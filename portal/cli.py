@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Sequence
 
 from runner.models import ProjectSchedulingState
@@ -30,6 +31,7 @@ from .runtime import (
 from .wave_runtime import (
     PortalWaveStore,
     prepare_portal_wave,
+    verify_portal_wave_delivery,
 )
 
 
@@ -204,6 +206,66 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         dest="occupied_collision_keys",
     )
+
+    wave_claim = wave_subcommands.add_parser(
+        "claim",
+        help="lease one node-assigned wave packet to a worker",
+    )
+    wave_claim.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_claim.add_argument("--run-id", default="portal-wave-default")
+    wave_claim.add_argument("--node", required=True)
+    wave_claim.add_argument("--holder", required=True)
+    wave_claim.add_argument("--lease-ttl", type=float, default=300.0)
+    wave_claim.add_argument("--payload-out", type=Path, required=True)
+
+    wave_receipt = wave_subcommands.add_parser(
+        "receipt",
+        help="record one exact fenced worker receipt",
+    )
+    wave_receipt.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_receipt.add_argument("--run-id", default="portal-wave-default")
+    wave_receipt.add_argument("--subject-id", required=True)
+    wave_receipt.add_argument("--node", required=True)
+    wave_receipt.add_argument("--holder", required=True)
+    wave_receipt.add_argument("--fencing-token", type=int, required=True)
+    wave_receipt.add_argument(
+        "--receipt-class",
+        choices=(
+            "SUCCEEDED_SOURCE_CHANGE",
+            "SUCCEEDED_NO_EFFECT",
+            "HELD",
+            "FAILED_RETRYABLE",
+            "FAILED_DETERMINISTIC",
+            "OUTCOME_UNKNOWN",
+        ),
+        required=True,
+    )
+    wave_receipt.add_argument("--result-repository")
+    wave_receipt.add_argument("--result-ref")
+    wave_receipt.add_argument("--result-head")
+    wave_receipt.add_argument("--evidence-sha256", required=True)
+    wave_receipt.add_argument("--reason", required=True)
+
+    wave_verify = wave_subcommands.add_parser(
+        "verify",
+        help="independently verify a recorded worker receipt",
+    )
+    wave_verify.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_verify.add_argument("--run-id", default="portal-wave-default")
+    wave_verify.add_argument("--subject-id", required=True)
+    wave_verify.add_argument("--verifier", required=True)
 
     wave_status = wave_subcommands.add_parser(
         "status",
@@ -433,6 +495,83 @@ def _wave_prepare_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _wave_claim_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalWaveStore(Path(args.state_db))
+    try:
+        claim = store.claim_delivery(
+            run_id=args.run_id,
+            node_id=args.node,
+            holder=args.holder,
+            now=time.time(),
+            ttl=args.lease_ttl,
+        )
+    finally:
+        store.close()
+
+    if claim is None:
+        return {
+            "mode": "PORTAL_WAVE_CLAIM_V1",
+            "claimed": False,
+            "payload_written": False,
+        }
+
+    output = Path(args.payload_out)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(claim.payload, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "mode": "PORTAL_WAVE_CLAIM_V1",
+        "claimed": True,
+        "payload_written": True,
+        "delivery_fencing_token": claim.fencing_token,
+        "lease_expires_at": claim.lease_expires_at,
+    }
+
+
+def _wave_receipt_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalWaveStore(Path(args.state_db))
+    try:
+        receipt = store.record_delivery_receipt(
+            run_id=args.run_id,
+            subject_id=args.subject_id,
+            node_id=args.node,
+            holder=args.holder,
+            expected_fencing_token=args.fencing_token,
+            receipt_class=args.receipt_class,
+            result_repository=args.result_repository,
+            result_ref=args.result_ref,
+            result_head=args.result_head,
+            evidence_sha256=args.evidence_sha256,
+            reason=args.reason,
+            now=time.time(),
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_WAVE_RECEIPT_V1",
+        "state": receipt.state,
+        "receipt_class": receipt.receipt_class,
+        "receipt_sha256": receipt.receipt_sha256,
+    }
+
+
+def _wave_verify_payload(args: argparse.Namespace) -> dict[str, object]:
+    result = verify_portal_wave_delivery(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        verifier=args.verifier,
+        token=_github_token(),
+    )
+    return {
+        "mode": "PORTAL_WAVE_VERIFY_V1",
+        "state": result.state,
+        "reason": result.reason,
+    }
+
+
 def _wave_status_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalWaveStore(Path(args.state_db))
     try:
@@ -460,6 +599,12 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
         elif args.command == "wave":
             if args.wave_command == "prepare":
                 payload = _wave_prepare_payload(args)
+            elif args.wave_command == "claim":
+                payload = _wave_claim_payload(args)
+            elif args.wave_command == "receipt":
+                payload = _wave_receipt_payload(args)
+            elif args.wave_command == "verify":
+                payload = _wave_verify_payload(args)
             elif args.wave_command == "status":
                 payload = _wave_status_payload(args)
             else:
