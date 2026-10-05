@@ -44,3 +44,38 @@ class PortalDispatchRecord:
                 "evidence_id",
                 _required(self.evidence_id, "dispatch evidence_id"),
             )
+
+_ALLOWED_RECONCILIATION_STATES = frozenset(
+    {
+        "IN_PROGRESS",
+        "OUTCOME_UNKNOWN",
+        "VERIFIED_COMPLETE",
+        "VERIFIED_HELD",
+    }
+)
+
+
+@dataclass(frozen=True)
+class PortalReconciliationRecord:
+    subject_kind: str
+    subject_id: str
+    adapter_id: str
+    route_id: str
+    state: str
+    evidence_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subject_kind", _required(self.subject_kind, "subject_kind"))
+        object.__setattr__(self, "subject_id", _required(self.subject_id, "subject_id"))
+        object.__setattr__(self, "adapter_id", _required(self.adapter_id, "adapter_id"))
+        object.__setattr__(self, "route_id", _required(self.route_id, "route_id"))
+        state = _required(self.state, "reconciliation state")
+        if state not in _ALLOWED_RECONCILIATION_STATES:
+            raise ValueError("unsupported reconciliation state")
+        object.__setattr__(self, "state", state)
+        object.__setattr__(
+            self,
+            "evidence_id",
+            _required(self.evidence_id, "reconciliation evidence_id"),
+        )
+
