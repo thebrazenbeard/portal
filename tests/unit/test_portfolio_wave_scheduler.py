@@ -300,3 +300,53 @@ def test_lane_is_bound_in_plan_summary_but_not_a_collision_override():
     assert [item.subject_id for item in planned.selected] == ["shared-a"]
     assert planned.deferred[0].reason == "COLLISION"
     assert planned.summary()["selected_by_lane"] == {"ONE": 1}
+
+
+
+def test_terminal_subject_exclusion_refills_with_next_eligible_subject():
+    planned = plan_wave_admission(
+        wave(
+            item("a", priority="P0", repository="owner/a"),
+            item("b", priority="P0", repository="owner/b"),
+            item("c", priority="P1", repository="owner/c"),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        excluded_subjects=(("repository", "a"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == ["b"]
+    excluded = next(
+        value for value in planned.deferred if value.subject_id == "a"
+    )
+    assert excluded.reason == "EXCLUDED_TERMINAL"
+    assert planned.excluded_subjects == (("repository", "a"),)
+    assert planned.summary()["excluded_subjects"] == ["repository:a"]
+
+
+def test_excluded_subject_identity_is_kind_scoped():
+    planned = plan_wave_admission(
+        wave(
+            item("same", repository="owner/repo", kind="repository"),
+            item(
+                "same",
+                repository="surface-a",
+                kind="workstream",
+                lead="VOSS",
+                family="other",
+            ),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        excluded_subjects=(("repository", "same"),),
+    )
+
+    assert [selected.subject_kind for selected in planned.selected] == [
+        "workstream"
+    ]
