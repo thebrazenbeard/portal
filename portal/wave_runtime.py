@@ -1818,6 +1818,7 @@ def prepare_portal_wave(
     token: str | None,
     occupied_collision_keys: Iterable[str] = (),
     excluded_subjects: Iterable[tuple[str, str]] = (),
+    active_subjects: Iterable[tuple[str, str]] = (),
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
 ) -> PortalWavePreparationResult:
@@ -1834,6 +1835,7 @@ def prepare_portal_wave(
     node_tuple = tuple(nodes)
     occupied_tuple = tuple(occupied_collision_keys)
     excluded_tuple = tuple(excluded_subjects)
+    active_tuple = tuple(active_subjects)
 
     wave = load_advancement_wave(wave_path)
     corpus = load_portfolio_corpus(corpus_path, public_safe=True)
@@ -1851,12 +1853,14 @@ def prepare_portal_wave(
         nodes=node_tuple,
         occupied_collision_keys=occupied_tuple,
         excluded_subjects=excluded_tuple,
+        active_subjects=active_tuple,
     )
     plan_payload = build_bound_wave_plan_payload(
         wave_path,
         budget=budget,
         occupied_collision_keys=occupied_tuple,
         excluded_subjects=excluded_tuple,
+        active_subjects=active_tuple,
     )
     plan_binding = plan_payload.get("plan_binding")
     if not isinstance(plan_binding, dict):
@@ -1898,6 +1902,10 @@ def prepare_portal_wave(
             "excluded_subjects": sorted(
                 f"{kind}:{subject_id}"
                 for kind, subject_id in excluded_tuple
+            ),
+            "active_subjects": sorted(
+                f"{kind}:{subject_id}"
+                for kind, subject_id in active_tuple
             ),
         }
     )
