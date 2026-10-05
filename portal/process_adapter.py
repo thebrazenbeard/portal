@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 from typing import Callable, Mapping, TYPE_CHECKING
 
+from runner.execution_promotion import NO_PROTECTED_EFFECT
 from runner.github_backend import GitHubTransport
 
 from .adapters import (
@@ -11,7 +12,9 @@ from .adapters import (
     PortalReconciliationRecord,
     PortalRouteBinding,
 )
+from .execution_router import CapabilityExecutionAdapter
 from .models import ExecutionNode
+from .route_resolver import PortalRouteAdvertisement, PortalRouteRequest
 from .wave_runtime import PortalWaveStore
 from .worker_backend import ProcessWorkerSpec
 from .worker_runtime import run_wave_proposal_workers_once
@@ -372,3 +375,60 @@ class PortalProposalProcessAdapter:
         finally:
             store.close()
         return tuple(records)
+
+def build_process_proposal_execution_adapter(
+    driver: PortalProposalProcessAdapter,
+) -> CapabilityExecutionAdapter:
+    """Wrap the local advisory process driver in capability-based routing."""
+
+    nodes_by_id = {
+        node.node_id: node
+        for node in driver.nodes
+    }
+
+    def advertisement_provider(
+        result: "PortalSessionResult",
+    ) -> tuple[PortalRouteAdvertisement, ...]:
+        advertisements: list[PortalRouteAdvertisement] = []
+        for packet in result.packets:
+            node = nodes_by_id.get(packet.node_id)
+            if node is None:
+                continue
+            advertisements.append(
+                PortalRouteAdvertisement(
+                    adapter_id=driver.adapter_id,
+                    route_id=driver._route_id(packet.node_id),
+                    node_id=packet.node_id,
+                    target_kind="repository",
+                    target_id=packet.repository,
+                    capabilities=("source_proposal",),
+                    effect_capabilities=(NO_PROTECTED_EFFECT,),
+                    authorized_effects=(NO_PROTECTED_EFFECT,),
+                    available=(
+                        node.enabled
+                        and packet.node_id in driver.backends
+                    ),
+                    attached=True,
+                    current=True,
+                    preference=0,
+                )
+            )
+        return tuple(advertisements)
+
+    def request_builder(packet) -> PortalRouteRequest:
+        return PortalRouteRequest(
+            subject_kind="repository",
+            subject_id=packet.subject_id,
+            node_id=packet.node_id,
+            target_kind="repository",
+            target_id=packet.repository,
+            required_capabilities=("source_proposal",),
+            required_effect=NO_PROTECTED_EFFECT,
+        )
+
+    return CapabilityExecutionAdapter(
+        advertisement_provider=advertisement_provider,
+        request_builder=request_builder,
+        drivers={driver.adapter_id: driver},
+    )
+
