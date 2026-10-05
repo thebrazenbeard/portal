@@ -9,6 +9,7 @@ from typing import Callable, Iterable, Mapping
 from runner.github_backend import GitHubTransport
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 
+from .adapters import PortalDispatchRecord, PortalRouteBinding
 from .models import ExecutionNode
 from .wave_runtime import (
     PortalWavePacket,
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS portal_command_subjects (
     wave_run_id TEXT,
     verification_state TEXT,
     hold_requested INTEGER NOT NULL DEFAULT 0 CHECK (hold_requested IN (0, 1)),
+    adapter_id TEXT,
+    route_id TEXT,
+    dispatch_state TEXT,
+    dispatch_evidence_id TEXT,
     updated_at REAL NOT NULL,
     PRIMARY KEY (session_id, subject_kind, subject_id),
     FOREIGN KEY (session_id)
@@ -93,6 +98,16 @@ class PortalCommandSession:
                 "ADD COLUMN hold_requested INTEGER NOT NULL DEFAULT 0 "
                 "CHECK (hold_requested IN (0, 1))"
             )
+        for column in (
+            "adapter_id",
+            "route_id",
+            "dispatch_state",
+            "dispatch_evidence_id",
+        ):
+            if column not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE portal_command_subjects ADD COLUMN {column} TEXT"
+                )
 
     def close(self) -> None:
         self.connection.close()
@@ -361,7 +376,8 @@ class PortalCommandSession:
             """
             SELECT
                 subject_kind, subject_id, state, wave_run_id,
-                verification_state, hold_requested
+                verification_state, hold_requested,
+                adapter_id, route_id, dispatch_state, dispatch_evidence_id
             FROM portal_command_subjects
             WHERE session_id = ?
             ORDER BY subject_kind, subject_id
@@ -386,6 +402,18 @@ class PortalCommandSession:
                         str(row[4]) if row[4] is not None else None
                     ),
                     "hold_requested": bool(row[5]),
+                    "adapter_id": (
+                        str(row[6]) if row[6] is not None else None
+                    ),
+                    "route_id": (
+                        str(row[7]) if row[7] is not None else None
+                    ),
+                    "dispatch_state": (
+                        str(row[8]) if row[8] is not None else None
+                    ),
+                    "dispatch_evidence_id": (
+                        str(row[9]) if row[9] is not None else None
+                    ),
                 }
                 for row in rows
             ],
@@ -530,6 +558,197 @@ class PortalCommandSession:
             )
         return self.status(session_id)
 
+    def bind_routes(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+        wave_run_id: str,
+        bindings: Iterable[PortalRouteBinding],
+        clock: Callable[[], float] = time.time,
+    ) -> dict[str, object]:
+        self._require_session(session_id=session_id, holder=holder)
+        wave_run_id = wave_run_id.strip()
+        if not wave_run_id:
+            raise ValueError("wave_run_id is required")
+
+        binding_tuple = tuple(bindings)
+        seen: set[tuple[str, str]] = set()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            for binding in binding_tuple:
+                key = (binding.subject_kind, binding.subject_id)
+                if key in seen:
+                    raise ValueError("duplicate route binding subject")
+                seen.add(key)
+                row = self.connection.execute(
+                    """
+                    SELECT state, wave_run_id, adapter_id, route_id
+                    FROM portal_command_subjects
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (session_id, binding.subject_kind, binding.subject_id),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("route binding subject does not exist")
+                if str(row[0]) != "ACTIVE":
+                    raise ValueError("route binding requires active subject")
+                if row[1] is None or str(row[1]) != wave_run_id:
+                    raise ValueError("route binding wave does not match subject")
+
+                existing_adapter = str(row[2]) if row[2] is not None else None
+                existing_route = str(row[3]) if row[3] is not None else None
+                if existing_adapter is not None or existing_route is not None:
+                    if (
+                        existing_adapter == binding.adapter_id
+                        and existing_route == binding.route_id
+                    ):
+                        continue
+                    raise ValueError(
+                        "route already bound; reconciliation required before substitution"
+                    )
+
+                self.connection.execute(
+                    """
+                    UPDATE portal_command_subjects
+                    SET adapter_id = ?,
+                        route_id = ?,
+                        dispatch_state = 'BOUND',
+                        dispatch_evidence_id = NULL,
+                        updated_at = ?
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (
+                        binding.adapter_id,
+                        binding.route_id,
+                        float(clock()),
+                        session_id,
+                        binding.subject_kind,
+                        binding.subject_id,
+                    ),
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return self.status(session_id)
+
+    def record_dispatches(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+        records: Iterable[PortalDispatchRecord],
+        clock: Callable[[], float] = time.time,
+    ) -> dict[str, object]:
+        self._require_session(session_id=session_id, holder=holder)
+        record_tuple = tuple(records)
+        seen: set[tuple[str, str]] = set()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            for record in record_tuple:
+                key = (record.subject_kind, record.subject_id)
+                if key in seen:
+                    raise ValueError("duplicate dispatch record subject")
+                seen.add(key)
+                row = self.connection.execute(
+                    """
+                    SELECT state, adapter_id, route_id
+                    FROM portal_command_subjects
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (session_id, record.subject_kind, record.subject_id),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("dispatch subject does not exist")
+                if str(row[0]) != "ACTIVE":
+                    raise ValueError("dispatch requires active subject")
+                if row[1] is None or row[2] is None:
+                    raise ValueError("dispatch requires durable route binding")
+                if (
+                    str(row[1]) != record.adapter_id
+                    or str(row[2]) != record.route_id
+                ):
+                    raise ValueError(
+                        "dispatch route differs from durable route binding"
+                    )
+
+                self.connection.execute(
+                    """
+                    UPDATE portal_command_subjects
+                    SET dispatch_state = ?,
+                        dispatch_evidence_id = ?,
+                        updated_at = ?
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (
+                        record.state,
+                        record.evidence_id,
+                        float(clock()),
+                        session_id,
+                        record.subject_kind,
+                        record.subject_id,
+                    ),
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return self.status(session_id)
+
+    def _dispatch_generation(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+        result: PortalSessionResult,
+        execution_adapter: object,
+        clock: Callable[[], float],
+    ) -> None:
+        if not result.packets:
+            return
+
+        bindings = tuple(execution_adapter.select_routes(result))
+        expected = {
+            ("repository", packet.subject_id)
+            for packet in result.packets
+        }
+        binding_keys = {
+            (binding.subject_kind, binding.subject_id)
+            for binding in bindings
+        }
+        if len(binding_keys) != len(bindings):
+            raise ValueError("execution adapter returned duplicate route bindings")
+        if binding_keys != expected:
+            raise ValueError(
+                "execution adapter must route every newly admitted packet"
+            )
+
+        self.bind_routes(
+            session_id=session_id,
+            holder=holder,
+            wave_run_id=result.wave_run_id,
+            bindings=bindings,
+            clock=clock,
+        )
+        records = tuple(execution_adapter.dispatch(result, bindings))
+        record_keys = {
+            (record.subject_kind, record.subject_id)
+            for record in records
+        }
+        if len(record_keys) != len(records):
+            raise ValueError("execution adapter returned duplicate dispatch records")
+        if record_keys != binding_keys:
+            raise ValueError(
+                "execution adapter must return one dispatch record per bound route"
+            )
+        self.record_dispatches(
+            session_id=session_id,
+            holder=holder,
+            records=records,
+            clock=clock,
+        )
+
     def reconcile_active(
         self,
         *,
@@ -654,6 +873,7 @@ class PortalCommandSession:
         poll_seconds: float = 0.0,
         occupied_node_slots: Mapping[str, int] | None = None,
         node_occupancy_provider: Callable[[], Mapping[str, int]] | None = None,
+        execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
@@ -694,9 +914,16 @@ class PortalCommandSession:
                 "occupied_node_slots": snapshot,
             }
 
-        cycles: list[PortalSessionResult] = [
-            self.run(**generation_common())
-        ]
+        first = self.run(**generation_common())
+        cycles: list[PortalSessionResult] = [first]
+        if execution_adapter is not None:
+            self._dispatch_generation(
+                session_id=session_id,
+                holder=holder,
+                result=first,
+                execution_adapter=execution_adapter,
+                clock=clock,
+            )
         idle_cycles = 0
         stop_reason = "MAX_CYCLES"
 
@@ -733,6 +960,14 @@ class PortalCommandSession:
 
             advanced = self.continue_run(**generation_common())
             cycles.append(advanced)
+            if execution_adapter is not None:
+                self._dispatch_generation(
+                    session_id=session_id,
+                    holder=holder,
+                    result=advanced,
+                    execution_adapter=execution_adapter,
+                    clock=clock,
+                )
             current = self.status(session_id)
 
             if not advanced.packets and current["summary"]["active"] == 0:
