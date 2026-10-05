@@ -75,6 +75,7 @@ class WaveAdmissionPlan:
     budget: WaveExecutionBudget
     occupied_collision_keys: tuple[str, ...]
     excluded_subjects: tuple[tuple[str, str], ...] = ()
+    active_subjects: tuple[tuple[str, str], ...] = ()
 
     def summary(self) -> dict[str, object]:
         return {
@@ -103,6 +104,10 @@ class WaveAdmissionPlan:
             "excluded_subjects": [
                 f"{kind}:{subject_id}"
                 for kind, subject_id in self.excluded_subjects
+            ],
+            "active_subjects": [
+                f"{kind}:{subject_id}"
+                for kind, subject_id in self.active_subjects
             ],
         }
 
@@ -137,6 +142,7 @@ def plan_wave_admission(
     budget: WaveExecutionBudget,
     occupied_collision_keys: Iterable[str] = (),
     excluded_subjects: Iterable[tuple[str, str]] = (),
+    active_subjects: Iterable[tuple[str, str]] = (),
 ) -> WaveAdmissionPlan:
     """Select a deterministic, collision-free source-work slice.
 
@@ -161,6 +167,33 @@ def plan_wave_admission(
             )
         excluded.add((value[0].strip(), value[1].strip()))
 
+    active: set[tuple[str, str]] = set()
+    for value in active_subjects:
+        if (
+            not isinstance(value, tuple)
+            or len(value) != 2
+            or not all(isinstance(part, str) and part.strip() for part in value)
+        ):
+            raise ValueError(
+                "active subjects must be (subject_kind, subject_id) string pairs"
+            )
+        active.add((value[0].strip(), value[1].strip()))
+
+    overlap = active.intersection(excluded)
+    if overlap:
+        raise ValueError("subject cannot be both active and excluded")
+
+    by_subject = {
+        (item.subject_kind, item.subject_id): item
+        for item in wave.items
+    }
+    missing_active = sorted(active - set(by_subject))
+    if missing_active:
+        kind, subject_id = missing_active[0]
+        raise ValueError(
+            f"active subject is absent from advancement wave: {kind}:{subject_id}"
+        )
+
     selected: list[WaveAdmission] = []
     deferred: list[WaveDeferral] = []
     reserved = set(occupied)
@@ -168,9 +201,31 @@ def plan_wave_admission(
     family_load: Counter[str] = Counter()
     lane_load: Counter[str] = Counter()
 
+    for key in sorted(active):
+        item = by_subject[key]
+        reserved.update(collision_keys(item))
+        identity_load[item.lead_identity] += 1
+        family_load[item.family_id] += 1
+        lane_load[item.effective_lane] += 1
+
+    active_count = len(active)
+
     for item in sorted(wave.items, key=_admission_sort_key):
         keys = collision_keys(item)
         lane_id = item.effective_lane
+
+        if (item.subject_kind, item.subject_id) in active:
+            deferred.append(WaveDeferral(
+                subject_kind=item.subject_kind,
+                subject_id=item.subject_id,
+                family_id=item.family_id,
+                lead_identity=item.lead_identity,
+                lane_id=lane_id,
+                priority=item.priority,
+                reason="ALREADY_ACTIVE",
+                collision_keys=keys,
+            ))
+            continue
 
         if (item.subject_kind, item.subject_id) in excluded:
             deferred.append(WaveDeferral(
@@ -229,7 +284,7 @@ def plan_wave_admission(
             ))
             continue
 
-        if len(selected) >= budget.max_parallel:
+        if active_count + len(selected) >= budget.max_parallel:
             deferred.append(WaveDeferral(
                 subject_kind=item.subject_kind,
                 subject_id=item.subject_id,
@@ -311,4 +366,5 @@ def plan_wave_admission(
         budget=budget,
         occupied_collision_keys=tuple(sorted(occupied)),
         excluded_subjects=tuple(sorted(excluded)),
+        active_subjects=tuple(sorted(active)),
     )
