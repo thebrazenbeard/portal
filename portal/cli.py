@@ -34,6 +34,10 @@ from .discovery import (
     write_project_registry,
 )
 from .node_registry import load_execution_nodes
+from .process_adapter import (
+    PortalProposalProcessAdapter,
+    build_process_proposal_execution_adapter,
+)
 from .worker_registry import load_worker_backends
 from .runtime import (
     PortalRunStore,
@@ -165,6 +169,14 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--max-per-family", type=int, default=2)
     run.add_argument("--max-per-lane", type=int, default=2)
     run.add_argument("--verifier", default="vera")
+    run.add_argument("--worker-backends", type=Path)
+    run.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path(".portal/workers"),
+    )
+    run.add_argument("--worker-holder-prefix", default="portal")
+    run.add_argument("--delivery-lease-ttl", type=float, default=300.0)
     run.add_argument(
         "--occupied-node",
         action="append",
@@ -225,6 +237,14 @@ def _parser() -> argparse.ArgumentParser:
     continue_cmd.add_argument("--max-per-identity", type=int, default=2)
     continue_cmd.add_argument("--max-per-family", type=int, default=2)
     continue_cmd.add_argument("--max-per-lane", type=int, default=2)
+    continue_cmd.add_argument("--worker-backends", type=Path)
+    continue_cmd.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path(".portal/workers"),
+    )
+    continue_cmd.add_argument("--worker-holder-prefix", default="portal")
+    continue_cmd.add_argument("--delivery-lease-ttl", type=float, default=300.0)
     continue_cmd.add_argument(
         "--occupied-node",
         action="append",
@@ -644,6 +664,25 @@ def _session_budget(args: argparse.Namespace) -> WaveExecutionBudget:
     )
 
 
+def _session_execution_adapter(
+    args: argparse.Namespace,
+    nodes,
+):
+    if args.worker_backends is None:
+        return None
+
+    driver = PortalProposalProcessAdapter(
+        state_db=Path(args.state_db),
+        nodes=tuple(nodes),
+        backends=load_worker_backends(Path(args.worker_backends)),
+        workspace_root=Path(args.workspace_root),
+        holder_prefix=args.worker_holder_prefix,
+        delivery_lease_ttl=args.delivery_lease_ttl,
+        token=_github_token(),
+    )
+    return build_process_proposal_execution_adapter(driver)
+
+
 def _session_result_payload(
     *,
     mode: str,
@@ -669,6 +708,8 @@ def _session_result_payload(
 
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     projects_path = _wave_projects_path(args)
+    nodes = load_execution_nodes(Path(args.nodes))
+    execution_adapter = _session_execution_adapter(args, nodes)
     controller = PortalCommandSession(Path(args.state_db))
     try:
         common = dict(
@@ -677,14 +718,17 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             wave_path=Path(args.wave),
             corpus_path=Path(args.corpus),
             projects_path=projects_path,
-            nodes=load_execution_nodes(Path(args.nodes)),
+            nodes=nodes,
             budget=_session_budget(args),
             lease_ttl=args.lease_ttl,
             token=_github_token(),
             occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
         )
         if args.once:
-            result = controller.run(**common)
+            result = controller.run(
+                **common,
+                execution_adapter=execution_adapter,
+            )
         else:
             result = controller.run_until_idle(
                 **common,
@@ -692,6 +736,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 max_cycles=args.max_cycles,
                 max_idle_cycles=args.max_idle_cycles,
                 poll_seconds=args.poll_seconds,
+                execution_adapter=execution_adapter,
             )
     finally:
         controller.close()
@@ -702,6 +747,8 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
+    nodes = load_execution_nodes(Path(args.nodes))
+    execution_adapter = _session_execution_adapter(args, nodes)
     controller = PortalCommandSession(Path(args.state_db))
     try:
         result = controller.continue_run(
@@ -710,11 +757,12 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             wave_path=Path(args.wave),
             corpus_path=Path(args.corpus),
             projects_path=Path(args.projects),
-            nodes=load_execution_nodes(Path(args.nodes)),
+            nodes=nodes,
             budget=_session_budget(args),
             lease_ttl=args.lease_ttl,
             token=_github_token(),
             occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
+            execution_adapter=execution_adapter,
         )
     finally:
         controller.close()
@@ -781,6 +829,8 @@ def _stop_payload(args: argparse.Namespace) -> dict[str, object]:
 def _run_payload(args: argparse.Namespace) -> dict[str, object]:
     if args.session_id:
         return _session_run_payload(args)
+    if args.worker_backends is not None:
+        raise ValueError("--worker-backends requires --session-id")
 
     project_snapshot, portfolio_source = _run_project_snapshot(args)
     dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
