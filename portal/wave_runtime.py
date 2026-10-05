@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS portal_wave_deliveries (
 CREATE TABLE IF NOT EXISTS portal_wave_proposals (
     run_id TEXT NOT NULL,
     subject_id TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('AWAITING_PROMOTION')),
+    state TEXT NOT NULL,
     receipt_sha256 TEXT NOT NULL,
     proposal_json TEXT NOT NULL,
     proposal_sha256 TEXT NOT NULL,
@@ -1531,6 +1531,54 @@ class PortalWaveStore:
             self.connection.rollback()
             raise
 
+    def update_source_proposal_state(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+        expected_state: str,
+        state: str,
+        now: float,
+    ) -> None:
+        allowed = {
+            "AWAITING_PROMOTION",
+            "PROMOTED",
+            "OUTCOME_UNKNOWN",
+            "FAILED_PRECONDITION",
+            "FAILED_EXECUTION",
+            "VERIFIED_COMPLETE",
+            "VERIFICATION_STALE",
+        }
+        if expected_state not in allowed or state not in allowed:
+            raise ValueError("unsupported source proposal state")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = self.connection.execute(
+                """
+                UPDATE portal_wave_proposals
+                SET state = ?, updated_at = ?
+                WHERE run_id = ? AND subject_id = ? AND state = ?
+                """,
+                (state, now, run_id, subject_id, expected_state),
+            )
+            if cursor.rowcount != 1:
+                current = self.connection.execute(
+                    """
+                    SELECT state
+                    FROM portal_wave_proposals
+                    WHERE run_id = ? AND subject_id = ?
+                    """,
+                    (run_id, subject_id),
+                ).fetchone()
+                if current == (state,):
+                    self.connection.commit()
+                    return
+                raise ValueError("source proposal state changed concurrently")
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
     def load_source_proposal(
         self,
         *,
@@ -1699,8 +1747,7 @@ class PortalWaveStore:
             """
             SELECT
                 CASE
-                    WHEN q.state = 'AWAITING_PROMOTION'
-                    THEN 'AWAITING_PROMOTION'
+                    WHEN q.state IS NOT NULL THEN q.state
                     ELSE d.state
                 END AS effective_state,
                 COUNT(*)
