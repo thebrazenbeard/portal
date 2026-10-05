@@ -4,63 +4,58 @@
 
 ## Purpose
 
-P.O.R.T.A.L. is the portfolio-level coordinator above Project Runner. Project Runner remains the governed execution substrate: exact-subject identity, collision domains, durable currentness, leases/fencing, worker routing, bounded queue consumption, and verified execution remain in `runner/`. P.O.R.T.A.L. adds portfolio-wide node routing and coordination without weakening those controls.
+P.O.R.T.A.L. is the whole-portfolio coordinator built around a single P.O.R.T.A.L. chat control surface.
 
-The repository was seeded from `thebrazenbeard/project-runner@04702abbf51aa2920b7d054275619253ea6fa748`. The inherited runner code is not renamed or rewritten merely for branding.
+The mission is to keep every eligible active project advancing in maximal safe parallelism. The chat is not a sequential project worker; it is the operator surface for a durable portfolio scheduler. Vera coordinates cross-project ownership/collisions. P.O.R.T.A.L. schedules lanes and nodes. Project Runner remains the governed execution engine.
+
+The repository was seeded from `thebrazenbeard/project-runner@04702abbf51aa2920b7d054275619253ea6fa748`.
 
 ## Architecture
 
-The first Portal layer is a separate `portal/` package. It consumes the existing `AdvancementWave`, `WaveExecutionBudget`, and `WaveAdmissionPlan` interfaces from `runner.portfolio_advancement` and `runner.portfolio_wave_scheduler`.
+Project Runner already contains durable portfolio and execution-loop mechanisms. Portal therefore composes rather than reinvents:
+- durable portfolio currentness;
+- queue consumption;
+- exact claims/fencing;
+- worker routing;
+- receipts and reconciliation;
+- recursive work and budgets;
+- task supervision.
+
+The full target architecture is defined in:
+`docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md`.
+
+Donor/reuse analysis is defined in:
+`docs/research/PORTAL_LOOP_DONOR_MINING_V1.md`.
+
+## Current first slice
+
+The first Portal package adds deterministic node assignment above Project Runner wave admission.
 
 Portal planning is two-stage:
-
-1. Project Runner selects the deterministic collision-free, authority-ceiling-safe wave.
+1. Project Runner selects a deterministic collision-free, authority-ceiling-safe wave.
 2. Portal assigns those already-admitted subjects to declared execution nodes without granting new authority.
 
 An execution node declares:
-- `node_id`
-- `max_parallel`
-- optional `allowed_lanes`
-- `enabled`
+- `node_id`;
+- `max_parallel`;
+- optional `allowed_lanes`;
+- `enabled`.
 
-Node assignment is deterministic. Eligible nodes are enabled, have remaining capacity, and either allow all lanes or include the admission's lane. For each admitted subject in Project Runner order, Portal chooses the eligible node with the lowest current load; ties break lexicographically by `node_id`. If no node is eligible, the subject is not dispatched and is reported as `NO_EXECUTION_NODE`.
+For each admission, Portal chooses the eligible node with the lowest current load; ties break lexicographically by `node_id`.
 
-Portal planning never:
-- widens an effect ceiling;
-- treats machine/tool availability as authority;
-- resolves Project Runner HOLDs by itself;
-- dispatches protected effects;
-- claims worker success as verified completion;
-- reassigns an already-owned semantic subject without an explicit coordinator decision.
+## Whole-portfolio successor
 
-## Interfaces
+The next implementation layer is not a new bespoke execution loop. It is a Portal composition root that drives:
+`portfolio-cycle -> wave admission -> node placement -> exact claim -> queue/worker routing -> execution -> receipt/reconciliation -> refill`.
 
-`portal.models.ExecutionNode`
-- validates non-empty node IDs;
-- requires positive integer capacity;
-- normalizes allowed lanes into a deterministic tuple;
-- disabled nodes are never eligible.
-
-`portal.coordinator.plan_portal_wave(...)`
-- consumes an `AdvancementWave`, a `WaveExecutionBudget`, declared nodes, and optional occupied collision keys;
-- calls Project Runner's `plan_wave_admission` unchanged;
-- produces assignments plus Portal-only deferrals;
-- preserves the underlying Project Runner admission plan in the result.
-
-`portal.cli`
-- exposes `portal plan`;
-- reads an advancement-wave JSON and a node-manifest YAML;
-- emits a deterministic JSON plan;
-- performs no execution in this first slice.
+Resident/recovery behavior should reuse Patrick-owned mechanisms, especially Pre-Active and WIP, where their contracts fit.
 
 ## Failure behavior
 
-Malformed node manifests fail closed with a non-zero CLI exit. Duplicate node IDs are rejected. Zero or negative capacity is rejected. If all nodes are disabled or ineligible, Project Runner admissions remain visible but none are assigned. Existing Project Runner deferrals remain unchanged and separately visible.
+Malformed manifests, stale currentness, collision conflicts, unsupported authority, unresolved ambiguous effects, and unavailable execution nodes fail closed.
 
-## Testing
-
-The first behavior test must fail before Portal production code exists. Focused tests cover deterministic balancing, lane eligibility, capacity exhaustion, duplicate nodes, disabled nodes, and preservation of Project Runner collision decisions. Integration coverage exercises the CLI against fixture files. The inherited Project Runner suite must remain green.
+A blocked subject does not block unrelated work.
 
 ## Initial claim ceiling
 
-This slice proves deterministic portfolio-to-node planning only. It does not prove live multi-machine dispatch, persistent node discovery, autonomous background operation, or protected-effect execution.
+Current code proves deterministic portfolio-to-node planning only. The mission and architecture are broader, but live whole-portfolio execution is not claimed until the composition loop is implemented and qualified.

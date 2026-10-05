@@ -188,3 +188,46 @@ Confirm `.portal-bootstrap.json` still binds source repository, commit `04702abb
 - [ ] **Step 4: Freeze exact head**
 
 Push the passing branch and record its exact commit SHA. Do not merge automatically; subsequent live node discovery/dispatch is a new review subject.
+
+
+---
+
+### Task 5: Bind the original single-chat whole-portfolio mission
+
+**Files:**
+- Create: `docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md`
+- Create: `docs/research/PORTAL_LOOP_DONOR_MINING_V1.md`
+- Modify: `README.md`
+- Modify: `PORTAL.md`
+- Modify: `docs/specs/2026-10-05-portal-portfolio-coordinator-design.md`
+- Test: `tests/integration/test_portal_repository_contract.py`
+
+- [x] Add a repository contract that requires the single-chat, whole-portfolio, parallel-lane mission and internal donor policy.
+- [x] Mine Project Runner and Patrick-owned execution/recovery repositories before external donors.
+- [x] Record external donor findings without promoting them to runtime dependencies.
+- [x] Distinguish current planning slice from mission-level architecture.
+
+### Task 6: Compose existing loops into `portal run`
+
+**Goal:** Turn the existing inherited execution machinery into the whole-portfolio continuous loop rather than building another runner.
+
+**Primary internal mechanisms to compose:**
+- Project Runner `portfolio-cycle`, `consume-queue`, wave claim, worker routes, receipts, reconciliation, task supervision;
+- Pre-Active resident daemon/event-loop, lease heartbeat, retry/dead-letter, autonomous re-entry, effect recovery;
+- WIP checkpoint/resume and ambiguous-effect journal;
+- CCB/Intranel durable coordination envelopes;
+- VeraMesh/WorkBridge node transport/capacity;
+- Discovery whole-portfolio census/currentness;
+- Vera Mono effect/currentness separation.
+
+- [ ] Add failing integration tests for `portal run --once` over a deterministic multi-project fixture.
+- [ ] Implement one bounded cycle: refresh -> plan -> claim -> dispatch -> verify -> persist.
+- [ ] Add lane refill: when one lane completes/blocks, admit the next safe frontier without waiting for unrelated lanes.
+- [ ] Add durable run identity and recovery after process/chat restart.
+- [ ] Add node discovery/health adapters with stale-node fail-closed behavior.
+- [ ] Add Patrick/Vera approval/HOLD interrupt state.
+- [ ] Add circuit breakers: max cycles, max active lanes, retry ceilings, wall-time ceiling.
+- [ ] Add `portal status`, `portal stop`, and `portal resume`.
+- [ ] Prove no duplicate mutation ownership under concurrent lanes.
+- [ ] Prove ambiguous effects reconcile before retry.
+- [ ] Run full inherited Project Runner suite plus Portal continuous-loop qualification.

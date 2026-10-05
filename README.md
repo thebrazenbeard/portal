@@ -4,20 +4,37 @@
 
 **Portfolio Orchestration & Repository Tracking Access Layer**
 
-P.O.R.T.A.L. is the portfolio-level coordination layer for a multi-repository project ecosystem. It answers a broader question than Project Runner alone: given all currently known projects, dependencies, ownership boundaries, collisions, worker lanes, and execution nodes, what independent work can safely advance now and where should it be routed?
+P.O.R.T.A.L. exists so a **single P.O.R.T.A.L. chat** can coordinate and advance the **whole portfolio** in maximal safe parallelism.
 
-P.O.R.T.A.L. was seeded from the Project Runner execution kernel and deliberately keeps that kernel intact.
+The intended operating model is not one chat manually working repositories in sequence. Vera acts as the cross-project coordinator; P.O.R.T.A.L. discovers and schedules executable frontiers across all active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane is refilled with the next eligible frontier.
+
+See [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
 
 ## Architecture
 
-- `runner/` is the inherited Project Runner substrate: exact-subject identity, currentness, dependency propagation, budgets, leases, fencing, queue state, worker routing, GitHub execution gates, and completion verification.
-- `portal/` is the P.O.R.T.A.L. coordination layer: portfolio-wide planning and execution-node placement.
-- P.O.R.T.A.L. consumes Project Runner admission decisions rather than replacing them.
-- Node placement is scheduling metadata. It does not create repository or provider authority.
+- `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
+- `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, node placement, and the future single-command continuous run surface.
+- Vera owns cross-project coordination and collision/ownership arbitration.
+- Durable state lives outside chat context so a fresh P.O.R.T.A.L. chat can reconstruct and resume the portfolio.
+- Node placement and schedulability do not create protected-effect authority.
 
-The first Portal slice is intentionally planning-only. It can assign already-admitted work across declared execution nodes while respecting global Project Runner collision and budget decisions. It does not yet perform live multi-machine dispatch.
+P.O.R.T.A.L. was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
 
-## Quick start
+## Current implementation state
+
+The current `portal/` package implements deterministic wave-to-node planning and a `portal plan` CLI. That is the **current implementation slice**, not the mission ceiling.
+
+The next build target is `portal run`: compose Project Runner's existing `portfolio-cycle`, `consume-queue`, claim/fence, worker-route, receipt/reconciliation, and task-supervision machinery with resident-loop/recovery mechanisms mined from Patrick's own repositories.
+
+## Internal-first donor policy
+
+Before implementing new orchestration machinery, Portal mines Patrick-owned repositories for existing qualified mechanisms. External projects are secondary research inputs.
+
+See [Loop Donor Mining V1](docs/research/PORTAL_LOOP_DONOR_MINING_V1.md).
+
+Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB Base, Intranel, VeraMesh, WorkBridge Commander, WorkBridgeMCP, Vera Mono, Discovery, DriftGuard, Ingest, and Temporal.
+
+## Quick start for the implemented planning slice
 
     python -m pip install -e '.[dev]'
     project-runner validate
@@ -46,22 +63,19 @@ Plan a bounded portfolio wave:
       --max-per-identity 2 \
       --max-per-family 2
 
-The command emits a deterministic JSON plan. It performs no execution.
+The current command emits a deterministic JSON plan. It does not yet perform the whole-portfolio continuous run described above.
 
 ## Core invariants
-
-P.O.R.T.A.L. inherits and preserves Project Runner's safety model:
 
 - observation is not authority;
 - coordination is not authorization;
 - exact evidence outranks convenience pointers;
-- one colliding semantic subject is not admitted twice;
-- blocked work does not stall unrelated work;
+- one colliding semantic mutation subject has one mutation owner;
+- blocked work does not stall unrelated executable work;
 - node/tool availability does not manufacture authority;
 - stale or ambiguous effects fail closed;
-- worker success is not completion until required currentness/effect evidence verifies it.
-
-Portal adds one additional rule: machine placement happens only after Project Runner admission. A node cannot make otherwise-ineligible work runnable merely because it has capacity.
+- worker success is not completion until required currentness/effect evidence verifies it;
+- fresh-chat recovery comes from durable evidence, not assumed conversational continuity.
 
 ## Repository provenance
 
