@@ -3,15 +3,28 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Sequence
 
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from runner.registry import (
+    load_dependency_snapshot,
+    load_project_snapshot,
+    load_worker_snapshot,
+)
 
 from .coordinator import plan_portal_wave
 from .node_registry import load_execution_nodes
+from .runtime import (
+    PortalRunStore,
+    run_portal_until_idle,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -40,6 +53,58 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         dest="occupied_collision_keys",
     )
+
+    run = subcommands.add_parser(
+        "run",
+        help=(
+            "refresh durable portfolio state and execute/refill "
+            "qualified Project Runner queue lanes"
+        ),
+    )
+    run.add_argument(
+        "--projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    run.add_argument(
+        "--workers",
+        type=Path,
+        default=ROOT / "registry" / "workers.yaml",
+    )
+    run.add_argument(
+        "--dependencies",
+        type=Path,
+        default=ROOT / "topology" / "dependencies.yaml",
+    )
+    run.add_argument("--nodes", type=Path, required=True)
+    run.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    run.add_argument("--run-id", default="portal-default")
+    run.add_argument("--holder", default="vera")
+    run.add_argument("--lease-ttl", type=float, default=300.0)
+    run.add_argument("--max-parallel", type=int, default=6)
+    run.add_argument("--max-cycles", type=int, default=100)
+    run.add_argument("--max-idle-cycles", type=int, default=1)
+    run.add_argument("--poll-seconds", type=float, default=0.0)
+    run.add_argument(
+        "--once",
+        action="store_true",
+        help="execute exactly one bounded durable Portal cycle",
+    )
+
+    status = subcommands.add_parser(
+        "status",
+        help="show durable P.O.R.T.A.L. run state",
+    )
+    status.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    status.add_argument("--run-id", default="portal-default")
     return parser
 
 
@@ -81,16 +146,97 @@ def _plan_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _run_payload(args: argparse.Namespace) -> dict[str, object]:
+    project_snapshot = load_project_snapshot(Path(args.projects))
+    dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
+    worker_snapshot = load_worker_snapshot(Path(args.workers))
+    nodes = load_execution_nodes(Path(args.nodes))
+
+    max_cycles = 1 if args.once else args.max_cycles
+    max_idle_cycles = 1 if args.once else args.max_idle_cycles
+    result = run_portal_until_idle(
+        projects=project_snapshot.projects,
+        dependencies=dependency_snapshot.dependencies,
+        workers=worker_snapshot.workers,
+        registry_digest=project_snapshot.sha256,
+        dependency_digest=dependency_snapshot.sha256,
+        worker_registry_digest=worker_snapshot.sha256,
+        state_db=Path(args.state_db),
+        nodes=nodes,
+        run_id=args.run_id,
+        holder=args.holder,
+        lease_ttl=args.lease_ttl,
+        max_parallel=args.max_parallel,
+        max_cycles=max_cycles,
+        max_idle_cycles=max_idle_cycles,
+        poll_seconds=0.0 if args.once else args.poll_seconds,
+        token=os.environ.get("PROJECT_RUNNER_GITHUB_TOKEN"),
+    )
+
+    cycles = []
+    for cycle in result.cycles:
+        cycles.append(
+            {
+                "cycle_number": cycle.cycle_number,
+                "snapshot_id": cycle.cycle.snapshot_id,
+                "snapshot_digest": cycle.cycle.snapshot_digest,
+                "baseline": cycle.cycle.baseline,
+                "ready": cycle.cycle.ready_count,
+                "blocked": cycle.cycle.blocked_count,
+                "progress_made": cycle.progress_made,
+                "queue_summary": cycle.queue_summary,
+                "lanes": [
+                    {
+                        "node_id": lane.node_id,
+                        "slot": lane.slot,
+                        "claimed": lane.claimed,
+                        "queue_state": lane.queue_state,
+                        "snapshot_id": lane.snapshot_id,
+                        "fencing_token": lane.fencing_token,
+                        "route_id": lane.route_id,
+                        "operator_status": lane.operator_status,
+                        "reason": lane.reason,
+                    }
+                    for lane in cycle.lanes
+                ],
+            }
+        )
+    return {
+        "mode": "PORTAL_RUN_V1",
+        "run_id": result.run_id,
+        "stop_reason": result.stop_reason,
+        "idle_cycles": result.idle_cycles,
+        "cycles": cycles,
+        "protected_effects_authorized": False,
+    }
+
+
+def _status_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalRunStore(Path(args.state_db))
+    try:
+        summary = store.summary(args.run_id)
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_RUN_STATUS_V1",
+        "run": summary,
+    }
+
+
 def entrypoint(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
             payload = _plan_payload(args)
+        elif args.command == "run":
+            payload = _run_payload(args)
+        elif args.command == "status":
+            payload = _status_payload(args)
         else:
             parser.error("unsupported command")
             return 2
-    except (OSError, KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, RuntimeError, TypeError, ValueError) as exc:
         print(f"portal: {exc}", file=sys.stderr)
         return 2
 
