@@ -9,6 +9,12 @@ import sys
 import time
 from typing import Sequence
 
+from runner.execution_promotion import (
+    effect_authority_key_from_environment,
+    execution_authority_key_from_environment,
+    load_json_document,
+    review_key_from_environment,
+)
 from runner.models import ProjectSchedulingState
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
@@ -31,6 +37,7 @@ from .runtime import (
 from .wave_runtime import (
     PortalWaveStore,
     prepare_portal_wave,
+    promote_portal_wave_packet,
     verify_portal_wave_delivery,
 )
 
@@ -206,6 +213,24 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         dest="occupied_collision_keys",
     )
+
+    wave_promote = wave_subcommands.add_parser(
+        "promote",
+        help=(
+            "promote one exact Portal packet through Project Runner review "
+            "and execution-authority gates"
+        ),
+    )
+    wave_promote.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_promote.add_argument("--run-id", default="portal-wave-default")
+    wave_promote.add_argument("--subject-id", required=True)
+    wave_promote.add_argument("--review", type=Path, required=True)
+    wave_promote.add_argument("--execution-grant", type=Path, required=True)
+    wave_promote.add_argument("--effect-grant", type=Path)
 
     wave_claim = wave_subcommands.add_parser(
         "claim",
@@ -494,6 +519,37 @@ def _wave_prepare_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
+    review_document = load_json_document(Path(args.review))
+    execution_document = load_json_document(Path(args.execution_grant))
+    effect_document = (
+        load_json_document(Path(args.effect_grant))
+        if args.effect_grant is not None
+        else None
+    )
+    receipt = promote_portal_wave_packet(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        review_document=review_document,
+        execution_grant_document=execution_document,
+        effect_grant_document=effect_document,
+        review_key=review_key_from_environment(),
+        execution_authority_key=execution_authority_key_from_environment(),
+        effect_authority_key=effect_authority_key_from_environment(),
+        token=_github_token(),
+    )
+    protected = receipt.effect_class != "NO_PROTECTED_EFFECT"
+    return {
+        "mode": "PORTAL_WAVE_PROMOTE_V1",
+        "promoted": True,
+        "effect_class": receipt.effect_class,
+        "promotion_sha256": receipt.promotion_sha256,
+        "protected_effects_authorized": protected,
+        "source_mutation_authorized": receipt.effect_class == "SOURCE_WRITE",
+    }
+
+
 def _wave_claim_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalWaveStore(Path(args.state_db))
     try:
@@ -598,6 +654,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
         elif args.command == "wave":
             if args.wave_command == "prepare":
                 payload = _wave_prepare_payload(args)
+            elif args.wave_command == "promote":
+                payload = _wave_promote_payload(args)
             elif args.wave_command == "claim":
                 payload = _wave_claim_payload(args)
             elif args.wave_command == "receipt":
