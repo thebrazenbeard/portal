@@ -31,6 +31,49 @@ def test_portal_identity_and_bootstrap_provenance_are_explicit() -> None:
     assert bootstrap["source_tree"] == SOURCE_TREE
 
 
+def test_single_chat_whole_portfolio_mission_is_architectural() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    portal_doc = (ROOT / "PORTAL.md").read_text(encoding="utf-8")
+    architecture = (
+        ROOT
+        / "docs"
+        / "architecture"
+        / "PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md"
+    ).read_text(encoding="utf-8")
+    donors = (
+        ROOT
+        / "docs"
+        / "research"
+        / "PORTAL_LOOP_DONOR_MINING_V1.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (readme, portal_doc, architecture):
+        assert "single P.O.R.T.A.L. chat" in text
+        assert "whole portfolio" in text
+        assert "parallel" in text.lower()
+
+    assert "Vera" in architecture
+    assert "Project Runner" in architecture
+    assert "portfolio-cycle" in architecture
+    assert "consume-queue" in architecture
+    assert "claim-worker-route" in architecture
+    assert "record-worker-receipt" in architecture
+    assert "task-start" in architecture
+    assert "pre-active" in donors
+    assert "wip" in donors
+    assert "ccb-core" in donors
+    assert "vera-mesh" in donors
+    assert "workbridgecommander" in donors
+    assert "LongHorizon-Harness" in donors
+    assert "inferable" in donors
+    assert "bmalph" in donors
+
+    assert (
+        "mine Patrick-owned repositories before adopting external mechanisms"
+        in donors
+    )
+
+
 def test_both_portal_and_project_runner_clis_remain_packaged() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = config["project"]["scripts"]
