@@ -178,10 +178,10 @@ def finalize_github_source_tree_write(
         elif (
             not result.succeeded
             and result.classification == "OUTCOME_UNKNOWN"
-            and len(result.outputs) == 1
+            and len(result.outputs) == len(request.files) + 1
         ):
             candidate_commit = result.outputs[0]
-            candidate_blobs = None
+            candidate_blobs = tuple(result.outputs[1:])
             reconciliation = store.load_latest_reconciliation(
                 lineage_id=lineage_id,
                 work_fingerprint_value=work_fingerprint_value,
@@ -249,9 +249,6 @@ def finalize_github_source_tree_write(
             pairs = tuple(
                 (file.path, candidate_blobs[index])
                 for index, file in enumerate(request.files)
-            ) if candidate_blobs is not None else tuple(
-                (file.path, "")
-                for file in request.files
             )
             return GitHubSourceTreeFinalization(
                 status="COMPLETE",
@@ -370,12 +367,13 @@ def reconcile_github_source_tree_write_outcome_unknown(
             result is None
             or result.succeeded
             or result.classification != "OUTCOME_UNKNOWN"
-            or len(result.outputs) != 1
+            or len(result.outputs) != len(request.files) + 1
         ):
             raise ValueError(
-                "source-tree reconciliation requires recorded OUTCOME_UNKNOWN"
+                "source-tree reconciliation requires recorded OUTCOME_UNKNOWN with exact candidate blobs"
             )
         candidate_commit = result.outputs[0]
+        candidate_blobs = tuple(result.outputs[1:])
         if _SHA40.fullmatch(candidate_commit) is None:
             raise ValueError("source-tree candidate commit is invalid")
 
@@ -390,13 +388,17 @@ def reconcile_github_source_tree_write_outcome_unknown(
 
         complete = observed_head == candidate_commit
         if complete:
-            for file in request.files:
+            for index, file in enumerate(request.files):
                 observed = transport.read_file(
                     receipt.repository,
                     file.path,
                     candidate_commit,
                 )
-                if observed is None or observed.content != file.content:
+                if (
+                    observed is None
+                    or observed.content != file.content
+                    or observed.sha != candidate_blobs[index]
+                ):
                     complete = False
                     evidence.append(f"file_mismatch={file.path}")
                     break
