@@ -303,19 +303,13 @@ def run_process_worker(
     stdout_path = workspace / "stdout.log"
     stderr_path = workspace / "stderr.log"
 
-    packet_bytes = _canonical_bytes(dict(packet))
-    packet_digest = hashlib.sha256(packet_bytes).hexdigest()
-    packet_record = {
-        "schema": "PORTAL_PROCESS_PACKET_BINDING_V1",
-        "packet_sha256": packet_digest,
-        "packet": dict(packet),
-    }
+    packet_record = dict(packet)
 
     if packet_path.exists():
         try:
             existing = json.loads(packet_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError("existing worker packet binding is invalid") from exc
+            raise ValueError("existing worker packet is invalid") from exc
         if existing != packet_record:
             raise ValueError(
                 "worker workspace already binds a different delivery packet"
