@@ -288,6 +288,26 @@ def run_process_worker(
     replayed instead of re-executing the same fenced delivery.
     """
 
+    if packet.get("execution_authorized") is not True:
+        raise ValueError("process worker requires promoted execution")
+    if packet.get("execution_effect_class") != "NO_PROTECTED_EFFECT":
+        raise ValueError(
+            "process worker only accepts NO_PROTECTED_EFFECT execution"
+        )
+    promotion = packet.get("execution_promotion")
+    if not isinstance(promotion, Mapping):
+        raise ValueError("process worker requires execution promotion binding")
+    for key in (
+        "promotion_sha256",
+        "review_sha256",
+        "execution_grant_sha256",
+    ):
+        value = promotion.get(key)
+        if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+            raise ValueError(
+                f"process worker promotion binding has invalid {key}"
+            )
+
     if packet.get("protected_effects_authorized") is not False:
         raise ValueError("process worker packet must deny protected effects")
     if packet.get("source_mutation_authorized") is not False:
