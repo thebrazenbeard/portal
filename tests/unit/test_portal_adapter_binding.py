@@ -583,3 +583,122 @@ def test_refill_preserves_adapter_outcome_unknown_over_internal_pending(
     )
     controller.close()
 
+def test_single_generation_run_can_dispatch_execution_adapter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_prepare(monkeypatch, tmp_path)
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+
+    class FakeAdapter:
+        def select_routes(self, result):
+            return (
+                PortalRouteBinding(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                ),
+            )
+
+        def dispatch(self, result, routes):
+            return (
+                PortalDispatchRecord(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                    state="DISPATCHED",
+                    evidence_id="executor:single-run",
+                ),
+            )
+
+    controller.run(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        execution_adapter=FakeAdapter(),
+    )
+
+    subject = controller.status("portal")["subjects"][0]
+    assert subject["dispatch_state"] == "DISPATCHED"
+    assert subject["dispatch_evidence_id"] == "executor:single-run"
+    controller.close()
+
+
+def test_single_generation_continue_can_dispatch_execution_adapter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def fake_prepare(**kwargs):
+        nonlocal calls
+        calls += 1
+        packets = () if calls == 1 else (_packet(kwargs["run_id"]),)
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=len(packets),
+            claimed=len(packets),
+            held=0,
+            packets=packets,
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+
+    common = dict(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+    )
+    controller.run(**common)
+
+    class FakeAdapter:
+        def select_routes(self, result):
+            assert result.generation == 2
+            return (
+                PortalRouteBinding(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                ),
+            )
+
+        def dispatch(self, result, routes):
+            return (
+                PortalDispatchRecord(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                    state="DISPATCHED",
+                    evidence_id="executor:continue",
+                ),
+            )
+
+    controller.continue_run(
+        **common,
+        execution_adapter=FakeAdapter(),
+    )
+
+    subject = controller.status("portal")["subjects"][0]
+    assert subject["dispatch_state"] == "DISPATCHED"
+    assert subject["dispatch_evidence_id"] == "executor:continue"
+    controller.close()
+
