@@ -264,3 +264,74 @@ def test_run_once_rejects_duplicate_run_configuration(tmp_path: Path) -> None:
             **common,
             nodes=(ExecutionNode(node_id="beta", max_parallel=1),),
         )
+
+
+
+def test_continuous_run_refills_lane_until_portfolio_is_idle(
+    tmp_path: Path,
+) -> None:
+    from portal.runtime import run_portal_until_idle
+
+    projects, dependencies, transport = _fixture()
+    db = tmp_path / "portal-refill.sqlite3"
+
+    collect_and_schedule_portfolio(
+        projects=projects,
+        dependencies=dependencies,
+        registry_digest="1" * 64,
+        dependency_digest="2" * 64,
+        worker_registry_digest="3" * 64,
+        state_db=db,
+        token=None,
+        transport=transport,
+        clock=lambda: 1.0,
+    )
+    transport.heads[("example/provider-a", "main")] = "e" * 40
+    transport.heads[("example/provider-b", "main")] = "f" * 40
+
+    ticks = iter(float(value) for value in range(2, 100))
+    result = run_portal_until_idle(
+        projects=projects,
+        dependencies=dependencies,
+        workers=(),
+        registry_digest="1" * 64,
+        dependency_digest="2" * 64,
+        worker_registry_digest="3" * 64,
+        state_db=db,
+        nodes=(ExecutionNode(node_id="only", max_parallel=1),),
+        run_id="refill-run",
+        holder="vera",
+        lease_ttl=60.0,
+        max_parallel=1,
+        max_cycles=10,
+        max_idle_cycles=1,
+        poll_seconds=0.0,
+        token=None,
+        transport=transport,
+        clock=lambda: next(ticks),
+        sleep=lambda _seconds: None,
+    )
+
+    assert result.stop_reason == "IDLE"
+    assert len(result.cycles) == 3
+    assert [cycle.progress_made for cycle in result.cycles] == [
+        True,
+        True,
+        False,
+    ]
+    completed = [
+        lane
+        for cycle in result.cycles
+        for lane in cycle.lanes
+        if lane.claimed and lane.queue_state == "COMPLETE"
+    ]
+    assert len(completed) == 2
+
+    store = PortalRunStore(db)
+    try:
+        summary = store.summary("refill-run")
+    finally:
+        store.close()
+    assert summary["cycles"] == 3
+    assert summary["lane_events"] == 2
+    assert summary["states"] == {"COMPLETE": 2}
