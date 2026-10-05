@@ -25,19 +25,27 @@ from runner.registry import (
 )
 
 from .coordinator import plan_portal_wave
+from .ecosystem_runtime import (
+    PortalEcosystemStore,
+    run_ecosystem_proposal_generations,
+)
 from .discovery import (
     discover_live_project_registry,
     write_project_registry,
 )
 from .node_registry import load_execution_nodes
+from .worker_registry import load_worker_backends
 from .runtime import (
     PortalRunStore,
     run_portal_until_idle,
 )
 from .wave_runtime import (
     PortalWaveStore,
+    execute_portal_source_proposal,
     prepare_portal_wave,
+    promote_portal_source_proposal,
     promote_portal_wave_packet,
+    reconcile_portal_source_proposal,
     verify_portal_wave_delivery,
 )
 
@@ -301,6 +309,125 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(".portal/portal.sqlite3"),
     )
     wave_status.add_argument("--run-id", default="portal-wave-default")
+
+    wave_proposal_promote = wave_subcommands.add_parser(
+        "proposal-promote",
+        help="promote one exact persisted source-tree proposal",
+    )
+    wave_proposal_promote.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_proposal_promote.add_argument("--run-id", default="portal-wave-default")
+    wave_proposal_promote.add_argument("--subject-id", required=True)
+    wave_proposal_promote.add_argument("--review", type=Path, required=True)
+    wave_proposal_promote.add_argument(
+        "--execution-grant",
+        type=Path,
+        required=True,
+    )
+    wave_proposal_promote.add_argument(
+        "--effect-grant",
+        type=Path,
+        required=True,
+    )
+
+    wave_proposal_execute = wave_subcommands.add_parser(
+        "proposal-execute",
+        help="execute one previously promoted source-tree proposal",
+    )
+    wave_proposal_execute.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_proposal_execute.add_argument("--run-id", default="portal-wave-default")
+    wave_proposal_execute.add_argument("--subject-id", required=True)
+
+    wave_proposal_reconcile = wave_subcommands.add_parser(
+        "proposal-reconcile",
+        help="reconcile one ambiguous source-tree proposal without replay",
+    )
+    wave_proposal_reconcile.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_proposal_reconcile.add_argument("--run-id", default="portal-wave-default")
+    wave_proposal_reconcile.add_argument("--subject-id", required=True)
+    wave_proposal_reconcile.add_argument("--reconciler", required=True)
+
+    ecosystem = subcommands.add_parser(
+        "ecosystem",
+        help="run and inspect the durable whole-repository coordinator session",
+    )
+    ecosystem_subcommands = ecosystem.add_subparsers(
+        dest="ecosystem_command",
+        required=True,
+    )
+
+    ecosystem_propose = ecosystem_subcommands.add_parser(
+        "propose",
+        help=(
+            "continuously refill parallel repository lanes and generate "
+            "bounded source-tree proposals"
+        ),
+    )
+    ecosystem_propose.add_argument(
+        "--wave",
+        type=Path,
+        default=ROOT / "portfolio" / "advancement_wave.public.json",
+    )
+    ecosystem_propose.add_argument(
+        "--corpus",
+        type=Path,
+        default=ROOT / "portfolio" / "corpus.public.json",
+    )
+    ecosystem_propose.add_argument(
+        "--projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    ecosystem_propose.add_argument("--discover-owner")
+    ecosystem_propose.add_argument("--write-live-registry", type=Path)
+    ecosystem_propose.add_argument("--nodes", type=Path, required=True)
+    ecosystem_propose.add_argument("--worker-backends", type=Path, required=True)
+    ecosystem_propose.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    ecosystem_propose.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path(".portal/workers"),
+    )
+    ecosystem_propose.add_argument("--session-id", default="portal-ecosystem")
+    ecosystem_propose.add_argument("--holder", default="vera")
+    ecosystem_propose.add_argument("--holder-prefix", default="portal")
+    ecosystem_propose.add_argument("--lease-ttl", type=float, default=1800.0)
+    ecosystem_propose.add_argument(
+        "--delivery-lease-ttl",
+        type=float,
+        default=900.0,
+    )
+    ecosystem_propose.add_argument("--max-generations", type=int, default=100)
+    ecosystem_propose.add_argument("--max-parallel", type=int, default=6)
+    ecosystem_propose.add_argument("--max-per-identity", type=int, default=2)
+    ecosystem_propose.add_argument("--max-per-family", type=int, default=2)
+    ecosystem_propose.add_argument("--max-per-lane", type=int, default=2)
+
+    ecosystem_status = ecosystem_subcommands.add_parser(
+        "status",
+        help="show the durable whole-repository coordinator session",
+    )
+    ecosystem_status.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    ecosystem_status.add_argument("--session-id", default="portal-ecosystem")
     return parser
 
 
@@ -639,6 +766,139 @@ def _wave_status_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+
+def _wave_proposal_promote_payload(args: argparse.Namespace) -> dict[str, object]:
+    receipt = promote_portal_source_proposal(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        review_document=load_json_document(Path(args.review)),
+        execution_grant_document=load_json_document(Path(args.execution_grant)),
+        effect_grant_document=load_json_document(Path(args.effect_grant)),
+        review_key=review_key_from_environment(),
+        execution_authority_key=execution_authority_key_from_environment(),
+        effect_authority_key=effect_authority_key_from_environment(),
+        token=_github_token(),
+    )
+    return {
+        "mode": "PORTAL_SOURCE_PROPOSAL_PROMOTE_V1",
+        "promoted": True,
+        "effect_class": receipt.effect_class,
+        "promotion_sha256": receipt.promotion_sha256,
+        "protected_effects_authorized": True,
+        "source_mutation_authorized": receipt.effect_class == "SOURCE_WRITE",
+    }
+
+
+def _wave_proposal_execute_payload(args: argparse.Namespace) -> dict[str, object]:
+    result = execute_portal_source_proposal(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        token=_github_token(),
+    )
+    return {
+        "mode": "PORTAL_SOURCE_PROPOSAL_EXECUTE_V1",
+        "state": result.state,
+        "classification": result.classification,
+        "backend_executed": result.backend_executed,
+        "result_head": result.result_head,
+        "reason": result.reason,
+    }
+
+
+def _wave_proposal_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
+    result = reconcile_portal_source_proposal(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        reconciler=args.reconciler,
+        token=_github_token(),
+    )
+    return {
+        "mode": "PORTAL_SOURCE_PROPOSAL_RECONCILE_V1",
+        "state": result.state,
+        "classification": result.classification,
+        "backend_executed": result.backend_executed,
+        "result_head": result.result_head,
+        "reason": result.reason,
+    }
+
+
+def _ecosystem_projects_path(args: argparse.Namespace) -> Path:
+    projects_path = Path(args.projects)
+    if not args.discover_owner:
+        return projects_path
+
+    curated = load_project_snapshot(projects_path)
+    snapshot = discover_live_project_registry(
+        owner=args.discover_owner,
+        curated_projects=curated.projects,
+        token=_github_token(),
+    )
+    output = (
+        Path(args.write_live_registry)
+        if args.write_live_registry is not None
+        else Path(args.state_db).parent / "projects.live.yaml"
+    )
+    write_project_registry(output, snapshot)
+    return output
+
+
+def _ecosystem_propose_payload(args: argparse.Namespace) -> dict[str, object]:
+    projects_path = _ecosystem_projects_path(args)
+    nodes = load_execution_nodes(Path(args.nodes))
+    backends = load_worker_backends(Path(args.worker_backends))
+    budget = WaveExecutionBudget(
+        max_parallel=args.max_parallel,
+        max_per_identity=args.max_per_identity,
+        max_per_family=args.max_per_family,
+        max_per_lane=args.max_per_lane,
+    )
+    result = run_ecosystem_proposal_generations(
+        wave_path=Path(args.wave),
+        corpus_path=Path(args.corpus),
+        projects_path=projects_path,
+        state_db=Path(args.state_db),
+        nodes=nodes,
+        budget=budget,
+        backends=backends,
+        workspace_root=Path(args.workspace_root),
+        session_id=args.session_id,
+        holder=args.holder,
+        lease_ttl=args.lease_ttl,
+        delivery_lease_ttl=args.delivery_lease_ttl,
+        holder_prefix=args.holder_prefix,
+        max_generations=args.max_generations,
+        token=_github_token(),
+    )
+    return {
+        "mode": "PORTAL_ECOSYSTEM_PROPOSE_V1",
+        "session_id": result.session_id,
+        "generations": result.generations,
+        "admitted": result.admitted,
+        "awaiting_promotion": result.awaiting_promotion,
+        "active": result.active,
+        "terminal": result.terminal,
+        "duplicate_admissions": result.duplicate_admissions,
+        "workstreams_remaining": result.workstreams_remaining,
+        "saturated": result.saturated,
+        "protected_effects_authorized": False,
+        "source_mutation_authorized": False,
+    }
+
+
+def _ecosystem_status_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalEcosystemStore(Path(args.state_db))
+    try:
+        summary = store.summary(args.session_id)
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_ECOSYSTEM_STATUS_V1",
+        "ecosystem": summary,
+    }
+
 def entrypoint(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -664,8 +924,22 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _wave_verify_payload(args)
             elif args.wave_command == "status":
                 payload = _wave_status_payload(args)
+            elif args.wave_command == "proposal-promote":
+                payload = _wave_proposal_promote_payload(args)
+            elif args.wave_command == "proposal-execute":
+                payload = _wave_proposal_execute_payload(args)
+            elif args.wave_command == "proposal-reconcile":
+                payload = _wave_proposal_reconcile_payload(args)
             else:
                 parser.error("unsupported wave command")
+                return 2
+        elif args.command == "ecosystem":
+            if args.ecosystem_command == "propose":
+                payload = _ecosystem_propose_payload(args)
+            elif args.ecosystem_command == "status":
+                payload = _ecosystem_status_payload(args)
+            else:
+                parser.error("unsupported ecosystem command")
                 return 2
         else:
             parser.error("unsupported command")
