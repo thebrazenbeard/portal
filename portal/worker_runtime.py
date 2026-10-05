@@ -83,19 +83,26 @@ def _run_slot(
     token: str | None,
     transport: GitHubTransport | None,
     clock: Callable[[], float],
+    claim_attempts: int,
 ) -> PortalWorkerSlotResult:
     holder = f"{holder_prefix}:{node_id}:{slot}"
-    store = PortalWaveStore(state_db)
-    try:
-        claim = store.claim_delivery(
-            run_id=run_id,
-            node_id=node_id,
-            holder=holder,
-            now=float(clock()),
-            ttl=delivery_lease_ttl,
-        )
-    finally:
-        store.close()
+    claim = None
+    for attempt in range(claim_attempts):
+        store = PortalWaveStore(state_db)
+        try:
+            claim = store.claim_delivery(
+                run_id=run_id,
+                node_id=node_id,
+                holder=holder,
+                now=float(clock()),
+                ttl=delivery_lease_ttl,
+            )
+        finally:
+            store.close()
+        if claim is not None:
+            break
+        if attempt + 1 < claim_attempts:
+            time.sleep(0.005)
 
     if claim is None:
         return PortalWorkerSlotResult(
@@ -119,7 +126,7 @@ def _run_slot(
         evidence_sha256 = worker.evidence_sha256
         reason = worker.reason
     except ValueError as exc:
-        receipt_class = "FAILED_DETERMINISTIC"
+        receipt_class = "OUTCOME_UNKNOWN"
         evidence_sha256 = _error_digest(
             run_id=run_id,
             node_id=node_id,
@@ -127,8 +134,8 @@ def _run_slot(
             error=exc,
         )
         reason = (
-            "worker protocol rejected deterministically: "
-            f"{type(exc).__name__}: {exc}"
+            "worker process returned an invalid/unverifiable protocol result; "
+            f"outcome is unknown: {type(exc).__name__}: {exc}"
         )
     except Exception as exc:
         receipt_class = "OUTCOME_UNKNOWN"
@@ -261,6 +268,7 @@ def run_wave_workers_once(
                 token=token,
                 transport=transport,
                 clock=clock,
+                claim_attempts=len(slots) + 1,
             )
             for node_id, slot in slots
         ]
