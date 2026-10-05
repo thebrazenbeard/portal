@@ -167,3 +167,111 @@ def test_session_complete_routes_through_verification(tmp_path, monkeypatch, cap
     name, kwargs = FakeSession.calls[0]
     assert name == "complete"
     assert kwargs["verifier"] == "vera-review"
+
+def test_session_run_with_worker_backends_builds_execution_adapter(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    built: dict[str, object] = {}
+    sentinel_adapter = object()
+
+    class FakeProcessDriver:
+        def __init__(self, **kwargs):
+            built["driver_kwargs"] = kwargs
+
+    def fake_build(driver):
+        built["driver"] = driver
+        return sentinel_adapter
+
+    monkeypatch.setattr(
+        portal_cli,
+        "PortalProposalProcessAdapter",
+        FakeProcessDriver,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "build_process_proposal_execution_adapter",
+        fake_build,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "load_worker_backends",
+        lambda path: {"worklaptop": object()},
+    )
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--worker-backends", str(tmp_path / "workers.yaml"),
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--worker-holder-prefix", "portal-host",
+        "--delivery-lease-ttl", "123",
+        "--once",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_COMMAND_SESSION_RUN_V1"
+    name, kwargs = FakeSession.calls[0]
+    assert name == "run"
+    assert kwargs["execution_adapter"] is sentinel_adapter
+    driver_kwargs = built["driver_kwargs"]
+    assert driver_kwargs["workspace_root"] == tmp_path / "workspaces"
+    assert driver_kwargs["holder_prefix"] == "portal-host"
+    assert driver_kwargs["delivery_lease_ttl"] == 123.0
+
+
+def test_session_continue_with_worker_backends_passes_execution_adapter(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    sentinel_adapter = object()
+
+    class FakeProcessDriver:
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(
+        portal_cli,
+        "PortalProposalProcessAdapter",
+        FakeProcessDriver,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "build_process_proposal_execution_adapter",
+        lambda driver: sentinel_adapter,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "load_worker_backends",
+        lambda path: {"worklaptop": object()},
+    )
+
+    code = portal_cli.entrypoint([
+        "continue",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--worker-backends", str(tmp_path / "workers.yaml"),
+    ])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_CONTINUE_V1"
+    name, kwargs = FakeSession.calls[0]
+    assert name == "continue"
+    assert kwargs["execution_adapter"] is sentinel_adapter
+
