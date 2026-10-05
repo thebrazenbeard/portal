@@ -271,7 +271,6 @@ def run_wave_workers_once(
                 transport=transport,
                 clock=clock,
                 claim_attempts=len(slots) + 1,
-                allowed_subject_ids=allowed_subject_ids,
             )
             for node_id, slot in slots
         ]
@@ -518,6 +517,7 @@ def run_wave_proposal_workers_once(
                 transport=transport,
                 clock=clock,
                 claim_attempts=len(slots) + 1,
+                allowed_subject_ids=allowed_subject_ids,
             )
             for node_id, slot in slots
         ]
