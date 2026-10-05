@@ -25,10 +25,16 @@ class GitHubOutcomeUnknown(RuntimeError):
         *,
         candidate_commit_sha: str | None = None,
         candidate_blob_sha: str | None = None,
+        candidate_blob_shas: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.candidate_commit_sha = candidate_commit_sha
         self.candidate_blob_sha = candidate_blob_sha
+        self.candidate_blob_shas = (
+            dict(candidate_blob_shas)
+            if candidate_blob_shas is not None
+            else None
+        )
 
 
 class GitHubOperation(str, Enum):
@@ -717,6 +723,7 @@ class GitHubRestTransport:
             raise GitHubOutcomeUnknown(
                 str(exc),
                 candidate_commit_sha=new_commit_sha,
+                candidate_blob_shas=blob_shas,
             ) from exc
 
         try:
@@ -725,6 +732,7 @@ class GitHubRestTransport:
                 raise GitHubOutcomeUnknown(
                     "github exact source-tree readback head mismatch",
                     candidate_commit_sha=new_commit_sha,
+                candidate_blob_shas=blob_shas,
                 )
             for path, content, _expected_blob_sha, _mode in normalized:
                 observed = self.read_file(repository, path, new_commit_sha)
@@ -736,6 +744,7 @@ class GitHubRestTransport:
                     raise GitHubOutcomeUnknown(
                         "github exact source-tree readback file mismatch",
                         candidate_commit_sha=new_commit_sha,
+                        candidate_blob_shas=blob_shas,
                     )
             final_head = self.read_ref(repository, branch)
         except GitHubOutcomeUnknown:
@@ -744,11 +753,13 @@ class GitHubRestTransport:
             raise GitHubOutcomeUnknown(
                 "github exact source-tree readback outcome is unknown",
                 candidate_commit_sha=new_commit_sha,
+                candidate_blob_shas=blob_shas,
             ) from exc
         if final_head != new_commit_sha:
             raise GitHubOutcomeUnknown(
                 "github exact source-tree ref moved during readback",
                 candidate_commit_sha=new_commit_sha,
+                candidate_blob_shas=blob_shas,
             )
         return new_commit_sha, blob_shas
 
