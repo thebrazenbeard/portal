@@ -9,7 +9,11 @@ from typing import Callable, Iterable, Mapping
 from runner.github_backend import GitHubTransport
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 
-from .adapters import PortalDispatchRecord, PortalRouteBinding
+from .adapters import (
+    PortalDispatchRecord,
+    PortalReconciliationRecord,
+    PortalRouteBinding,
+)
 from .models import ExecutionNode
 from .wave_runtime import (
     PortalWavePacket,
@@ -682,6 +686,78 @@ class PortalCommandSession:
                     WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
                     """,
                     (
+                        record.state,
+                        record.evidence_id,
+                        float(clock()),
+                        session_id,
+                        record.subject_kind,
+                        record.subject_id,
+                    ),
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return self.status(session_id)
+
+    def record_reconciliations(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+        records: Iterable[PortalReconciliationRecord],
+        clock: Callable[[], float] = time.time,
+    ) -> dict[str, object]:
+        self._require_session(session_id=session_id, holder=holder)
+        record_tuple = tuple(records)
+        seen: set[tuple[str, str]] = set()
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            for record in record_tuple:
+                key = (record.subject_kind, record.subject_id)
+                if key in seen:
+                    raise ValueError("duplicate reconciliation record subject")
+                seen.add(key)
+
+                row = self.connection.execute(
+                    """
+                    SELECT state, adapter_id, route_id
+                    FROM portal_command_subjects
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (session_id, record.subject_kind, record.subject_id),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("reconciliation subject does not exist")
+                if str(row[0]) != "ACTIVE":
+                    raise ValueError("reconciliation requires active subject")
+                if row[1] is None or row[2] is None:
+                    raise ValueError("reconciliation requires durable route binding")
+                if (
+                    str(row[1]) != record.adapter_id
+                    or str(row[2]) != record.route_id
+                ):
+                    raise ValueError(
+                        "reconciliation route differs from durable route binding"
+                    )
+
+                next_state = "ACTIVE"
+                if record.state == "VERIFIED_COMPLETE":
+                    next_state = "TERMINAL"
+                elif record.state == "VERIFIED_HELD":
+                    next_state = "HELD"
+
+                self.connection.execute(
+                    """
+                    UPDATE portal_command_subjects
+                    SET state = ?,
+                        verification_state = ?,
+                        dispatch_evidence_id = ?,
+                        updated_at = ?
+                    WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
+                    """,
+                    (
+                        next_state,
                         record.state,
                         record.evidence_id,
                         float(clock()),
