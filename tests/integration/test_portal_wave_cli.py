@@ -127,3 +127,175 @@ def test_portal_wave_status_cli_reads_durable_outbox(
     assert payload["mode"] == "PORTAL_WAVE_STATUS_V1"
     assert payload["wave"]["run_id"] == "wave-status"
     assert payload["wave"]["packets"] == 0
+
+
+
+def test_portal_wave_claim_writes_worker_payload_and_hides_repo_from_stdout(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db = tmp_path / "portal.sqlite3"
+    store = PortalWaveStore(db)
+    try:
+        store.ensure_run(
+            run_id="wave-cli",
+            config_digest="a" * 64,
+            wave_sha256="b" * 64,
+            plan_sha256="c" * 64,
+            holder="vera",
+            now=1.0,
+        )
+        store.record_packet(
+            _packet(),
+            reason="test packet",
+            now=1.0,
+        )
+    finally:
+        store.close()
+
+    payload_out = tmp_path / "packet.json"
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "claim",
+            "--state-db",
+            str(db),
+            "--run-id",
+            "wave-cli",
+            "--node",
+            "lappy",
+            "--holder",
+            "worker-lappy",
+            "--lease-ttl",
+            "30",
+            "--payload-out",
+            str(payload_out),
+        ]
+    )
+
+    assert code == 0
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["mode"] == "PORTAL_WAVE_CLAIM_V1"
+    assert payload["claimed"] is True
+    assert payload["payload_written"] is True
+    assert "thebrazenbeard/project-runner" not in output
+
+    worker_payload = json.loads(payload_out.read_text(encoding="utf-8"))
+    assert worker_payload["repository"] == "thebrazenbeard/project-runner"
+    assert worker_payload["exact_head"] == "a" * 40
+    assert worker_payload["protected_effects_authorized"] is False
+
+
+def test_portal_wave_receipt_records_exact_delivery_fence(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db = tmp_path / "portal.sqlite3"
+    store = PortalWaveStore(db)
+    try:
+        store.ensure_run(
+            run_id="wave-cli",
+            config_digest="a" * 64,
+            wave_sha256="b" * 64,
+            plan_sha256="c" * 64,
+            holder="vera",
+            now=1.0,
+        )
+        store.record_packet(_packet(), reason="test packet", now=1.0)
+        claim = store.claim_delivery(
+            run_id="wave-cli",
+            node_id="lappy",
+            holder="worker-lappy",
+            now=2.0,
+            ttl=30.0,
+        )
+        assert claim is not None
+    finally:
+        store.close()
+
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "receipt",
+            "--state-db",
+            str(db),
+            "--run-id",
+            "wave-cli",
+            "--subject-id",
+            "project-runner",
+            "--node",
+            "lappy",
+            "--holder",
+            "worker-lappy",
+            "--fencing-token",
+            str(claim.fencing_token),
+            "--receipt-class",
+            "SUCCEEDED_SOURCE_CHANGE",
+            "--result-repository",
+            "thebrazenbeard/project-runner",
+            "--result-ref",
+            "work/portal/project-runner",
+            "--result-head",
+            "d" * 40,
+            "--evidence-sha256",
+            "e" * 64,
+            "--reason",
+            "source branch ready",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_WAVE_RECEIPT_V1"
+    assert payload["state"] == "RECEIPT_RECORDED"
+    assert payload["receipt_class"] == "SUCCEEDED_SOURCE_CHANGE"
+
+
+def test_portal_wave_verify_cli_uses_independent_verifier(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from portal.wave_runtime import PortalWaveVerificationResult
+
+    captured = {}
+
+    def fake_verify(**kwargs):
+        captured.update(kwargs)
+        return PortalWaveVerificationResult(
+            run_id=kwargs["run_id"],
+            subject_id=kwargs["subject_id"],
+            state="VERIFIED_COMPLETE",
+            result_repository="thebrazenbeard/project-runner",
+            result_ref="work/portal/project-runner",
+            result_head="d" * 40,
+            reason="verified",
+        )
+
+    monkeypatch.setattr(
+        portal_cli,
+        "verify_portal_wave_delivery",
+        fake_verify,
+    )
+
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "verify",
+            "--state-db",
+            str(tmp_path / "portal.sqlite3"),
+            "--run-id",
+            "wave-cli",
+            "--subject-id",
+            "project-runner",
+            "--verifier",
+            "vera-review",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_WAVE_VERIFY_V1"
+    assert payload["state"] == "VERIFIED_COMPLETE"
+    assert captured["verifier"] == "vera-review"
