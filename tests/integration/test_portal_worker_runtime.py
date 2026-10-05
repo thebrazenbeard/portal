@@ -1,15 +1,38 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
+import time
 
 import pytest
 
+from portal.discovery import (
+    RepositoryInventoryItem,
+    build_live_project_registry,
+    write_project_registry,
+)
 from portal.models import ExecutionNode
-from portal.wave_runtime import PortalWavePacket, PortalWaveStore
+from portal.wave_runtime import (
+    PortalWaveStore,
+    prepare_portal_wave,
+    promote_portal_wave_packet,
+)
 from portal.worker_backend import ProcessWorkerSpec
 from portal.worker_runtime import run_wave_workers_once
+from runner.execution_promotion import (
+    NO_PROTECTED_EFFECT,
+    sign_evidence,
+)
+from runner.models import ProjectDefinition
+from runner.portfolio_corpus import load_portfolio_corpus
+from runner.portfolio_wave_scheduler import WaveExecutionBudget
+
+
+ROOT = Path(__file__).resolve().parents[2]
+WAVE = ROOT / "portfolio" / "advancement_wave.public.json"
+CORPUS = ROOT / "portfolio" / "corpus.public.json"
+REVIEW_KEY = b"portal-auto-worker-review"
+EXECUTION_KEY = b"portal-auto-worker-execution"
 
 
 class FakeReadOnlyTransport:
@@ -39,44 +62,127 @@ class FakeReadOnlyTransport:
         raise AssertionError("automatic worker runtime must not mutate source")
 
 
-def _packet(subject: str, node: str) -> PortalWavePacket:
-    return PortalWavePacket(
-        run_id="auto-run",
-        subject_id=subject,
-        repository=f"example/{subject}",
-        ref="main",
-        exact_head="a" * 40,
-        node_id=node,
-        lane_id="LANE_A",
-        state="CLAIMED",
-        plan_sha256="b" * 64,
-        fencing_token=1,
-        lineage_id=f"lineage-{subject}",
-        work_fingerprint="c" * 64,
-        action="EXECUTE_FRONTIER",
-        effect_ceiling="SOURCE_ONLY",
-        review_gate="EXACT_HEAD_REVIEW",
-        frontier=f"advance {subject}",
-        lead_identity="vera",
-        reviewer_identities=("reviewer",),
-    )
-
-
-def _seed(db: Path) -> None:
-    store = PortalWaveStore(db)
-    try:
-        store.ensure_run(
-            run_id="auto-run",
-            config_digest="a" * 64,
-            wave_sha256="b" * 64,
-            plan_sha256="c" * 64,
-            holder="vera",
-            now=1.0,
+def _seed(db: Path):
+    corpus = load_portfolio_corpus(CORPUS, public_safe=True)
+    repos = []
+    curated = []
+    heads = {}
+    for record in corpus.records:
+        repos.append(
+            RepositoryInventoryItem(
+                name=record.repository.split("/", 1)[1],
+                full_name=record.repository,
+                private=False,
+                archived=record.archived,
+                default_branch=record.default_branch,
+            )
         )
-        store.record_packet(_packet("repo-a", "alpha"), reason="ready", now=1.0)
-        store.record_packet(_packet("repo-b", "alpha"), reason="ready", now=1.0)
-    finally:
-        store.close()
+        curated.append(
+            ProjectDefinition.from_mapping(
+                {
+                    "id": record.id,
+                    "name": record.name,
+                    "visibility": "public",
+                    "repositories": [record.repository],
+                    "capabilities": ["read", "analyze", "propose"],
+                    "assignment_scope": "NONE",
+                    "review_scope": "NONE",
+                    "family_id": record.family_id,
+                    "scheduling_state": (
+                        "ARCHIVED" if record.archived else "SCHEDULABLE"
+                    ),
+                }
+            )
+        )
+        heads[(record.repository, record.default_branch)] = "a" * 40
+
+    snapshot = build_live_project_registry(
+        owner="thebrazenbeard",
+        repositories=tuple(repos),
+        curated_projects=tuple(curated),
+    )
+    projects = db.parent / "projects.live.yaml"
+    write_project_registry(projects, snapshot)
+
+    transport = FakeReadOnlyTransport(heads)
+    now = time.time()
+    prepared = prepare_portal_wave(
+        wave_path=WAVE,
+        corpus_path=CORPUS,
+        projects_path=projects,
+        state_db=db,
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=2),),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=2,
+            max_per_family=2,
+            max_per_lane=2,
+        ),
+        run_id="auto-run",
+        holder="vera",
+        lease_ttl=600.0,
+        token=None,
+        transport=transport,
+        clock=lambda: now,
+    )
+    assert len(prepared.packets) == 2
+
+    for packet in prepared.packets:
+        review = sign_evidence(
+            {
+                "schema": "PROJECT_RUNNER_EXECUTION_REVIEW_V1",
+                "subject_id": packet.subject_id,
+                "repository": packet.repository,
+                "ref": packet.ref,
+                "exact_head": packet.exact_head,
+                "plan_sha256": packet.plan_sha256,
+                "work_fingerprint": packet.work_fingerprint,
+                "reviewer_identity": packet.reviewer_identities[0],
+                "review_gate": packet.review_gate,
+                "review_state": "EXECUTION_PROMOTION_REVIEWED",
+                "reviewed_at": now,
+                "valid_until": now + 600.0,
+                "execution_request_sha256": None,
+            },
+            REVIEW_KEY,
+        )
+        execution = sign_evidence(
+            {
+                "schema": "PROJECT_RUNNER_EXECUTION_AUTHORITY_V1",
+                "grant_id": f"auto:{packet.subject_id}",
+                "issuer": "portal-test-authority",
+                "subject_id": packet.subject_id,
+                "repository": packet.repository,
+                "ref": packet.ref,
+                "exact_head": packet.exact_head,
+                "lineage_id": packet.lineage_id,
+                "work_fingerprint": packet.work_fingerprint,
+                "fencing_token": packet.fencing_token,
+                "operation": packet.action,
+                "effect_class": NO_PROTECTED_EFFECT,
+                "execution_request": None,
+                "execution_authorized": True,
+                "issued_at": now,
+                "valid_until": now + 600.0,
+            },
+            EXECUTION_KEY,
+        )
+        promote_portal_wave_packet(
+            state_db=db,
+            run_id="auto-run",
+            subject_id=packet.subject_id,
+            review_document=review,
+            execution_grant_document=execution,
+            effect_grant_document=None,
+            review_key=REVIEW_KEY,
+            execution_authority_key=EXECUTION_KEY,
+            effect_authority_key=None,
+            token=None,
+            transport=transport,
+            clock=lambda: now + 1.0,
+        )
+
+    return transport, prepared.packets
 
 
 def _worker(path: Path) -> None:
@@ -91,6 +197,9 @@ p.add_argument("--portal-packet", required=True)
 p.add_argument("--portal-receipt", required=True)
 args = p.parse_args()
 packet = json.loads(Path(args.portal_packet).read_text(encoding="utf-8"))
+assert packet["execution_authorized"] is True
+assert packet["execution_effect_class"] == "NO_PROTECTED_EFFECT"
+assert packet["source_mutation_authorized"] is False
 Path(args.portal_receipt).write_text(
     json.dumps(
         {
@@ -112,7 +221,7 @@ def test_automatic_worker_pass_fills_node_capacity_and_verifies(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "portal.sqlite3"
-    _seed(db)
+    transport, packets = _seed(db)
     worker = tmp_path / "worker.py"
     _worker(worker)
 
@@ -132,18 +241,15 @@ def test_automatic_worker_pass_fills_node_capacity_and_verifies(
         delivery_lease_ttl=30.0,
         verifier="vera-review",
         token=None,
-        transport=FakeReadOnlyTransport(
-            {
-                ("example/repo-a", "main"): "a" * 40,
-                ("example/repo-b", "main"): "a" * 40,
-            }
-        ),
+        transport=transport,
     )
 
     assert result.claimed == 2
     assert result.verified_complete == 2
     assert result.no_work == 0
-    assert {slot.subject_id for slot in result.slots} == {"repo-a", "repo-b"}
+    assert {slot.subject_id for slot in result.slots} == {
+        packet.subject_id for packet in packets
+    }
     assert {slot.state for slot in result.slots} == {"VERIFIED_COMPLETE"}
 
     store = PortalWaveStore(db)
@@ -158,7 +264,7 @@ def test_automatic_worker_pass_is_idle_after_packets_are_terminal(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "portal.sqlite3"
-    _seed(db)
+    transport, _packets = _seed(db)
     worker = tmp_path / "worker.py"
     _worker(worker)
     kwargs = dict(
@@ -177,12 +283,7 @@ def test_automatic_worker_pass_is_idle_after_packets_are_terminal(
         delivery_lease_ttl=30.0,
         verifier="vera-review",
         token=None,
-        transport=FakeReadOnlyTransport(
-            {
-                ("example/repo-a", "main"): "a" * 40,
-                ("example/repo-b", "main"): "a" * 40,
-            }
-        ),
+        transport=transport,
     )
 
     first = run_wave_workers_once(**kwargs)
@@ -197,7 +298,7 @@ def test_automatic_worker_pass_requires_backend_for_every_enabled_node(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "portal.sqlite3"
-    _seed(db)
+    transport, _packets = _seed(db)
 
     with pytest.raises(ValueError, match="missing worker backend for enabled node"):
         run_wave_workers_once(
@@ -210,7 +311,5 @@ def test_automatic_worker_pass_requires_backend_for_every_enabled_node(
             delivery_lease_ttl=30.0,
             verifier="vera-review",
             token=None,
-            transport=FakeReadOnlyTransport(
-                {("example/repo-a", "main"): "a" * 40}
-            ),
+            transport=transport,
         )
