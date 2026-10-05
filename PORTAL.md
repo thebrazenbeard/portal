@@ -6,7 +6,7 @@ P.O.R.T.A.L. is designed so a **single P.O.R.T.A.L. chat** can coordinate and ad
 
 Project Runner remains the governed execution substrate. P.O.R.T.A.L. composes its currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics rather than replacing them.
 
-## Mission versus current slice
+## Mission and implemented coordinator core
 
 Mission:
 - whole accessible active portfolio;
@@ -16,12 +16,19 @@ Mission:
 - continuous lane refill;
 - durable recovery across chat/runtime loss.
 
-Current implemented slice:
-- deterministic Project Runner wave admission;
-- execution-node placement;
-- read-only `portal plan`.
+Implemented coordinator core:
+- live repository discovery with private membership kept operator-local;
+- deterministic Project Runner wave admission and execution-node placement;
+- exact-head claims, leases, fencing, durable receipts and reconciliation;
+- zero-mutation advisory workers for source-proposal generation;
+- hash-bound multi-file source-tree proposals;
+- separate Project Runner review, execution-authority and protected-effect promotion;
+- atomic exact-head multi-file GitHub source publication;
+- independent effect verification and ambiguous-outcome reconciliation;
+- durable parent ecosystem sessions that exclude previously admitted subjects and refill repository lanes across successive child waves;
+- CLI surfaces for discovery, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
 
-Do not mistake the current slice for the architectural ceiling.
+This is no longer a planning-only implementation. Remaining work before a complete whole-ecosystem claim is concentrated in qualified intelligent proposal authorship for arbitrary repositories, first-class multi-repository workstream execution, and live node/backend qualification at run time.
 
 ## Existing execution-loop substrate
 
@@ -43,7 +50,7 @@ The single P.O.R.T.A.L. chat is an operator/control surface, not canonical persi
 
 A fresh chat must be able to reconstruct the run from durable state and continue without requiring the prior transcript.
 
-Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution backends such as VeraMesh/WorkBridge carry effects when independently current and authorized.
+Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution backends are bound per node and must be independently current and authorized. Capability is never inferred across transports. In the current workstation topology, WorkLaptop is an Executor-backed node only; WorkBridge/Desktop Commander capability must not be inferred for it.
 
 ## Whole-portfolio loop
 
