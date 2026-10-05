@@ -240,3 +240,31 @@ def test_equal_preference_selection_is_deterministic() -> None:
 def test_preferred_adapter_and_route_must_be_supplied_together() -> None:
     with pytest.raises(ValueError, match="preferred adapter and route must be paired"):
         _request(preferred_adapter_id="github")
+
+def test_same_physical_route_can_advertise_multiple_exact_targets() -> None:
+    selected = resolve_portal_route(
+        _request(
+            preferred_adapter_id="github",
+            preferred_route_id="repo-native",
+        ),
+        (
+            _route(
+                adapter_id="github",
+                route_id="repo-native",
+                target_id="thebrazenbeard/portal",
+            ),
+            _route(
+                adapter_id="github",
+                route_id="repo-native",
+                target_id="thebrazenbeard/tattler",
+            ),
+        ),
+    )
+
+    assert selected == PortalRouteBinding(
+        subject_kind="repository",
+        subject_id="portal",
+        adapter_id="github",
+        route_id="repo-native",
+    )
+
