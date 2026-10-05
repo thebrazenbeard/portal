@@ -5,8 +5,10 @@ from pathlib import Path
 
 import portal.cli as portal_cli
 from portal.wave_runtime import (
+    PortalWaveDeliveryClaim,
     PortalWavePacket,
     PortalWavePreparationResult,
+    PortalWaveReceipt,
     PortalWaveStore,
 )
 
@@ -132,6 +134,7 @@ def test_portal_wave_status_cli_reads_durable_outbox(
 
 def test_portal_wave_claim_writes_worker_payload_and_hides_repo_from_stdout(
     tmp_path: Path,
+    monkeypatch,
     capsys,
 ) -> None:
     db = tmp_path / "portal.sqlite3"
@@ -152,6 +155,34 @@ def test_portal_wave_claim_writes_worker_payload_and_hides_repo_from_stdout(
         )
     finally:
         store.close()
+
+    worker_payload = {
+        "schema": "PORTAL_WAVE_WORK_PACKET_V1",
+        "repository": "thebrazenbeard/project-runner",
+        "exact_head": "a" * 40,
+        "execution_authorized": True,
+        "execution_effect_class": "NO_PROTECTED_EFFECT",
+        "protected_effects_authorized": False,
+        "source_mutation_authorized": False,
+        "target_ref_mutation_authorized": False,
+    }
+
+    def fake_claim_delivery(self, **kwargs):
+        return PortalWaveDeliveryClaim(
+            run_id=kwargs["run_id"],
+            subject_id="project-runner",
+            node_id=kwargs["node_id"],
+            holder=kwargs["holder"],
+            fencing_token=1,
+            lease_expires_at=9999999999.0,
+            payload=worker_payload,
+        )
+
+    monkeypatch.setattr(
+        PortalWaveStore,
+        "claim_delivery",
+        fake_claim_delivery,
+    )
 
     payload_out = tmp_path / "packet.json"
     code = portal_cli.entrypoint(
@@ -192,29 +223,26 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
     monkeypatch,
     capsys,
 ) -> None:
-    db = tmp_path / "portal.sqlite3"
-    store = PortalWaveStore(db)
-    try:
-        store.ensure_run(
-            run_id="wave-cli",
-            config_digest="a" * 64,
-            wave_sha256="b" * 64,
-            plan_sha256="c" * 64,
-            holder="vera",
-            now=1.0,
+    def fake_receipt(self, **kwargs):
+        assert kwargs["expected_fencing_token"] == 7
+        assert kwargs["receipt_class"] == "SUCCEEDED_NO_EFFECT"
+        return PortalWaveReceipt(
+            run_id=kwargs["run_id"],
+            subject_id=kwargs["subject_id"],
+            node_id=kwargs["node_id"],
+            state="RECEIPT_RECORDED",
+            receipt_class=kwargs["receipt_class"],
+            receipt_sha256="f" * 64,
+            result_repository=None,
+            result_ref=None,
+            result_head=None,
         )
-        store.record_packet(_packet(), reason="test packet", now=1.0)
-        claim = store.claim_delivery(
-            run_id="wave-cli",
-            node_id="lappy",
-            holder="worker-lappy",
-            now=2.0,
-            ttl=30.0,
-        )
-        assert claim is not None
-    finally:
-        store.close()
 
+    monkeypatch.setattr(
+        PortalWaveStore,
+        "record_delivery_receipt",
+        fake_receipt,
+    )
     monkeypatch.setattr(portal_cli.time, "time", lambda: 3.0)
 
     code = portal_cli.entrypoint(
@@ -222,7 +250,7 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
             "wave",
             "receipt",
             "--state-db",
-            str(db),
+            str(tmp_path / "portal.sqlite3"),
             "--run-id",
             "wave-cli",
             "--subject-id",
@@ -232,13 +260,13 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
             "--holder",
             "worker-lappy",
             "--fencing-token",
-            str(claim.fencing_token),
+            "7",
             "--receipt-class",
             "SUCCEEDED_NO_EFFECT",
             "--evidence-sha256",
             "e" * 64,
             "--reason",
-            "source branch ready",
+            "analysis complete",
         ]
     )
 
@@ -247,7 +275,6 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
     assert payload["mode"] == "PORTAL_WAVE_RECEIPT_V1"
     assert payload["state"] == "RECEIPT_RECORDED"
     assert payload["receipt_class"] == "SUCCEEDED_NO_EFFECT"
-
 
 def test_portal_wave_verify_cli_uses_independent_verifier(
     tmp_path: Path,
