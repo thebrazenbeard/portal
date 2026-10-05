@@ -179,3 +179,55 @@ def test_prepare_wave_is_idempotent_for_same_holder_and_exact_heads(
     finally:
         store.close()
     assert summary["packets"] == 1
+
+
+
+def test_prepare_wave_excludes_prior_subject_and_refills_next_candidate(
+    tmp_path: Path,
+):
+    projects_path, heads = _operator_registry(tmp_path)
+    state_db = tmp_path / "portal-refill.sqlite3"
+    transport = FakeReadOnlyTransport(heads)
+    budget = WaveExecutionBudget(
+        max_parallel=1,
+        max_per_identity=1,
+        max_per_family=1,
+        max_per_lane=1,
+    )
+    nodes = (ExecutionNode(node_id="alpha", max_parallel=1),)
+
+    first = prepare_portal_wave(
+        wave_path=WAVE,
+        corpus_path=CORPUS,
+        projects_path=projects_path,
+        state_db=state_db,
+        nodes=nodes,
+        budget=budget,
+        run_id="wave-1",
+        holder="vera",
+        lease_ttl=60.0,
+        token=None,
+        transport=transport,
+        clock=lambda: 100.0,
+    )
+    assert len(first.packets) == 1
+    first_subject = first.packets[0].subject_id
+
+    second = prepare_portal_wave(
+        wave_path=WAVE,
+        corpus_path=CORPUS,
+        projects_path=projects_path,
+        state_db=state_db,
+        nodes=nodes,
+        budget=budget,
+        run_id="wave-2",
+        holder="vera",
+        lease_ttl=60.0,
+        token=None,
+        excluded_subjects=(("repository", first_subject),),
+        transport=transport,
+        clock=lambda: 101.0,
+    )
+
+    assert len(second.packets) == 1
+    assert second.packets[0].subject_id != first_subject
