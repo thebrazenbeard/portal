@@ -15,6 +15,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ALLOWED_RECEIPTS = {
     "SUCCEEDED_NO_EFFECT",
+    "PROPOSED_SOURCE_TREE",
     "HELD",
     "FAILED_RETRYABLE",
     "FAILED_DETERMINISTIC",
