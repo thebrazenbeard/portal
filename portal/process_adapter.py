@@ -119,6 +119,39 @@ class PortalProposalProcessAdapter:
         if not routes:
             return ()
 
+        packets_by_subject = {
+            packet.subject_id: packet
+            for packet in result.packets
+        }
+        allowed_subject_ids: list[str] = []
+        seen_subjects: set[str] = set()
+        for binding in routes:
+            if binding.adapter_id != _ADAPTER_ID:
+                raise ValueError("process proposal route uses wrong adapter_id")
+            if binding.subject_id in seen_subjects:
+                raise ValueError("duplicate process proposal route subject")
+            seen_subjects.add(binding.subject_id)
+
+            packet = packets_by_subject.get(binding.subject_id)
+            if packet is None:
+                raise ValueError(
+                    "process proposal route references non-admitted subject"
+                )
+            if binding.route_id != self._route_id(packet.node_id):
+                raise ValueError(
+                    "process proposal route does not match assigned node"
+                )
+            if packet.node_id not in self._node_ids:
+                raise ValueError(
+                    "process proposal packet references unknown execution node"
+                )
+            if packet.node_id not in self.backends:
+                raise ValueError(
+                    "missing process proposal backend for assigned node: "
+                    + packet.node_id
+                )
+            allowed_subject_ids.append(binding.subject_id)
+
         worker_pass = run_wave_proposal_workers_once(
             state_db=self.state_db,
             run_id=result.wave_run_id,
@@ -128,6 +161,7 @@ class PortalProposalProcessAdapter:
             holder_prefix=self.holder_prefix,
             delivery_lease_ttl=self.delivery_lease_ttl,
             token=self.token,
+            allowed_subject_ids=tuple(allowed_subject_ids),
             transport=self.transport,
             clock=self.clock,
         )
@@ -141,8 +175,6 @@ class PortalProposalProcessAdapter:
         records: list[PortalDispatchRecord] = []
         try:
             for binding in routes:
-                if binding.adapter_id != _ADAPTER_ID:
-                    raise ValueError("process proposal route uses wrong adapter_id")
                 slot = by_subject.get(binding.subject_id)
                 if slot is None:
                     raise ValueError(
@@ -187,15 +219,60 @@ class PortalProposalProcessAdapter:
     def reconcile(
         self,
         status: Mapping[str, object],
+        subjects: tuple[Mapping[str, object], ...] | None = None,
     ) -> tuple[PortalReconciliationRecord, ...]:
         raw_subjects = status.get("subjects")
         if not isinstance(raw_subjects, list):
             raise ValueError("Portal status subjects must be a list")
 
+        if subjects is None:
+            candidates: tuple[Mapping[str, object], ...] = tuple(
+                raw
+                for raw in raw_subjects
+                if isinstance(raw, Mapping)
+            )
+        else:
+            candidates = tuple(subjects)
+            status_bindings = {
+                (
+                    raw.get("subject_kind"),
+                    raw.get("subject_id"),
+                    raw.get("adapter_id"),
+                    raw.get("route_id"),
+                    raw.get("state"),
+                )
+                for raw in raw_subjects
+                if isinstance(raw, Mapping)
+            }
+            for raw in candidates:
+                if not isinstance(raw, Mapping):
+                    raise ValueError(
+                        "process proposal reconciliation subject must be a mapping"
+                    )
+                binding = (
+                    raw.get("subject_kind"),
+                    raw.get("subject_id"),
+                    raw.get("adapter_id"),
+                    raw.get("route_id"),
+                    raw.get("state"),
+                )
+                if binding not in status_bindings:
+                    raise ValueError(
+                        "process proposal reconciliation subject is not in status"
+                    )
+                if raw.get("state") != "ACTIVE":
+                    raise ValueError(
+                        "process proposal reconciliation requires active subjects"
+                    )
+                if raw.get("adapter_id") != _ADAPTER_ID:
+                    raise ValueError(
+                        "process proposal reconciliation received foreign adapter subject"
+                    )
+
         store = PortalWaveStore(self.state_db)
         records: list[PortalReconciliationRecord] = []
         try:
-            for raw in raw_subjects:
+            for raw in candidates:
                 if not isinstance(raw, Mapping):
                     raise ValueError("Portal status subject must be a mapping")
                 if raw.get("state") != "ACTIVE":
