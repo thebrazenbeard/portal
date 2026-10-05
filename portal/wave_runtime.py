@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 import time
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from runner.backends import BackendResult
 from runner.durable_dispatch import SqliteDispatchAdmissionStore
@@ -16,6 +16,7 @@ from runner.execution_promotion import (
     NO_PROTECTED_EFFECT,
     execute_promoted,
     load_durable_promotion_receipt,
+    promote_claimed_to_running,
 )
 from runner.github_backend import GitHubRestTransport, GitHubTransport
 from runner.leases import Lease
@@ -1464,6 +1465,72 @@ def prepare_portal_wave(
         claimed=len(packets),
         held=held,
         packets=tuple(sorted(packets, key=lambda item: item.subject_id)),
+    )
+
+
+def promote_portal_wave_packet(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    review_document: Mapping[str, object],
+    execution_grant_document: Mapping[str, object],
+    effect_grant_document: Mapping[str, object] | None,
+    review_key: bytes,
+    execution_authority_key: bytes,
+    effect_authority_key: bytes | None,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> ExecutionPromotionReceipt:
+    """Promote one durable Portal packet through Project Runner authority gates."""
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        row = store.connection.execute(
+            """
+            SELECT
+                p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
+                p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
+                p.work_fingerprint, p.action, p.effect_ceiling,
+                p.review_gate, p.frontier, p.lead_identity,
+                p.reviewer_identities_json,
+                r.holder
+            FROM portal_wave_packets AS p
+            JOIN portal_wave_runs AS r ON r.run_id = p.run_id
+            WHERE p.run_id = ? AND p.subject_id = ?
+            """,
+            (run_id, subject_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Portal wave packet does not exist")
+        packet = _packet_from_row(
+            run_id,
+            subject_id,
+            tuple(row[:16]),
+        )
+        claim_holder = str(row[16])
+    finally:
+        store.close()
+
+    if packet.state != "CLAIMED":
+        raise ValueError("Portal wave packet is not claim-promotable")
+
+    return promote_claimed_to_running(
+        state_db=Path(state_db),
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        holder=claim_holder,
+        review_document=review_document,
+        execution_grant_document=execution_grant_document,
+        effect_grant_document=effect_grant_document,
+        review_key=review_key,
+        execution_authority_key=execution_authority_key,
+        effect_authority_key=effect_authority_key,
+        token=token,
+        transport=transport,
+        clock=clock,
     )
 
 
