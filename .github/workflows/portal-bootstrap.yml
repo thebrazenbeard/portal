@@ -1,0 +1,66 @@
+name: Bootstrap P.O.R.T.A.L. from Project Runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/portal-bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror-project-runner:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out P.O.R.T.A.L.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch exact Project Runner source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/thebrazenbeard/project-runner.git /tmp/project-runner
+          git -C /tmp/project-runner checkout --quiet 04702abbf51aa2920b7d054275619253ea6fa748
+          test "$(git -C /tmp/project-runner rev-parse HEAD)" = "04702abbf51aa2920b7d054275619253ea6fa748"
+
+      - name: Mirror source tree without erasing Portal provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.portal-bootstrap.json' \
+            --exclude='.github/workflows/portal-bootstrap.yml' \
+            /tmp/project-runner/ ./
+          cat > PORTAL_SOURCE_PROVENANCE.md <<'EOF'
+          # P.O.R.T.A.L. Source Provenance
+
+          **P.O.R.T.A.L.** means **Portfolio Orchestration & Repository Tracking Access Layer**.
+
+          This repository was initially seeded from the governed Project Runner execution kernel.
+
+          - Source repository: `thebrazenbeard/project-runner`
+          - Source commit: `04702abbf51aa2920b7d054275619253ea6fa748`
+          - Source tree: `f3f228258bc2de73724c598721bd5aa5beedab95`
+
+          Portal-specific development must preserve the distinction between the inherited Project Runner execution substrate and P.O.R.T.A.L.'s portfolio-level coordination layer.
+          EOF
+
+      - name: Commit exact mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "P.O.R.T.A.L. Bootstrap"
+          git config user.email "portal-bootstrap@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No mirror changes to commit."
+            exit 0
+          fi
+          git commit -m "bootstrap: mirror project-runner@04702abb into P.O.R.T.A.L."
+          git push origin HEAD:main
