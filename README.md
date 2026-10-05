@@ -22,9 +22,11 @@ P.O.R.T.A.L. was seeded from Project Runner because the required execution loops
 
 ## Current implementation state
 
-The current `portal/` package implements deterministic wave-to-node planning and a `portal plan` CLI. That is the **current implementation slice**, not the mission ceiling.
+The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, place work on bounded nodes, acquire exact-head Project Runner claims, generate durable source-tree proposals through explicitly zero-mutation advisory workers, separately promote authorized proposals, perform atomic multi-file source writes, verify/reconcile effects, and refill a durable parent ecosystem session with the next eligible repository subjects.
 
-The next build target is `portal run`: compose Project Runner's existing `portfolio-cycle`, `consume-queue`, claim/fence, worker-route, receipt/reconciliation, and task-supervision machinery with resident-loop/recovery mechanisms mined from Patrick's own repositories.
+The principal repository-wide coordinator surface is `portal ecosystem propose`. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+
+Two material classes remain before a complete whole-ecosystem claim: a qualified intelligent proposal-authoring backend for arbitrary repositories, and first-class execution of multi-repository workstream subjects.
 
 ## Internal-first donor policy
 
@@ -34,7 +36,7 @@ See [Loop Donor Mining V1](docs/research/PORTAL_LOOP_DONOR_MINING_V1.md).
 
 Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB Base, Intranel, VeraMesh, WorkBridge Commander, WorkBridgeMCP, Vera Mono, Discovery, DriftGuard, Ingest, and Temporal.
 
-## Quick start for the implemented planning slice
+## Quick start
 
     python -m pip install -e '.[dev]'
     project-runner validate
@@ -63,7 +65,7 @@ Plan a bounded portfolio wave:
       --max-per-identity 2 \
       --max-per-family 2
 
-The current command emits a deterministic JSON plan. It does not yet perform the whole-portfolio continuous run described above.
+The `plan` command remains the read-only planning surface. The newer `ecosystem` and `wave` commands drive durable repository-wide proposal/refill and governed proposal promotion/execution workflows.
 
 ## Core invariants
 
