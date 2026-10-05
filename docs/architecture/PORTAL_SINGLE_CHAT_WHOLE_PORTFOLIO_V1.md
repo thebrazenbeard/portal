@@ -178,11 +178,23 @@ The current internal donor map is recorded in:
 
 ## Current implementation versus mission
 
-The current `portal/` package implements deterministic wave-to-node planning only.
+The repository-level coordinator core is now implemented beyond planning:
 
-That is an implementation slice, **not the architecture ceiling**.
+- live portfolio repository discovery and local registry overlay;
+- deterministic maximal-safe wave admission and node placement;
+- exact-head Project Runner claims, leases and fencing;
+- durable worker delivery/receipt state;
+- zero-mutation advisory source-proposal workers;
+- hash-bound multi-file source-tree proposals;
+- separate Project Runner review/execution/effect promotion;
+- atomic exact-head multi-file source writes;
+- independent verification and ambiguous-effect reconciliation;
+- durable parent ecosystem sessions that exclude previously admitted subjects and refill repository lanes across successive generations;
+- operator CLI surfaces for ecosystem proposal advancement, status, proposal promotion, execution and reconciliation.
 
-The next implementation target is to compose the inherited Project Runner loop and Patrick-owned runtime mechanisms behind one P.O.R.T.A.L. run surface, rather than implementing a new execution loop from scratch.
+Current qualification has exercised the repository coordinator path on WorkLaptop through **Executor**, which is the only currently attached execution transport for that machine. P.O.R.T.A.L. must not infer WorkBridge/Desktop Commander capability for WorkLaptop.
+
+The remaining mission gap is narrower: provide a qualified intelligent proposal-authoring backend that can do real arbitrary-repository work under the advisory packet contract, and add first-class execution for multi-repository workstream subjects. Until those are qualified, P.O.R.T.A.L. can coordinate and advance the repository estate structurally, but it cannot honestly claim autonomous semantic advancement of every project class.
 
 ## Protected-effect boundary
 
