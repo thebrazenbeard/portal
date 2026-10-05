@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -15,6 +16,11 @@ from portal.wave_runtime import (
     prepare_portal_wave,
     verify_portal_wave_delivery,
 )
+from runner.execution_promotion import (
+    NO_PROTECTED_EFFECT,
+    promote_claimed_to_running,
+    sign_evidence,
+)
 from runner.models import ProjectDefinition
 from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
@@ -23,6 +29,8 @@ from runner.portfolio_wave_scheduler import WaveExecutionBudget
 ROOT = Path(__file__).resolve().parents[2]
 WAVE = ROOT / "portfolio" / "advancement_wave.public.json"
 CORPUS = ROOT / "portfolio" / "corpus.public.json"
+REVIEW_KEY = b"portal-wave-review-test-key"
+EXECUTION_KEY = b"portal-wave-execution-test-key"
 
 
 class FakeReadOnlyTransport:
@@ -121,10 +129,96 @@ def _prepared(tmp_path: Path):
     return state_db, projects_path, transport, prepared.packets[0]
 
 
+def _promote_no_effect(
+    state_db: Path,
+    transport: FakeReadOnlyTransport,
+    packet,
+) -> None:
+    review = sign_evidence(
+        {
+            "schema": "PROJECT_RUNNER_EXECUTION_REVIEW_V1",
+            "subject_id": packet.subject_id,
+            "repository": packet.repository,
+            "ref": packet.ref,
+            "exact_head": packet.exact_head,
+            "plan_sha256": packet.plan_sha256,
+            "work_fingerprint": packet.work_fingerprint,
+            "reviewer_identity": packet.reviewer_identities[0],
+            "review_gate": packet.review_gate,
+            "review_state": "EXECUTION_PROMOTION_REVIEWED",
+            "reviewed_at": 101.0,
+            "valid_until": 150.0,
+            "execution_request_sha256": None,
+        },
+        REVIEW_KEY,
+    )
+    execution = sign_evidence(
+        {
+            "schema": "PROJECT_RUNNER_EXECUTION_AUTHORITY_V1",
+            "grant_id": f"portal-test:{packet.subject_id}",
+            "issuer": "portal-test-authority",
+            "subject_id": packet.subject_id,
+            "repository": packet.repository,
+            "ref": packet.ref,
+            "exact_head": packet.exact_head,
+            "lineage_id": packet.lineage_id,
+            "work_fingerprint": packet.work_fingerprint,
+            "fencing_token": packet.fencing_token,
+            "operation": packet.action,
+            "effect_class": NO_PROTECTED_EFFECT,
+            "execution_request": None,
+            "execution_authorized": True,
+            "issued_at": 102.0,
+            "valid_until": 150.0,
+        },
+        EXECUTION_KEY,
+    )
+    promote_claimed_to_running(
+        state_db=state_db,
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        holder="vera",
+        review_document=review,
+        execution_grant_document=execution,
+        effect_grant_document=None,
+        review_key=REVIEW_KEY,
+        execution_authority_key=EXECUTION_KEY,
+        effect_authority_key=None,
+        transport=transport,
+        clock=lambda: 105.0,
+    )
+
+
+def _prepared_promoted(tmp_path: Path):
+    state_db, projects_path, transport, packet = _prepared(tmp_path)
+    _promote_no_effect(state_db, transport, packet)
+    return state_db, projects_path, transport, packet
+
+
+def test_unpromoted_packet_is_not_deliverable(tmp_path: Path) -> None:
+    state_db, _projects_path, _transport, _packet = _prepared(tmp_path)
+    store = PortalWaveStore(state_db)
+    try:
+        with pytest.raises(
+            ValueError,
+            match="Project Runner execution promotion",
+        ):
+            store.claim_delivery(
+                run_id="delivery-run",
+                node_id="alpha",
+                holder="worker-alpha",
+                now=110.0,
+                ttl=30.0,
+            )
+    finally:
+        store.close()
+
+
 def test_delivery_claim_is_fenced_and_payload_preserves_authority_boundary(
     tmp_path: Path,
 ) -> None:
-    state_db, _projects_path, _transport, packet = _prepared(tmp_path)
+    state_db, _projects_path, _transport, packet = _prepared_promoted(tmp_path)
     store = PortalWaveStore(state_db)
     try:
         claim = store.claim_delivery(
@@ -143,6 +237,8 @@ def test_delivery_claim_is_fenced_and_payload_preserves_authority_boundary(
         assert claim.payload["exact_head"] == packet.exact_head
         assert claim.payload["frontier"] == packet.frontier
         assert claim.payload["effect_ceiling"] == "SOURCE_ONLY"
+        assert claim.payload["execution_authorized"] is True
+        assert claim.payload["execution_effect_class"] == "NO_PROTECTED_EFFECT"
         assert claim.payload["protected_effects_authorized"] is False
         assert claim.payload["source_mutation_authorized"] is False
         assert claim.payload["target_ref_mutation_authorized"] is False
@@ -162,7 +258,7 @@ def test_delivery_claim_is_fenced_and_payload_preserves_authority_boundary(
 def test_expired_delivery_becomes_outcome_unknown_instead_of_replaying(
     tmp_path: Path,
 ) -> None:
-    state_db, _projects_path, _transport, _packet = _prepared(tmp_path)
+    state_db, _projects_path, _transport, _packet = _prepared_promoted(tmp_path)
     store = PortalWaveStore(state_db)
     try:
         first = store.claim_delivery(
@@ -191,7 +287,7 @@ def test_expired_delivery_becomes_outcome_unknown_instead_of_replaying(
 def test_worker_delivery_cannot_report_source_change_without_promoted_execution(
     tmp_path: Path,
 ) -> None:
-    state_db, _projects_path, _transport, packet = _prepared(tmp_path)
+    state_db, _projects_path, _transport, packet = _prepared_promoted(tmp_path)
     store = PortalWaveStore(state_db)
     try:
         claim = store.claim_delivery(
@@ -227,7 +323,7 @@ def test_worker_delivery_cannot_report_source_change_without_promoted_execution(
 def test_no_effect_receipt_is_independently_verified_before_completion(
     tmp_path: Path,
 ) -> None:
-    state_db, _projects_path, transport, packet = _prepared(tmp_path)
+    state_db, _projects_path, transport, packet = _prepared_promoted(tmp_path)
 
     store = PortalWaveStore(state_db)
     try:
@@ -272,6 +368,26 @@ def test_no_effect_receipt_is_independently_verified_before_completion(
     assert verified.state == "VERIFIED_COMPLETE"
     assert verified.result_head is None
 
+    with sqlite3.connect(state_db) as db:
+        work = db.execute(
+            """
+            SELECT status
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (packet.lineage_id, packet.work_fingerprint),
+        ).fetchone()
+        lease = db.execute(
+            """
+            SELECT completed
+            FROM leases
+            WHERE work_fingerprint = ?
+            """,
+            (packet.work_fingerprint,),
+        ).fetchone()
+    assert work == ("COMPLETE",)
+    assert lease == (1,)
+
     store = PortalWaveStore(state_db)
     try:
         assert store.summary("delivery-run")["delivery_states"] == {
@@ -284,7 +400,7 @@ def test_no_effect_receipt_is_independently_verified_before_completion(
 def test_verification_marks_stale_when_original_exact_subject_moved(
     tmp_path: Path,
 ) -> None:
-    state_db, _projects_path, transport, packet = _prepared(tmp_path)
+    state_db, _projects_path, transport, packet = _prepared_promoted(tmp_path)
 
     store = PortalWaveStore(state_db)
     try:
