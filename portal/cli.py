@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
+from runner.models import ProjectSchedulingState
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 from runner.registry import (
@@ -17,6 +18,10 @@ from runner.registry import (
 )
 
 from .coordinator import plan_portal_wave
+from .discovery import (
+    discover_live_project_registry,
+    write_project_registry,
+)
 from .node_registry import load_execution_nodes
 from .runtime import (
     PortalRunStore,
@@ -25,6 +30,13 @@ from .runtime import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _github_token() -> str | None:
+    return (
+        os.environ.get("PORTAL_GITHUB_TOKEN")
+        or os.environ.get("PROJECT_RUNNER_GITHUB_TOKEN")
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -36,6 +48,21 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
+
+    discover = subcommands.add_parser(
+        "discover",
+        help=(
+            "discover the live owned GitHub estate and write a local "
+            "Project Runner-compatible registry"
+        ),
+    )
+    discover.add_argument("--owner", required=True)
+    discover.add_argument(
+        "--curated-projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    discover.add_argument("--output", type=Path, required=True)
 
     plan = subcommands.add_parser(
         "plan",
@@ -65,6 +92,21 @@ def _parser() -> argparse.ArgumentParser:
         "--projects",
         type=Path,
         default=ROOT / "registry" / "projects.yaml",
+    )
+    run.add_argument(
+        "--discover-owner",
+        help=(
+            "replace static membership with a live owned GitHub inventory, "
+            "using --projects only as curated metadata"
+        ),
+    )
+    run.add_argument(
+        "--write-live-registry",
+        type=Path,
+        help=(
+            "optional operator-local path for the live registry; "
+            "may contain private repository membership"
+        ),
     )
     run.add_argument(
         "--workers",
@@ -108,6 +150,33 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _discovery_payload(args: argparse.Namespace) -> dict[str, object]:
+    curated = load_project_snapshot(Path(args.curated_projects))
+    snapshot = discover_live_project_registry(
+        owner=args.owner,
+        curated_projects=curated.projects,
+        token=_github_token(),
+    )
+    write_project_registry(Path(args.output), snapshot)
+    public = sum(project.visibility == "public" for project in snapshot.projects)
+    private = sum(project.visibility == "private" for project in snapshot.projects)
+    archived = sum(
+        project.scheduling_state is ProjectSchedulingState.ARCHIVED
+        for project in snapshot.projects
+    )
+    return {
+        "mode": "PORTAL_DISCOVERY_V1",
+        "owner": args.owner,
+        "repositories": len(snapshot.projects),
+        "public": public,
+        "private": private,
+        "archived": archived,
+        "registry_sha256": snapshot.sha256,
+        "output": str(Path(args.output)),
+        "repository_names_emitted": False,
+    }
+
+
 def _plan_payload(args: argparse.Namespace) -> dict[str, object]:
     wave = load_advancement_wave(Path(args.wave))
     nodes = load_execution_nodes(Path(args.nodes))
@@ -146,8 +215,23 @@ def _plan_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _run_project_snapshot(args: argparse.Namespace):
+    curated = load_project_snapshot(Path(args.projects))
+    if not args.discover_owner:
+        return curated, "static-registry"
+
+    snapshot = discover_live_project_registry(
+        owner=args.discover_owner,
+        curated_projects=curated.projects,
+        token=_github_token(),
+    )
+    if args.write_live_registry is not None:
+        write_project_registry(Path(args.write_live_registry), snapshot)
+    return snapshot, "live-discovery"
+
+
 def _run_payload(args: argparse.Namespace) -> dict[str, object]:
-    project_snapshot = load_project_snapshot(Path(args.projects))
+    project_snapshot, portfolio_source = _run_project_snapshot(args)
     dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
     worker_snapshot = load_worker_snapshot(Path(args.workers))
     nodes = load_execution_nodes(Path(args.nodes))
@@ -170,7 +254,7 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
         max_cycles=max_cycles,
         max_idle_cycles=max_idle_cycles,
         poll_seconds=0.0 if args.once else args.poll_seconds,
-        token=os.environ.get("PROJECT_RUNNER_GITHUB_TOKEN"),
+        token=_github_token(),
     )
 
     cycles = []
@@ -204,6 +288,9 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
     return {
         "mode": "PORTAL_RUN_V1",
         "run_id": result.run_id,
+        "portfolio_source": portfolio_source,
+        "portfolio_repository_count": len(project_snapshot.projects),
+        "portfolio_registry_sha256": project_snapshot.sha256,
         "stop_reason": result.stop_reason,
         "idle_cycles": result.idle_cycles,
         "cycles": cycles,
@@ -227,7 +314,9 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "plan":
+        if args.command == "discover":
+            payload = _discovery_payload(args)
+        elif args.command == "plan":
             payload = _plan_payload(args)
         elif args.command == "run":
             payload = _run_payload(args)
