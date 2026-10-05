@@ -127,8 +127,12 @@ class PortalSourceProposalExecution:
     state: str
     classification: str
     backend_executed: bool
-    candidate_commit_sha: str | None
+    result_head: str | None
     reason: str
+
+    @property
+    def candidate_commit_sha(self) -> str | None:
+        return self.result_head
 
 
 @dataclass(frozen=True)
@@ -2282,7 +2286,7 @@ def execute_portal_source_proposal(
             state="VERIFIED_COMPLETE",
             classification=result.classification,
             backend_executed=backend_executed,
-            candidate_commit_sha=final.candidate_commit_sha,
+            result_head=final.candidate_commit_sha,
             reason=final.reason,
         )
 
@@ -2309,7 +2313,7 @@ def execute_portal_source_proposal(
             state="OUTCOME_UNKNOWN",
             classification=result.classification,
             backend_executed=backend_executed,
-            candidate_commit_sha=(
+            result_head=(
                 result.outputs[0] if result.outputs else None
             ),
             reason="source-tree publication outcome requires reconciliation",
@@ -2342,7 +2346,7 @@ def execute_portal_source_proposal(
         state=target_state,
         classification=result.classification,
         backend_executed=backend_executed,
-        candidate_commit_sha=None,
+        result_head=None,
         reason="Project Runner source-tree execution did not verify success",
     )
 
@@ -2392,7 +2396,7 @@ def reconcile_portal_source_proposal(
             state="OUTCOME_UNKNOWN",
             classification="OUTCOME_UNKNOWN",
             backend_executed=False,
-            candidate_commit_sha=reconciliation.observed_head,
+            result_head=reconciliation.observed_head,
             reason=reconciliation.reason,
         )
 
@@ -2421,7 +2425,7 @@ def reconcile_portal_source_proposal(
         state="VERIFIED_COMPLETE",
         classification="SUCCEEDED",
         backend_executed=False,
-        candidate_commit_sha=final.candidate_commit_sha,
+        result_head=final.candidate_commit_sha,
         reason=final.reason,
     )
 
