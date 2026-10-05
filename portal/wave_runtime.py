@@ -9,7 +9,16 @@ import sqlite3
 import time
 from typing import Callable, Iterable
 
+from runner.backends import BackendResult
+from runner.durable_dispatch import SqliteDispatchAdmissionStore
+from runner.execution_promotion import (
+    ExecutionPromotionReceipt,
+    NO_PROTECTED_EFFECT,
+    execute_promoted,
+    load_durable_promotion_receipt,
+)
 from runner.github_backend import GitHubRestTransport, GitHubTransport
+from runner.leases import Lease
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_operator_binding import bind_wave_to_operator_registry
@@ -20,6 +29,7 @@ from runner.portfolio_plan_binding import (
 )
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 from runner.registry import load_project_snapshot
+from runner.work_units import WorkUnitStatus
 
 from .coordinator import plan_portal_wave
 from .models import ExecutionNode
@@ -225,6 +235,7 @@ def _delivery_payload(
     packet: PortalWavePacket,
     *,
     delivery_fencing_token: int,
+    promotion: ExecutionPromotionReceipt,
 ) -> dict[str, object]:
     return {
         "schema": "PORTAL_WAVE_WORK_PACKET_V1",
@@ -248,6 +259,17 @@ def _delivery_payload(
             "work_fingerprint": packet.work_fingerprint,
         },
         "delivery_fencing_token": delivery_fencing_token,
+        "execution_authorized": True,
+        "execution_effect_class": promotion.effect_class,
+        "execution_promotion": {
+            "promotion_sha256": promotion.promotion_sha256,
+            "review_sha256": promotion.review_sha256,
+            "execution_grant_sha256": promotion.execution_grant_sha256,
+            "valid_until": min(
+                promotion.review_valid_until,
+                promotion.execution_valid_until,
+            ),
+        },
         "protected_effects_authorized": False,
         "source_mutation_authorized": False,
         "target_ref_mutation_authorized": False,
@@ -259,6 +281,235 @@ def _delivery_payload(
             "original_source_must_remain_exact_for_completion": True,
         },
     }
+
+
+class _PortalWorkerReceiptBackend:
+    """Pure promoted backend that journals an already-recorded worker receipt."""
+
+    def __init__(self, *, receipt_sha256: str) -> None:
+        self.receipt_sha256 = receipt_sha256
+
+    def execute_promoted(self, execution) -> BackendResult:
+        if execution.effect_class != NO_PROTECTED_EFFECT:
+            raise ValueError(
+                "Portal worker receipt backend only supports NO_PROTECTED_EFFECT"
+            )
+        return BackendResult(
+            work_fingerprint=execution.promotion.work_fingerprint,
+            succeeded=True,
+            outputs=(),
+            evidence=(
+                f"portal:worker-receipt:{self.receipt_sha256}",
+                "portal:no-protected-effect",
+            ),
+            classification="SUCCEEDED",
+        )
+
+
+def _require_no_effect_promotion(
+    *,
+    state_db: Path,
+    packet: PortalWavePacket,
+    now: float,
+) -> ExecutionPromotionReceipt:
+    try:
+        promotion = load_durable_promotion_receipt(
+            state_db=Path(state_db),
+            lineage_id=packet.lineage_id,
+            work_fingerprint_value=packet.work_fingerprint,
+            fencing_token=packet.fencing_token,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Portal worker delivery requires Project Runner execution promotion"
+        ) from exc
+
+    if (
+        promotion.repository != packet.repository
+        or promotion.ref != packet.ref
+        or promotion.exact_head != packet.exact_head
+        or promotion.operation != packet.action
+        or promotion.holder == ""
+    ):
+        raise ValueError(
+            "Project Runner execution promotion diverges from Portal packet"
+        )
+    if promotion.effect_class != NO_PROTECTED_EFFECT:
+        raise ValueError(
+            "source/effect execution must use Project Runner promoted backend directly"
+        )
+    if now >= promotion.review_valid_until:
+        raise ValueError("Project Runner execution promotion review is stale")
+    if now >= promotion.execution_valid_until:
+        raise ValueError("Project Runner execution promotion authority is stale")
+    return promotion
+
+
+def _project_runner_no_effect_complete(
+    *,
+    state_db: Path,
+    record: dict[str, object],
+    receipt_sha256: str,
+    token: str | None,
+    transport: GitHubTransport | None,
+    clock: Callable[[], float],
+) -> None:
+    lineage_id = str(record["lineage_id"])
+    work_fingerprint = str(record["work_fingerprint"])
+    fencing_token = int(record["project_runner_fencing_token"])
+
+    promotion = load_durable_promotion_receipt(
+        state_db=Path(state_db),
+        lineage_id=lineage_id,
+        work_fingerprint_value=work_fingerprint,
+        fencing_token=fencing_token,
+    )
+    if promotion.effect_class != NO_PROTECTED_EFFECT:
+        raise ValueError(
+            "Portal no-effect receipt cannot finalize protected-effect execution"
+        )
+
+    expected_result = BackendResult(
+        work_fingerprint=work_fingerprint,
+        succeeded=True,
+        outputs=(),
+        evidence=(
+            f"portal:worker-receipt:{receipt_sha256}",
+            "portal:no-protected-effect",
+        ),
+        classification="SUCCEEDED",
+    )
+
+    store = SqliteDispatchAdmissionStore(Path(state_db))
+    try:
+        row = store.connection.execute(
+            """
+            SELECT status, generation
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (lineage_id, work_fingerprint),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Project Runner work state is missing")
+        status = WorkUnitStatus(str(row[0]))
+        generation = int(row[1])
+        existing_result = store.load_result(
+            lineage_id=lineage_id,
+            work_fingerprint_value=work_fingerprint,
+            fencing_token=fencing_token,
+        )
+        if status is WorkUnitStatus.COMPLETE:
+            lease_row = store.connection.execute(
+                """
+                SELECT completed
+                FROM leases
+                WHERE work_fingerprint = ?
+                  AND fencing_token = ?
+                """,
+                (work_fingerprint, fencing_token),
+            ).fetchone()
+            if lease_row != (1,):
+                raise ValueError(
+                    "Project Runner COMPLETE work lacks completed exact fence"
+                )
+            if existing_result != expected_result:
+                raise ValueError(
+                    "Project Runner terminal result diverges from Portal receipt"
+                )
+            return
+    finally:
+        store.close()
+
+    if existing_result is None:
+        execute_promoted(
+            state_db=Path(state_db),
+            receipt=promotion,
+            backend=_PortalWorkerReceiptBackend(
+                receipt_sha256=receipt_sha256,
+            ),
+            token=token,
+            transport=transport,
+            clock=clock,
+        )
+    elif existing_result != expected_result:
+        raise ValueError(
+            "Project Runner recorded result diverges from Portal worker receipt"
+        )
+
+    store = SqliteDispatchAdmissionStore(Path(state_db))
+    try:
+        row = store.connection.execute(
+            """
+            SELECT status, generation
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (lineage_id, work_fingerprint),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Project Runner work state disappeared")
+        status = WorkUnitStatus(str(row[0]))
+        generation = int(row[1])
+
+        lease_row = store.connection.execute(
+            """
+            SELECT holder, fencing_token, expires_at, completed
+            FROM leases
+            WHERE work_fingerprint = ?
+            """,
+            (work_fingerprint,),
+        ).fetchone()
+        if lease_row is None:
+            raise ValueError("Project Runner exact fence is missing")
+        lease = Lease(
+            work_fingerprint=work_fingerprint,
+            holder=str(lease_row[0]),
+            fencing_token=int(lease_row[1]),
+            expires_at=float(lease_row[2]),
+        )
+        if lease.fencing_token != fencing_token:
+            raise ValueError("Project Runner exact fence changed")
+
+        now = float(clock())
+        if status is WorkUnitStatus.RUNNING:
+            if generation != promotion.promoted_work_generation:
+                raise ValueError(
+                    "Project Runner promoted work generation diverged"
+                )
+            generation = store.begin_verification(
+                lineage_id=lineage_id,
+                work_fingerprint_value=work_fingerprint,
+                fencing_token=fencing_token,
+                expected_work_generation=generation,
+                lease=lease,
+                started_at=now,
+            )
+            status = WorkUnitStatus.VERIFYING
+
+        if status is WorkUnitStatus.VERIFYING:
+            store.finalize_terminal_verification(
+                lineage_id=lineage_id,
+                work_fingerprint_value=work_fingerprint,
+                fencing_token=fencing_token,
+                expected_work_generation=generation,
+                lease=lease,
+                status=WorkUnitStatus.COMPLETE,
+                reason=(
+                    "Portal no-effect worker receipt independently verified: "
+                    f"{receipt_sha256}"
+                ),
+                verified_at=now,
+            )
+            return
+
+        if status is WorkUnitStatus.COMPLETE:
+            return
+        raise ValueError(
+            f"Project Runner work is not finalizable from {status.value}"
+        )
+    finally:
+        store.close()
 
 
 def _packet_from_row(run_id: str, subject_id: str, row: tuple[object, ...]) -> PortalWavePacket:
@@ -589,9 +840,15 @@ class PortalWaveStore:
                 subject_id,
                 tuple(selected[1:17]),
             )
+            promotion = _require_no_effect_promotion(
+                state_db=self.path,
+                packet=packet,
+                now=now,
+            )
             payload = _delivery_payload(
                 packet,
                 delivery_fencing_token=new_fence,
+                promotion=promotion,
             )
             self.connection.commit()
             return PortalWaveDeliveryClaim(
@@ -837,6 +1094,7 @@ class PortalWaveStore:
             """
             SELECT
                 p.repository, p.ref, p.exact_head, p.node_id,
+                p.lineage_id, p.work_fingerprint, p.fencing_token,
                 d.state, d.receipt_class, d.receipt_sha256,
                 d.result_repository, d.result_ref, d.result_head,
                 d.evidence_sha256, d.reason
@@ -855,22 +1113,25 @@ class PortalWaveStore:
             "source_ref": str(row[1]),
             "exact_head": str(row[2]),
             "node_id": str(row[3]),
-            "state": str(row[4]),
+            "lineage_id": str(row[4]),
+            "work_fingerprint": str(row[5]),
+            "project_runner_fencing_token": int(row[6]),
+            "state": str(row[7]),
             "receipt_class": (
-                str(row[5]) if row[5] is not None else None
+                str(row[8]) if row[8] is not None else None
             ),
             "receipt_sha256": (
-                str(row[6]) if row[6] is not None else None
+                str(row[9]) if row[9] is not None else None
             ),
             "result_repository": (
-                str(row[7]) if row[7] is not None else None
-            ),
-            "result_ref": str(row[8]) if row[8] is not None else None,
-            "result_head": str(row[9]) if row[9] is not None else None,
-            "evidence_sha256": (
                 str(row[10]) if row[10] is not None else None
             ),
-            "reason": str(row[11]) if row[11] is not None else "",
+            "result_ref": str(row[11]) if row[11] is not None else None,
+            "result_head": str(row[12]) if row[12] is not None else None,
+            "evidence_sha256": (
+                str(row[13]) if row[13] is not None else None
+            ),
+            "reason": str(row[14]) if row[14] is not None else "",
         }
 
     def finalize_verification(
@@ -1214,8 +1475,19 @@ def verify_portal_wave_delivery(
                     "verified independently"
                 )
         elif receipt_class == "SUCCEEDED_NO_EFFECT":
+            _project_runner_no_effect_complete(
+                state_db=Path(state_db),
+                record=record,
+                receipt_sha256=receipt_sha256,
+                token=token,
+                transport=transport,
+                clock=clock,
+            )
             state = "VERIFIED_COMPLETE"
-            reason = "no-effect completion verified against unchanged exact source"
+            reason = (
+                "no-effect completion verified against unchanged exact source "
+                "and Project Runner finalized COMPLETE"
+            )
         elif receipt_class == "HELD":
             state = "VERIFIED_HELD"
             reason = "held outcome verified against unchanged exact source"
