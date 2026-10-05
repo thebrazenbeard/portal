@@ -323,3 +323,96 @@ def test_portal_wave_verify_cli_uses_independent_verifier(
     assert payload["mode"] == "PORTAL_WAVE_VERIFY_V1"
     assert payload["state"] == "VERIFIED_COMPLETE"
     assert captured["verifier"] == "vera-review"
+
+
+
+def test_portal_wave_promote_resolves_durable_packet_without_manual_lineage(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from runner.execution_promotion import ExecutionPromotionReceipt
+
+    review = tmp_path / "review.json"
+    execution = tmp_path / "execution.json"
+    review.write_text("{}", encoding="utf-8")
+    execution.write_text("{}", encoding="utf-8")
+
+    captured = {}
+
+    def fake_promote(**kwargs):
+        captured.update(kwargs)
+        return ExecutionPromotionReceipt(
+            lineage_id="lineage",
+            work_fingerprint="c" * 64,
+            fencing_token=1,
+            holder="vera",
+            repository="thebrazenbeard/project-runner",
+            ref="main",
+            exact_head="a" * 40,
+            operation="EXECUTE_FRONTIER",
+            effect_class="NO_PROTECTED_EFFECT",
+            review_sha256="d" * 64,
+            review_valid_until=999.0,
+            execution_grant_sha256="e" * 64,
+            execution_valid_until=999.0,
+            execution_request_sha256=None,
+            effect_grant_sha256=None,
+            effect_valid_until=None,
+            promoted_at=2.0,
+            attempt_work_generation=2,
+            promoted_work_generation=3,
+            promotion_sha256="f" * 64,
+        )
+
+    monkeypatch.setattr(
+        portal_cli,
+        "promote_portal_wave_packet",
+        fake_promote,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "load_json_document",
+        lambda path: {"path": str(path)},
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "review_key_from_environment",
+        lambda: b"review",
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "execution_authority_key_from_environment",
+        lambda: b"execution",
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "effect_authority_key_from_environment",
+        lambda: None,
+    )
+
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "promote",
+            "--state-db",
+            str(tmp_path / "portal.sqlite3"),
+            "--run-id",
+            "wave-cli",
+            "--subject-id",
+            "project-runner",
+            "--review",
+            str(review),
+            "--execution-grant",
+            str(execution),
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_WAVE_PROMOTE_V1"
+    assert payload["promoted"] is True
+    assert payload["effect_class"] == "NO_PROTECTED_EFFECT"
+    assert payload["protected_effects_authorized"] is False
+    assert captured["run_id"] == "wave-cli"
+    assert captured["subject_id"] == "project-runner"
