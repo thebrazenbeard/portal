@@ -156,3 +156,24 @@ def test_project_runner_collision_decision_is_preserved() -> None:
     assert [(item.subject_id, item.reason) for item in plan.runner_plan.deferred] == [
         ("b", "COLLISION"),
     ]
+
+
+
+def test_active_subjects_consume_budget_before_new_assignments() -> None:
+    wave = _wave(
+        _item("a", "example/a"),
+        _item("b", "example/b"),
+        _item("c", "example/c"),
+    )
+    plan = plan_portal_wave(
+        wave,
+        budget=_budget(2),
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=2),),
+        active_subjects=(("repository", "a"),),
+    )
+
+    assert [item.subject_id for item in plan.assignments] == ["b"]
+    assert ("a", "ALREADY_ACTIVE") in [
+        (item.subject_id, item.reason)
+        for item in plan.runner_plan.deferred
+    ]
