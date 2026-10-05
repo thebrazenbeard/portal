@@ -108,7 +108,7 @@ proposal = {
     "files": [
         {
             "path": "portal-advance.txt",
-            "content": "advance " + packet["subject_id"] + "\n",
+            "content": "advance " + packet["subject_id"] + "\\n",
             "expected_blob_sha": None,
         }
     ],
