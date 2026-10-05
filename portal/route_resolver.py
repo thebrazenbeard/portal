@@ -142,7 +142,16 @@ def resolve_portal_route(
     routes: Iterable[PortalRouteAdvertisement],
 ) -> PortalRouteBinding:
     advertisements = tuple(routes)
-    identities = [(route.adapter_id, route.route_id) for route in advertisements]
+    identities = [
+        (
+            route.adapter_id,
+            route.route_id,
+            route.node_id,
+            route.target_kind,
+            route.target_id,
+        )
+        for route in advertisements
+    ]
     if len(identities) != len(set(identities)):
         raise ValueError("duplicate execution route advertisement")
 
@@ -153,8 +162,9 @@ def resolve_portal_route(
             for route in advertisements
             if route.adapter_id == preferred
             and route.route_id == request.preferred_route_id
+            and _qualified(request, route)
         )
-        if len(exact) != 1 or not _qualified(request, exact[0]):
+        if len(exact) != 1:
             raise ValueError("explicit route is not currently qualified")
         selected = exact[0]
     else:
