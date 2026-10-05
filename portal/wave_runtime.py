@@ -14,12 +14,19 @@ from runner.durable_dispatch import SqliteDispatchAdmissionStore
 from runner.execution_promotion import (
     ExecutionPromotionReceipt,
     NO_PROTECTED_EFFECT,
+    SOURCE_WRITE,
     execute_promoted,
     load_durable_promotion_receipt,
+    parse_execution_grant,
     promote_claimed_to_running,
 )
 from runner.github_backend import GitHubRestTransport, GitHubTransport
 from runner.leases import Lease
+from runner.promoted_github_tree import PromotedGitHubSourceTreeWriteBackend
+from runner.promoted_github_tree_runtime import (
+    finalize_github_source_tree_write,
+    reconcile_github_source_tree_write_outcome_unknown,
+)
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_operator_binding import bind_wave_to_operator_registry
@@ -111,6 +118,17 @@ class PortalWaveReceipt:
     result_repository: str | None
     result_ref: str | None
     result_head: str | None
+
+
+@dataclass(frozen=True)
+class PortalSourceProposalExecution:
+    run_id: str
+    subject_id: str
+    state: str
+    classification: str
+    backend_executed: bool
+    candidate_commit_sha: str | None
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -2032,6 +2050,379 @@ def promote_portal_wave_packet(
         token=token,
         transport=transport,
         clock=clock,
+    )
+
+
+def _portal_packet_execution_identity(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+) -> tuple[PortalWavePacket, str]:
+    store = PortalWaveStore(Path(state_db))
+    try:
+        row = store.connection.execute(
+            """
+            SELECT
+                p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
+                p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
+                p.work_fingerprint, p.action, p.effect_ceiling,
+                p.review_gate, p.frontier, p.lead_identity,
+                p.reviewer_identities_json,
+                r.holder
+            FROM portal_wave_packets AS p
+            JOIN portal_wave_runs AS r ON r.run_id = p.run_id
+            WHERE p.run_id = ? AND p.subject_id = ?
+            """,
+            (run_id, subject_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Portal wave packet does not exist")
+        return (
+            _packet_from_row(run_id, subject_id, tuple(row[:16])),
+            str(row[16]),
+        )
+    finally:
+        store.close()
+
+
+def promote_portal_source_proposal(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    review_document: Mapping[str, object],
+    execution_grant_document: Mapping[str, object],
+    effect_grant_document: Mapping[str, object],
+    review_key: bytes,
+    execution_authority_key: bytes,
+    effect_authority_key: bytes,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> ExecutionPromotionReceipt:
+    """Promote exactly the persisted proposal request through Project Runner."""
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        proposal = store.load_source_proposal(
+            run_id=run_id,
+            subject_id=subject_id,
+        )
+    finally:
+        store.close()
+    if proposal["state"] not in {"AWAITING_PROMOTION", "PROMOTED"}:
+        raise ValueError("source proposal is not promotion-ready")
+
+    grant = parse_execution_grant(
+        execution_grant_document,
+        key=execution_authority_key,
+    )
+    if grant.effect_class != SOURCE_WRITE:
+        raise ValueError("source proposal requires SOURCE_WRITE execution grant")
+    if grant.execution_request != proposal["execution_request"]:
+        raise ValueError(
+            "execution grant does not bind the exact persisted source proposal"
+        )
+    if grant.execution_request_sha256 != proposal["execution_request_sha256"]:
+        raise ValueError("execution grant proposal digest mismatch")
+
+    packet, claim_holder = _portal_packet_execution_identity(
+        state_db=Path(state_db),
+        run_id=run_id,
+        subject_id=subject_id,
+    )
+
+    if proposal["state"] == "PROMOTED":
+        receipt = load_durable_promotion_receipt(
+            state_db=Path(state_db),
+            lineage_id=packet.lineage_id,
+            work_fingerprint_value=packet.work_fingerprint,
+            fencing_token=packet.fencing_token,
+        )
+        if receipt.execution_request_sha256 != proposal["execution_request_sha256"]:
+            raise ValueError("durable promotion diverges from source proposal")
+        return receipt
+
+    receipt = promote_claimed_to_running(
+        state_db=Path(state_db),
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        holder=claim_holder,
+        review_document=review_document,
+        execution_grant_document=execution_grant_document,
+        effect_grant_document=effect_grant_document,
+        review_key=review_key,
+        execution_authority_key=execution_authority_key,
+        effect_authority_key=effect_authority_key,
+        token=token,
+        transport=transport,
+        clock=clock,
+    )
+    if (
+        receipt.effect_class != SOURCE_WRITE
+        or receipt.execution_request_sha256
+        != proposal["execution_request_sha256"]
+    ):
+        raise ValueError("Project Runner promotion diverges from source proposal")
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        store.update_source_proposal_state(
+            run_id=run_id,
+            subject_id=subject_id,
+            expected_state="AWAITING_PROMOTION",
+            state="PROMOTED",
+            now=float(clock()),
+        )
+    finally:
+        store.close()
+    return receipt
+
+
+def execute_portal_source_proposal(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> PortalSourceProposalExecution:
+    """Execute a previously authorized exact source proposal at most once."""
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        proposal = store.load_source_proposal(
+            run_id=run_id,
+            subject_id=subject_id,
+        )
+    finally:
+        store.close()
+    if proposal["state"] not in {
+        "PROMOTED",
+        "OUTCOME_UNKNOWN",
+        "VERIFIED_COMPLETE",
+    }:
+        raise ValueError("source proposal is not executable")
+
+    packet, _claim_holder = _portal_packet_execution_identity(
+        state_db=Path(state_db),
+        run_id=run_id,
+        subject_id=subject_id,
+    )
+    receipt = load_durable_promotion_receipt(
+        state_db=Path(state_db),
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+    )
+    if (
+        receipt.effect_class != SOURCE_WRITE
+        or receipt.execution_request_sha256
+        != proposal["execution_request_sha256"]
+    ):
+        raise ValueError("durable source-write promotion diverges from proposal")
+
+    dispatch = SqliteDispatchAdmissionStore(Path(state_db))
+    try:
+        existing_result = dispatch.load_result(
+            lineage_id=packet.lineage_id,
+            work_fingerprint_value=packet.work_fingerprint,
+            fencing_token=packet.fencing_token,
+        )
+    finally:
+        dispatch.close()
+
+    backend_executed = False
+    if existing_result is None:
+        result = execute_promoted(
+            state_db=Path(state_db),
+            receipt=receipt,
+            backend=PromotedGitHubSourceTreeWriteBackend(
+                transport=transport or GitHubRestTransport(token=token)
+            ),
+            token=token,
+            transport=transport,
+            clock=clock,
+        )
+        backend_executed = True
+    else:
+        result = existing_result
+
+    if result.succeeded and result.classification == "SUCCEEDED":
+        final = finalize_github_source_tree_write(
+            state_db=Path(state_db),
+            lineage_id=packet.lineage_id,
+            work_fingerprint_value=packet.work_fingerprint,
+            fencing_token=packet.fencing_token,
+            transport=transport or GitHubRestTransport(token=token),
+            clock=clock,
+        )
+        store = PortalWaveStore(Path(state_db))
+        try:
+            current = store.load_source_proposal(
+                run_id=run_id,
+                subject_id=subject_id,
+            )["state"]
+            if current != "VERIFIED_COMPLETE":
+                store.update_source_proposal_state(
+                    run_id=run_id,
+                    subject_id=subject_id,
+                    expected_state=str(current),
+                    state="VERIFIED_COMPLETE",
+                    now=float(clock()),
+                )
+        finally:
+            store.close()
+        return PortalSourceProposalExecution(
+            run_id=run_id,
+            subject_id=subject_id,
+            state="VERIFIED_COMPLETE",
+            classification=result.classification,
+            backend_executed=backend_executed,
+            candidate_commit_sha=final.candidate_commit_sha,
+            reason=final.reason,
+        )
+
+    if result.classification == "OUTCOME_UNKNOWN":
+        store = PortalWaveStore(Path(state_db))
+        try:
+            current = store.load_source_proposal(
+                run_id=run_id,
+                subject_id=subject_id,
+            )["state"]
+            if current == "PROMOTED":
+                store.update_source_proposal_state(
+                    run_id=run_id,
+                    subject_id=subject_id,
+                    expected_state="PROMOTED",
+                    state="OUTCOME_UNKNOWN",
+                    now=float(clock()),
+                )
+        finally:
+            store.close()
+        return PortalSourceProposalExecution(
+            run_id=run_id,
+            subject_id=subject_id,
+            state="OUTCOME_UNKNOWN",
+            classification=result.classification,
+            backend_executed=backend_executed,
+            candidate_commit_sha=(
+                result.outputs[0] if result.outputs else None
+            ),
+            reason="source-tree publication outcome requires reconciliation",
+        )
+
+    target_state = (
+        "FAILED_PRECONDITION"
+        if result.classification == "PRECONDITION_FAILED"
+        else "FAILED_EXECUTION"
+    )
+    store = PortalWaveStore(Path(state_db))
+    try:
+        current = store.load_source_proposal(
+            run_id=run_id,
+            subject_id=subject_id,
+        )["state"]
+        if current == "PROMOTED":
+            store.update_source_proposal_state(
+                run_id=run_id,
+                subject_id=subject_id,
+                expected_state="PROMOTED",
+                state=target_state,
+                now=float(clock()),
+            )
+    finally:
+        store.close()
+    return PortalSourceProposalExecution(
+        run_id=run_id,
+        subject_id=subject_id,
+        state=target_state,
+        classification=result.classification,
+        backend_executed=backend_executed,
+        candidate_commit_sha=None,
+        reason="Project Runner source-tree execution did not verify success",
+    )
+
+
+def reconcile_portal_source_proposal(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    reconciler: str,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> PortalSourceProposalExecution:
+    """Reconcile an ambiguous source-tree publication without backend replay."""
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        proposal = store.load_source_proposal(
+            run_id=run_id,
+            subject_id=subject_id,
+        )
+    finally:
+        store.close()
+    if proposal["state"] != "OUTCOME_UNKNOWN":
+        raise ValueError("source proposal is not awaiting reconciliation")
+
+    packet, _holder = _portal_packet_execution_identity(
+        state_db=Path(state_db),
+        run_id=run_id,
+        subject_id=subject_id,
+    )
+    source = transport or GitHubRestTransport(token=token)
+    reconciliation = reconcile_github_source_tree_write_outcome_unknown(
+        state_db=Path(state_db),
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        transport=source,
+        reconciler=reconciler,
+        clock=clock,
+    )
+    if reconciliation.outcome != "EFFECT_CONFIRMED":
+        return PortalSourceProposalExecution(
+            run_id=run_id,
+            subject_id=subject_id,
+            state="OUTCOME_UNKNOWN",
+            classification="OUTCOME_UNKNOWN",
+            backend_executed=False,
+            candidate_commit_sha=reconciliation.observed_head,
+            reason=reconciliation.reason,
+        )
+
+    final = finalize_github_source_tree_write(
+        state_db=Path(state_db),
+        lineage_id=packet.lineage_id,
+        work_fingerprint_value=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        transport=source,
+        clock=clock,
+    )
+    store = PortalWaveStore(Path(state_db))
+    try:
+        store.update_source_proposal_state(
+            run_id=run_id,
+            subject_id=subject_id,
+            expected_state="OUTCOME_UNKNOWN",
+            state="VERIFIED_COMPLETE",
+            now=float(clock()),
+        )
+    finally:
+        store.close()
+    return PortalSourceProposalExecution(
+        run_id=run_id,
+        subject_id=subject_id,
+        state="VERIFIED_COMPLETE",
+        classification="SUCCEEDED",
+        backend_executed=False,
+        candidate_commit_sha=final.candidate_commit_sha,
+        reason=final.reason,
     )
 
 
