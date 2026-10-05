@@ -324,3 +324,31 @@ def test_advisory_claim_allowlist_does_not_touch_other_same_node_delivery(
     ).fetchone()[0]
     assert alpha_state == "DELIVERED"
     store.close()
+
+def test_process_execution_adapter_factory_routes_multiple_targets_on_same_node(
+    tmp_path: Path,
+) -> None:
+    driver = _adapter(tmp_path)
+    adapter = process_adapter.build_process_proposal_execution_adapter(driver)
+    result = _result(
+        _packet(subject_id="alpha"),
+        _packet(subject_id="beta"),
+    )
+
+    routes = tuple(adapter.select_routes(result))
+
+    assert routes == (
+        PortalRouteBinding(
+            subject_kind="repository",
+            subject_id="alpha",
+            adapter_id="process-proposal",
+            route_id="process-proposal:worklaptop",
+        ),
+        PortalRouteBinding(
+            subject_kind="repository",
+            subject_id="beta",
+            adapter_id="process-proposal",
+            route_id="process-proposal:worklaptop",
+        ),
+    )
+
