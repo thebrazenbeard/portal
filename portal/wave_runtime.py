@@ -4,11 +4,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import time
 from typing import Callable, Iterable
 
-from runner.github_backend import GitHubTransport
+from runner.github_backend import GitHubRestTransport, GitHubTransport
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_operator_binding import bind_wave_to_operator_registry
@@ -22,6 +23,21 @@ from runner.registry import load_project_snapshot
 
 from .coordinator import plan_portal_wave
 from .models import ExecutionNode
+
+
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SUCCESS_RECEIPTS = {
+    "SUCCEEDED_SOURCE_CHANGE",
+    "SUCCEEDED_NO_EFFECT",
+    "HELD",
+}
+_FAILURE_RECEIPTS = {
+    "FAILED_RETRYABLE",
+    "FAILED_DETERMINISTIC",
+    "OUTCOME_UNKNOWN",
+}
+_RECEIPT_CLASSES = _SUCCESS_RECEIPTS | _FAILURE_RECEIPTS
 
 
 @dataclass(frozen=True)
@@ -55,6 +71,41 @@ class PortalWavePreparationResult:
     claimed: int
     held: int
     packets: tuple[PortalWavePacket, ...]
+
+
+@dataclass(frozen=True)
+class PortalWaveDeliveryClaim:
+    run_id: str
+    subject_id: str
+    node_id: str
+    holder: str
+    fencing_token: int
+    lease_expires_at: float
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class PortalWaveReceipt:
+    run_id: str
+    subject_id: str
+    node_id: str
+    state: str
+    receipt_class: str
+    receipt_sha256: str
+    result_repository: str | None
+    result_ref: str | None
+    result_head: str | None
+
+
+@dataclass(frozen=True)
+class PortalWaveVerificationResult:
+    run_id: str
+    subject_id: str
+    state: str
+    result_repository: str | None
+    result_ref: str | None
+    result_head: str | None
+    reason: str
 
 
 _SCHEMA = """
@@ -93,6 +144,43 @@ CREATE TABLE IF NOT EXISTS portal_wave_packets (
     PRIMARY KEY (run_id, subject_id),
     FOREIGN KEY (run_id) REFERENCES portal_wave_runs(run_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS portal_wave_deliveries (
+    run_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'PENDING',
+            'DELIVERED',
+            'RECEIPT_RECORDED',
+            'FAILED_RETRYABLE',
+            'FAILED_DETERMINISTIC',
+            'OUTCOME_UNKNOWN',
+            'VERIFICATION_STALE',
+            'VERIFIED_COMPLETE',
+            'VERIFIED_HELD'
+        )
+    ),
+    holder TEXT,
+    fencing_token INTEGER NOT NULL DEFAULT 0,
+    lease_expires_at REAL,
+    receipt_class TEXT,
+    receipt_sha256 TEXT,
+    result_repository TEXT,
+    result_ref TEXT,
+    result_head TEXT,
+    evidence_sha256 TEXT,
+    reason TEXT,
+    verifier TEXT,
+    verified_at REAL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (run_id, subject_id),
+    FOREIGN KEY (run_id, subject_id)
+        REFERENCES portal_wave_packets(run_id, subject_id)
+        ON DELETE CASCADE
+);
 """
 
 
@@ -117,6 +205,82 @@ def _node_payload(nodes: tuple[ExecutionNode, ...]) -> list[dict[str, object]]:
         }
         for node in sorted(nodes, key=lambda value: value.node_id)
     ]
+
+
+def _read_exact_ref(
+    *,
+    repository: str,
+    ref: str,
+    token: str | None,
+    transport: GitHubTransport | None,
+) -> str:
+    source = transport or GitHubRestTransport(token=token)
+    head = source.read_ref(repository, ref)
+    if _SHA40.fullmatch(head) is None:
+        raise ValueError("repository currentness read returned non-exact head")
+    return head
+
+
+def _delivery_payload(
+    packet: PortalWavePacket,
+    *,
+    delivery_fencing_token: int,
+) -> dict[str, object]:
+    return {
+        "schema": "PORTAL_WAVE_WORK_PACKET_V1",
+        "run_id": packet.run_id,
+        "subject_id": packet.subject_id,
+        "repository": packet.repository,
+        "source_ref": packet.ref,
+        "exact_head": packet.exact_head,
+        "node_id": packet.node_id,
+        "lane_id": packet.lane_id,
+        "action": packet.action,
+        "frontier": packet.frontier,
+        "effect_ceiling": packet.effect_ceiling,
+        "review_gate": packet.review_gate,
+        "lead_identity": packet.lead_identity,
+        "reviewer_identities": list(packet.reviewer_identities),
+        "plan_sha256": packet.plan_sha256,
+        "project_runner_claim": {
+            "fencing_token": packet.fencing_token,
+            "lineage_id": packet.lineage_id,
+            "work_fingerprint": packet.work_fingerprint,
+        },
+        "delivery_fencing_token": delivery_fencing_token,
+        "protected_effects_authorized": False,
+        "target_ref_mutation_authorized": False,
+        "completion_contract": {
+            "worker_receipt_is_completion": False,
+            "independent_verification_required": True,
+            "source_change_requires_non_default_result_ref": True,
+            "source_change_requires_exact_result_head": True,
+            "original_source_must_remain_exact_for_completion": True,
+        },
+    }
+
+
+def _packet_from_row(run_id: str, subject_id: str, row: tuple[object, ...]) -> PortalWavePacket:
+    return PortalWavePacket(
+        run_id=run_id,
+        subject_id=subject_id,
+        repository=str(row[0]),
+        ref=str(row[1]),
+        exact_head=str(row[2]),
+        node_id=str(row[3]),
+        lane_id=str(row[4]),
+        state=str(row[5]),
+        plan_sha256=str(row[6]),
+        fencing_token=int(row[7]),
+        lineage_id=str(row[8]),
+        work_fingerprint=str(row[9]),
+        action=str(row[10]),
+        effect_ceiling=str(row[11]),
+        review_gate=str(row[12]),
+        frontier=(str(row[13]) if row[13] is not None else None),
+        lead_identity=str(row[14]),
+        reviewer_identities=tuple(json.loads(str(row[15]))),
+    )
 
 
 class PortalWaveStore:
@@ -282,8 +446,485 @@ class PortalWaveStore:
                     """,
                     (now, packet.run_id, packet.subject_id),
                 )
+
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO portal_wave_deliveries(
+                    run_id, subject_id, node_id, state,
+                    fencing_token, created_at, updated_at
+                ) VALUES (?, ?, ?, 'PENDING', 0, ?, ?)
+                """,
+                (
+                    packet.run_id,
+                    packet.subject_id,
+                    packet.node_id,
+                    now,
+                    now,
+                ),
+            )
+            delivery_node = self.connection.execute(
+                """
+                SELECT node_id
+                FROM portal_wave_deliveries
+                WHERE run_id = ? AND subject_id = ?
+                """,
+                (packet.run_id, packet.subject_id),
+            ).fetchone()
+            if delivery_node != (packet.node_id,):
+                raise ValueError(
+                    "durable delivery node diverges from exact wave packet"
+                )
+
             self.connection.commit()
             return packet
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def claim_delivery(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        holder: str,
+        now: float,
+        ttl: float,
+    ) -> PortalWaveDeliveryClaim | None:
+        run_id = run_id.strip()
+        node_id = node_id.strip()
+        holder = holder.strip()
+        if not run_id or not node_id or not holder:
+            raise ValueError("run_id, node_id, and delivery holder are required")
+        if ttl <= 0:
+            raise ValueError("delivery ttl must be positive")
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            rows = self.connection.execute(
+                """
+                SELECT
+                    p.subject_id,
+                    p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
+                    p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
+                    p.work_fingerprint, p.action, p.effect_ceiling,
+                    p.review_gate, p.frontier, p.lead_identity,
+                    p.reviewer_identities_json,
+                    d.state, d.holder, d.fencing_token, d.lease_expires_at
+                FROM portal_wave_packets AS p
+                JOIN portal_wave_deliveries AS d
+                  ON d.run_id = p.run_id
+                 AND d.subject_id = p.subject_id
+                WHERE p.run_id = ?
+                  AND p.node_id = ?
+                  AND p.state = 'CLAIMED'
+                ORDER BY p.subject_id
+                """,
+                (run_id, node_id),
+            ).fetchall()
+
+            selected: tuple[object, ...] | None = None
+            for row in rows:
+                delivery_state = str(row[17])
+                lease_expires_at = (
+                    float(row[20]) if row[20] is not None else None
+                )
+                if delivery_state == "DELIVERED":
+                    if lease_expires_at is not None and lease_expires_at <= now:
+                        self.connection.execute(
+                            """
+                            UPDATE portal_wave_deliveries
+                            SET state = 'OUTCOME_UNKNOWN',
+                                reason = ?,
+                                lease_expires_at = NULL,
+                                updated_at = ?
+                            WHERE run_id = ? AND subject_id = ?
+                              AND state = 'DELIVERED'
+                            """,
+                            (
+                                "delivery lease expired; effect outcome requires reconciliation",
+                                now,
+                                run_id,
+                                str(row[0]),
+                            ),
+                        )
+                    continue
+                if delivery_state == "PENDING":
+                    selected = row
+                    break
+
+            if selected is None:
+                self.connection.commit()
+                return None
+
+            subject_id = str(selected[0])
+            new_fence = int(selected[19]) + 1
+            expires_at = now + ttl
+            cursor = self.connection.execute(
+                """
+                UPDATE portal_wave_deliveries
+                SET state = 'DELIVERED',
+                    holder = ?,
+                    fencing_token = ?,
+                    lease_expires_at = ?,
+                    reason = NULL,
+                    updated_at = ?
+                WHERE run_id = ? AND subject_id = ?
+                  AND state = 'PENDING'
+                """,
+                (
+                    holder,
+                    new_fence,
+                    expires_at,
+                    now,
+                    run_id,
+                    subject_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("delivery claim changed concurrently")
+
+            packet = _packet_from_row(
+                run_id,
+                subject_id,
+                tuple(selected[1:17]),
+            )
+            payload = _delivery_payload(
+                packet,
+                delivery_fencing_token=new_fence,
+            )
+            self.connection.commit()
+            return PortalWaveDeliveryClaim(
+                run_id=run_id,
+                subject_id=subject_id,
+                node_id=node_id,
+                holder=holder,
+                fencing_token=new_fence,
+                lease_expires_at=expires_at,
+                payload=payload,
+            )
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def record_delivery_receipt(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+        node_id: str,
+        holder: str,
+        expected_fencing_token: int,
+        receipt_class: str,
+        result_repository: str | None,
+        result_ref: str | None,
+        result_head: str | None,
+        evidence_sha256: str,
+        reason: str,
+        now: float,
+    ) -> PortalWaveReceipt:
+        receipt_class = receipt_class.strip()
+        if receipt_class not in _RECEIPT_CLASSES:
+            raise ValueError("unsupported delivery receipt class")
+        if _SHA256.fullmatch(evidence_sha256) is None:
+            raise ValueError("receipt evidence_sha256 must be lowercase SHA-256")
+        if not reason.strip():
+            raise ValueError("delivery receipt reason is required")
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT
+                    p.repository, p.ref, p.node_id,
+                    d.state, d.holder, d.fencing_token, d.lease_expires_at,
+                    d.receipt_class, d.receipt_sha256,
+                    d.result_repository, d.result_ref, d.result_head
+                FROM portal_wave_packets AS p
+                JOIN portal_wave_deliveries AS d
+                  ON d.run_id = p.run_id
+                 AND d.subject_id = p.subject_id
+                WHERE p.run_id = ? AND p.subject_id = ?
+                """,
+                (run_id, subject_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("delivery receipt subject does not exist")
+            repository = str(row[0])
+            source_ref = str(row[1])
+            packet_node = str(row[2])
+            state = str(row[3])
+
+            if packet_node != node_id:
+                raise ValueError("delivery receipt node does not match packet")
+
+            canonical_receipt = {
+                "schema": "PORTAL_WAVE_WORKER_RECEIPT_V1",
+                "run_id": run_id,
+                "subject_id": subject_id,
+                "node_id": node_id,
+                "holder": holder,
+                "fencing_token": expected_fencing_token,
+                "receipt_class": receipt_class,
+                "result_repository": result_repository,
+                "result_ref": result_ref,
+                "result_head": result_head,
+                "evidence_sha256": evidence_sha256,
+                "reason": reason,
+            }
+            receipt_sha256 = _canonical_digest(canonical_receipt)
+
+            if state in {
+                "RECEIPT_RECORDED",
+                "FAILED_RETRYABLE",
+                "FAILED_DETERMINISTIC",
+                "OUTCOME_UNKNOWN",
+                "VERIFICATION_STALE",
+                "VERIFIED_COMPLETE",
+                "VERIFIED_HELD",
+            }:
+                existing = (
+                    str(row[7]) if row[7] is not None else None,
+                    str(row[8]) if row[8] is not None else None,
+                    str(row[9]) if row[9] is not None else None,
+                    str(row[10]) if row[10] is not None else None,
+                    str(row[11]) if row[11] is not None else None,
+                )
+                requested = (
+                    receipt_class,
+                    receipt_sha256,
+                    result_repository,
+                    result_ref,
+                    result_head,
+                )
+                if existing != requested:
+                    raise ValueError(
+                        "delivery already has a different receipt or terminal state"
+                    )
+                self.connection.commit()
+                return PortalWaveReceipt(
+                    run_id=run_id,
+                    subject_id=subject_id,
+                    node_id=node_id,
+                    state=state,
+                    receipt_class=receipt_class,
+                    receipt_sha256=receipt_sha256,
+                    result_repository=result_repository,
+                    result_ref=result_ref,
+                    result_head=result_head,
+                )
+
+            if state != "DELIVERED":
+                raise ValueError("delivery is not actively leased")
+            if row[4] != holder or int(row[5]) != expected_fencing_token:
+                raise ValueError("delivery fence does not match active lease")
+            lease_expires_at = (
+                float(row[6]) if row[6] is not None else None
+            )
+            if lease_expires_at is None or lease_expires_at <= now:
+                self.connection.execute(
+                    """
+                    UPDATE portal_wave_deliveries
+                    SET state = 'OUTCOME_UNKNOWN',
+                        reason = ?,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE run_id = ? AND subject_id = ?
+                    """,
+                    (
+                        "receipt arrived after delivery lease expired",
+                        now,
+                        run_id,
+                        subject_id,
+                    ),
+                )
+                self.connection.commit()
+                raise ValueError(
+                    "delivery lease expired before receipt; reconciliation required"
+                )
+
+            if receipt_class == "SUCCEEDED_SOURCE_CHANGE":
+                if result_repository != repository:
+                    raise ValueError(
+                        "source-change receipt must remain in packet repository"
+                    )
+                if not result_ref or result_ref == source_ref:
+                    raise ValueError(
+                        "source-change receipt requires a non-default result ref"
+                    )
+                if result_head is None or _SHA40.fullmatch(result_head) is None:
+                    raise ValueError(
+                        "source-change receipt requires an exact result head"
+                    )
+            elif receipt_class in {"SUCCEEDED_NO_EFFECT", "HELD"}:
+                if any(
+                    value is not None
+                    for value in (result_repository, result_ref, result_head)
+                ):
+                    raise ValueError(
+                        "no-effect/held receipt must not claim a result ref"
+                    )
+            elif any(
+                value is not None
+                for value in (result_repository, result_ref, result_head)
+            ):
+                raise ValueError(
+                    "failed/unknown receipt must not claim a result ref"
+                )
+
+            if receipt_class in _SUCCESS_RECEIPTS:
+                next_state = "RECEIPT_RECORDED"
+            else:
+                next_state = receipt_class
+
+            self.connection.execute(
+                """
+                UPDATE portal_wave_deliveries
+                SET state = ?,
+                    receipt_class = ?,
+                    receipt_sha256 = ?,
+                    result_repository = ?,
+                    result_ref = ?,
+                    result_head = ?,
+                    evidence_sha256 = ?,
+                    reason = ?,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE run_id = ? AND subject_id = ?
+                """,
+                (
+                    next_state,
+                    receipt_class,
+                    receipt_sha256,
+                    result_repository,
+                    result_ref,
+                    result_head,
+                    evidence_sha256,
+                    reason,
+                    now,
+                    run_id,
+                    subject_id,
+                ),
+            )
+            self.connection.commit()
+            return PortalWaveReceipt(
+                run_id=run_id,
+                subject_id=subject_id,
+                node_id=node_id,
+                state=next_state,
+                receipt_class=receipt_class,
+                receipt_sha256=receipt_sha256,
+                result_repository=result_repository,
+                result_ref=result_ref,
+                result_head=result_head,
+            )
+        except BaseException:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            raise
+
+    def load_delivery(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+    ) -> dict[str, object]:
+        row = self.connection.execute(
+            """
+            SELECT
+                p.repository, p.ref, p.exact_head, p.node_id,
+                d.state, d.receipt_class, d.receipt_sha256,
+                d.result_repository, d.result_ref, d.result_head,
+                d.evidence_sha256, d.reason
+            FROM portal_wave_packets AS p
+            JOIN portal_wave_deliveries AS d
+              ON d.run_id = p.run_id
+             AND d.subject_id = p.subject_id
+            WHERE p.run_id = ? AND p.subject_id = ?
+            """,
+            (run_id, subject_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Portal wave delivery does not exist")
+        return {
+            "repository": str(row[0]),
+            "source_ref": str(row[1]),
+            "exact_head": str(row[2]),
+            "node_id": str(row[3]),
+            "state": str(row[4]),
+            "receipt_class": (
+                str(row[5]) if row[5] is not None else None
+            ),
+            "receipt_sha256": (
+                str(row[6]) if row[6] is not None else None
+            ),
+            "result_repository": (
+                str(row[7]) if row[7] is not None else None
+            ),
+            "result_ref": str(row[8]) if row[8] is not None else None,
+            "result_head": str(row[9]) if row[9] is not None else None,
+            "evidence_sha256": (
+                str(row[10]) if row[10] is not None else None
+            ),
+            "reason": str(row[11]) if row[11] is not None else "",
+        }
+
+    def finalize_verification(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+        expected_receipt_sha256: str,
+        state: str,
+        verifier: str,
+        reason: str,
+        now: float,
+    ) -> None:
+        if state not in {
+            "VERIFIED_COMPLETE",
+            "VERIFIED_HELD",
+            "VERIFICATION_STALE",
+        }:
+            raise ValueError("unsupported verification terminal state")
+        if not verifier.strip():
+            raise ValueError("verification requires verifier identity")
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT state, receipt_sha256
+                FROM portal_wave_deliveries
+                WHERE run_id = ? AND subject_id = ?
+                """,
+                (run_id, subject_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Portal wave delivery does not exist")
+            if str(row[0]) != "RECEIPT_RECORDED":
+                raise ValueError("delivery is not awaiting verification")
+            if str(row[1]) != expected_receipt_sha256:
+                raise ValueError("delivery receipt changed before verification")
+            self.connection.execute(
+                """
+                UPDATE portal_wave_deliveries
+                SET state = ?,
+                    verifier = ?,
+                    verified_at = ?,
+                    reason = ?,
+                    updated_at = ?
+                WHERE run_id = ? AND subject_id = ?
+                """,
+                (
+                    state,
+                    verifier,
+                    now,
+                    reason,
+                    now,
+                    run_id,
+                    subject_id,
+                ),
+            )
+            self.connection.commit()
         except BaseException:
             self.connection.rollback()
             raise
@@ -306,10 +947,24 @@ class PortalWaveStore:
             (run_id,),
         ).fetchall()
         states = {str(state): int(count) for state, count in rows}
+        delivery_rows = self.connection.execute(
+            """
+            SELECT state, COUNT(*)
+            FROM portal_wave_deliveries
+            WHERE run_id = ?
+            GROUP BY state
+            ORDER BY state
+            """,
+            (run_id,),
+        ).fetchall()
+        delivery_states = {
+            str(state): int(count) for state, count in delivery_rows
+        }
         return {
             "run_id": run_id,
             "packets": sum(states.values()),
             "states": states,
+            "delivery_states": delivery_states,
         }
 
 
@@ -432,7 +1087,9 @@ def prepare_portal_wave(
             binding = decisions.get(key)
             item = wave_items.get(key)
             if binding is None or item is None:
-                raise ValueError("Portal assignment lacks exact wave/binding evidence")
+                raise ValueError(
+                    "Portal assignment lacks exact wave/binding evidence"
+                )
             if assignment.subject_kind != "repository":
                 held += 1
                 continue
@@ -496,3 +1153,101 @@ def prepare_portal_wave(
         held=held,
         packets=tuple(sorted(packets, key=lambda item: item.subject_id)),
     )
+
+
+def verify_portal_wave_delivery(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    verifier: str,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> PortalWaveVerificationResult:
+    """Independently verify a worker receipt before freeing the semantic lane."""
+
+    store = PortalWaveStore(Path(state_db))
+    try:
+        record = store.load_delivery(
+            run_id=run_id,
+            subject_id=subject_id,
+        )
+        if record["state"] != "RECEIPT_RECORDED":
+            raise ValueError("delivery is not awaiting verification")
+        receipt_sha256 = str(record["receipt_sha256"])
+        receipt_class = str(record["receipt_class"])
+
+        source_head = _read_exact_ref(
+            repository=str(record["repository"]),
+            ref=str(record["source_ref"]),
+            token=token,
+            transport=transport,
+        )
+        if source_head != record["exact_head"]:
+            state = "VERIFICATION_STALE"
+            reason = (
+                "original exact source moved before completion verification"
+            )
+        elif receipt_class == "SUCCEEDED_SOURCE_CHANGE":
+            result_repository = str(record["result_repository"])
+            result_ref = str(record["result_ref"])
+            expected_result_head = str(record["result_head"])
+            observed_result_head = _read_exact_ref(
+                repository=result_repository,
+                ref=result_ref,
+                token=token,
+                transport=transport,
+            )
+            if observed_result_head != expected_result_head:
+                state = "VERIFICATION_STALE"
+                reason = "result ref moved before completion verification"
+            else:
+                state = "VERIFIED_COMPLETE"
+                reason = (
+                    "original source remained exact and result ref/head "
+                    "verified independently"
+                )
+        elif receipt_class == "SUCCEEDED_NO_EFFECT":
+            state = "VERIFIED_COMPLETE"
+            reason = "no-effect completion verified against unchanged exact source"
+        elif receipt_class == "HELD":
+            state = "VERIFIED_HELD"
+            reason = "held outcome verified against unchanged exact source"
+        else:
+            raise ValueError(
+                "delivery receipt class is not independently completable"
+            )
+
+        store.finalize_verification(
+            run_id=run_id,
+            subject_id=subject_id,
+            expected_receipt_sha256=receipt_sha256,
+            state=state,
+            verifier=verifier,
+            reason=reason,
+            now=float(clock()),
+        )
+        return PortalWaveVerificationResult(
+            run_id=run_id,
+            subject_id=subject_id,
+            state=state,
+            result_repository=(
+                str(record["result_repository"])
+                if record["result_repository"] is not None
+                else None
+            ),
+            result_ref=(
+                str(record["result_ref"])
+                if record["result_ref"] is not None
+                else None
+            ),
+            result_head=(
+                str(record["result_head"])
+                if record["result_head"] is not None
+                else None
+            ),
+            reason=reason,
+        )
+    finally:
+        store.close()
