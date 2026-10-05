@@ -329,7 +329,7 @@ def _require_no_effect_promotion(
         or promotion.ref != packet.ref
         or promotion.exact_head != packet.exact_head
         or promotion.operation != packet.action
-        or promotion.holder == ""
+        or not promotion.holder
     ):
         raise ValueError(
             "Project Runner execution promotion diverges from Portal packet"
@@ -342,8 +342,48 @@ def _require_no_effect_promotion(
         raise ValueError("Project Runner execution promotion review is stale")
     if now >= promotion.execution_valid_until:
         raise ValueError("Project Runner execution promotion authority is stale")
-    return promotion
 
+    store = SqliteDispatchAdmissionStore(Path(state_db))
+    try:
+        work = store.connection.execute(
+            """
+            SELECT status, generation
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (packet.lineage_id, packet.work_fingerprint),
+        ).fetchone()
+        if work is None or WorkUnitStatus(str(work[0])) is not WorkUnitStatus.RUNNING:
+            raise ValueError(
+                "Project Runner execution promotion is not currently RUNNING"
+            )
+        if int(work[1]) != promotion.promoted_work_generation:
+            raise ValueError(
+                "Project Runner promoted work generation diverges"
+            )
+
+        lease = store.connection.execute(
+            """
+            SELECT holder, fencing_token, expires_at, completed
+            FROM leases
+            WHERE work_fingerprint = ?
+            """,
+            (packet.work_fingerprint,),
+        ).fetchone()
+        if lease is None:
+            raise ValueError("Project Runner promotion fence is missing")
+        if (
+            str(lease[0]) != promotion.holder
+            or int(lease[1]) != packet.fencing_token
+            or bool(lease[3])
+        ):
+            raise ValueError("Project Runner promotion fence is no longer current")
+        if now >= float(lease[2]):
+            raise ValueError("Project Runner promotion fence is expired")
+    finally:
+        store.close()
+
+    return promotion
 
 def _project_runner_no_effect_complete(
     *,
@@ -750,67 +790,80 @@ class PortalWaveStore:
         if ttl <= 0:
             raise ValueError("delivery ttl must be positive")
 
+        # First reconcile expired Portal delivery leases in a short transaction.
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            rows = self.connection.execute(
+            self.connection.execute(
                 """
-                SELECT
-                    p.subject_id,
-                    p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
-                    p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
-                    p.work_fingerprint, p.action, p.effect_ceiling,
-                    p.review_gate, p.frontier, p.lead_identity,
-                    p.reviewer_identities_json,
-                    d.state, d.holder, d.fencing_token, d.lease_expires_at
-                FROM portal_wave_packets AS p
-                JOIN portal_wave_deliveries AS d
-                  ON d.run_id = p.run_id
-                 AND d.subject_id = p.subject_id
-                WHERE p.run_id = ?
-                  AND p.node_id = ?
-                  AND p.state = 'CLAIMED'
-                ORDER BY p.subject_id
+                UPDATE portal_wave_deliveries
+                SET state = 'OUTCOME_UNKNOWN',
+                    reason = ?,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE run_id = ?
+                  AND node_id = ?
+                  AND state = 'DELIVERED'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at <= ?
                 """,
-                (run_id, node_id),
-            ).fetchall()
+                (
+                    "delivery lease expired; effect outcome requires reconciliation",
+                    now,
+                    run_id,
+                    node_id,
+                    now,
+                ),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
 
-            selected: tuple[object, ...] | None = None
-            for row in rows:
-                delivery_state = str(row[17])
-                lease_expires_at = (
-                    float(row[20]) if row[20] is not None else None
-                )
-                if delivery_state == "DELIVERED":
-                    if lease_expires_at is not None and lease_expires_at <= now:
-                        self.connection.execute(
-                            """
-                            UPDATE portal_wave_deliveries
-                            SET state = 'OUTCOME_UNKNOWN',
-                                reason = ?,
-                                lease_expires_at = NULL,
-                                updated_at = ?
-                            WHERE run_id = ? AND subject_id = ?
-                              AND state = 'DELIVERED'
-                            """,
-                            (
-                                "delivery lease expired; effect outcome requires reconciliation",
-                                now,
-                                run_id,
-                                str(row[0]),
-                            ),
-                        )
-                    continue
-                if delivery_state == "PENDING":
-                    selected = row
-                    break
+        # Select a candidate without holding a Portal write lock while the
+        # independent Project Runner promotion/fence state is verified.
+        selected = self.connection.execute(
+            """
+            SELECT
+                p.subject_id,
+                p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
+                p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
+                p.work_fingerprint, p.action, p.effect_ceiling,
+                p.review_gate, p.frontier, p.lead_identity,
+                p.reviewer_identities_json,
+                d.fencing_token
+            FROM portal_wave_packets AS p
+            JOIN portal_wave_deliveries AS d
+              ON d.run_id = p.run_id
+             AND d.subject_id = p.subject_id
+            WHERE p.run_id = ?
+              AND p.node_id = ?
+              AND p.state = 'CLAIMED'
+              AND d.state = 'PENDING'
+            ORDER BY p.subject_id
+            LIMIT 1
+            """,
+            (run_id, node_id),
+        ).fetchone()
+        if selected is None:
+            return None
 
-            if selected is None:
-                self.connection.commit()
-                return None
+        subject_id = str(selected[0])
+        packet = _packet_from_row(
+            run_id,
+            subject_id,
+            tuple(selected[1:17]),
+        )
+        promotion = _require_no_effect_promotion(
+            state_db=self.path,
+            packet=packet,
+            now=now,
+        )
 
-            subject_id = str(selected[0])
-            new_fence = int(selected[19]) + 1
-            expires_at = now + ttl
+        previous_fence = int(selected[17])
+        new_fence = previous_fence + 1
+        expires_at = now + ttl
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
             cursor = self.connection.execute(
                 """
                 UPDATE portal_wave_deliveries
@@ -822,6 +875,7 @@ class PortalWaveStore:
                     updated_at = ?
                 WHERE run_id = ? AND subject_id = ?
                   AND state = 'PENDING'
+                  AND fencing_token = ?
                 """,
                 (
                     holder,
@@ -830,39 +884,31 @@ class PortalWaveStore:
                     now,
                     run_id,
                     subject_id,
+                    previous_fence,
                 ),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("delivery claim changed concurrently")
-
-            packet = _packet_from_row(
-                run_id,
-                subject_id,
-                tuple(selected[1:17]),
-            )
-            promotion = _require_no_effect_promotion(
-                state_db=self.path,
-                packet=packet,
-                now=now,
-            )
-            payload = _delivery_payload(
-                packet,
-                delivery_fencing_token=new_fence,
-                promotion=promotion,
-            )
+                self.connection.rollback()
+                return None
             self.connection.commit()
-            return PortalWaveDeliveryClaim(
-                run_id=run_id,
-                subject_id=subject_id,
-                node_id=node_id,
-                holder=holder,
-                fencing_token=new_fence,
-                lease_expires_at=expires_at,
-                payload=payload,
-            )
         except BaseException:
             self.connection.rollback()
             raise
+
+        payload = _delivery_payload(
+            packet,
+            delivery_fencing_token=new_fence,
+            promotion=promotion,
+        )
+        return PortalWaveDeliveryClaim(
+            run_id=run_id,
+            subject_id=subject_id,
+            node_id=node_id,
+            holder=holder,
+            fencing_token=new_fence,
+            lease_expires_at=expires_at,
+            payload=payload,
+        )
 
     def record_delivery_receipt(
         self,
