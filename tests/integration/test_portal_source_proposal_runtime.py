@@ -21,6 +21,9 @@ from portal.worker_runtime import run_wave_proposal_workers_once
 from runner.models import ProjectDefinition
 from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from runner.execution_promotion import sign_evidence
+from runner.promoted_github_tree import source_tree_write_request_sha256
+from portal.source_promotion import execute_portal_source_proposal
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -274,3 +277,234 @@ def test_advisory_proposal_pass_does_not_reclaim_awaiting_promotion(
     assert first.awaiting_promotion == 1
     assert second.claimed == 0
     assert second.no_work == 1
+
+
+
+REVIEW_KEY = b"portal-source-proposal-review"
+EXECUTION_KEY = b"portal-source-proposal-execution"
+EFFECT_KEY = b"portal-source-proposal-effect"
+
+
+class FakeSourceTreeWriteTransport(FakeReadOnlyTransport):
+    def __init__(self, heads):
+        super().__init__(heads)
+        self.files = {}
+        self.mutations = []
+
+    def read_file(self, repository, path, ref):
+        return self.files.get((repository, path, ref))
+
+    def put_files_exact_head(
+        self,
+        repository,
+        files,
+        branch,
+        message,
+        *,
+        expected_head,
+    ):
+        if self.read_ref(repository, branch) != expected_head:
+            raise AssertionError("source-tree backend bypassed exact-head guard")
+        commit = "d" * 40
+        blob_shas = {}
+        for index, item in enumerate(files, start=1):
+            path = item["path"]
+            content = item["content"]
+            blob = f"{index:x}" * 40
+            blob = blob[:40]
+            blob_shas[path] = blob
+            self.files[(repository, path, commit)] = type(
+                "FileState",
+                (),
+                {"sha": blob, "content": content},
+            )()
+        self.mutations.append(
+            (repository, tuple(item["path"] for item in files), branch, expected_head)
+        )
+        self.heads[(repository, branch)] = commit
+        return commit, blob_shas
+
+
+def _proposal_evidence(packet, request, now: float):
+    digest = source_tree_write_request_sha256(request)
+    review = sign_evidence(
+        {
+            "schema": "PROJECT_RUNNER_EXECUTION_REVIEW_V1",
+            "subject_id": packet.subject_id,
+            "repository": packet.repository,
+            "ref": packet.ref,
+            "exact_head": packet.exact_head,
+            "plan_sha256": packet.plan_sha256,
+            "work_fingerprint": packet.work_fingerprint,
+            "reviewer_identity": packet.reviewer_identities[0],
+            "review_gate": packet.review_gate,
+            "review_state": "EXECUTION_PROMOTION_REVIEWED",
+            "reviewed_at": now,
+            "valid_until": now + 300.0,
+            "execution_request_sha256": digest,
+        },
+        REVIEW_KEY,
+    )
+    execution = sign_evidence(
+        {
+            "schema": "PROJECT_RUNNER_EXECUTION_AUTHORITY_V1",
+            "grant_id": f"portal-source:{packet.subject_id}",
+            "issuer": "portal-test-execution",
+            "subject_id": packet.subject_id,
+            "repository": packet.repository,
+            "ref": packet.ref,
+            "exact_head": packet.exact_head,
+            "lineage_id": packet.lineage_id,
+            "work_fingerprint": packet.work_fingerprint,
+            "fencing_token": packet.fencing_token,
+            "operation": packet.action,
+            "effect_class": "SOURCE_WRITE",
+            "execution_request": request,
+            "execution_authorized": True,
+            "issued_at": now,
+            "valid_until": now + 300.0,
+        },
+        EXECUTION_KEY,
+    )
+    effect = sign_evidence(
+        {
+            "schema": "PROJECT_RUNNER_PROTECTED_EFFECT_AUTHORITY_V1",
+            "grant_id": f"portal-effect:{packet.subject_id}",
+            "issuer": "portal-test-effect",
+            "subject_id": packet.subject_id,
+            "repository": packet.repository,
+            "ref": packet.ref,
+            "exact_head": packet.exact_head,
+            "lineage_id": packet.lineage_id,
+            "work_fingerprint": packet.work_fingerprint,
+            "fencing_token": packet.fencing_token,
+            "effect_class": "SOURCE_WRITE",
+            "execution_request_sha256": digest,
+            "protected_effects_authorized": True,
+            "issued_at": now,
+            "valid_until": now + 300.0,
+        },
+        EFFECT_KEY,
+    )
+    return review, execution, effect
+
+
+def _prepare_proposal(tmp_path: Path):
+    db, claim_transport, packet = _seed(tmp_path)
+    worker = tmp_path / "worker.py"
+    _worker(worker)
+    result = run_wave_proposal_workers_once(
+        state_db=db,
+        run_id="proposal-run",
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=1),),
+        backends={
+            "alpha": ProcessWorkerSpec(
+                command=(sys.executable, str(worker)),
+                timeout_seconds=10.0,
+                pass_env=(),
+            )
+        },
+        workspace_root=tmp_path / "workers",
+        holder_prefix="portal-proposal",
+        delivery_lease_ttl=30.0,
+        token=None,
+        transport=claim_transport,
+        clock=time.time,
+    )
+    assert result.awaiting_promotion == 1
+    store = PortalWaveStore(db)
+    try:
+        proposal = store.load_source_proposal(
+            run_id="proposal-run",
+            subject_id=packet.subject_id,
+        )
+    finally:
+        store.close()
+    return db, packet, proposal
+
+
+def test_source_proposal_promotes_executes_and_completes_exact_project_runner_work(
+    tmp_path: Path,
+) -> None:
+    db, packet, proposal = _prepare_proposal(tmp_path)
+    now = time.time()
+    review, execution, effect = _proposal_evidence(
+        packet,
+        proposal["execution_request"],
+        now,
+    )
+    transport = FakeSourceTreeWriteTransport(
+        {(packet.repository, packet.ref): packet.exact_head}
+    )
+
+    result = execute_portal_source_proposal(
+        state_db=db,
+        run_id="proposal-run",
+        subject_id=packet.subject_id,
+        review_document=review,
+        execution_grant_document=execution,
+        effect_grant_document=effect,
+        review_key=REVIEW_KEY,
+        execution_authority_key=EXECUTION_KEY,
+        effect_authority_key=EFFECT_KEY,
+        verifier="vera-review",
+        token=None,
+        transport=transport,
+        clock=time.time,
+    )
+
+    assert result.state == "VERIFIED_COMPLETE"
+    assert result.result_head == "d" * 40
+    assert len(transport.mutations) == 1
+
+    store = PortalWaveStore(db)
+    try:
+        summary = store.summary("proposal-run")
+    finally:
+        store.close()
+    assert summary["delivery_states"] == {"VERIFIED_COMPLETE": 1}
+
+    with sqlite3.connect(db) as connection:
+        row = connection.execute(
+            """
+            SELECT status
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (packet.lineage_id, packet.work_fingerprint),
+        ).fetchone()
+    assert row == ("COMPLETE",)
+
+
+def test_source_proposal_refuses_stale_source_before_any_mutation(
+    tmp_path: Path,
+) -> None:
+    db, packet, proposal = _prepare_proposal(tmp_path)
+    now = time.time()
+    review, execution, effect = _proposal_evidence(
+        packet,
+        proposal["execution_request"],
+        now,
+    )
+    transport = FakeSourceTreeWriteTransport(
+        {(packet.repository, packet.ref): "f" * 40}
+    )
+
+    with pytest.raises(ValueError, match="source head is stale"):
+        execute_portal_source_proposal(
+            state_db=db,
+            run_id="proposal-run",
+            subject_id=packet.subject_id,
+            review_document=review,
+            execution_grant_document=execution,
+            effect_grant_document=effect,
+            review_key=REVIEW_KEY,
+            execution_authority_key=EXECUTION_KEY,
+            effect_authority_key=EFFECT_KEY,
+            verifier="vera-review",
+            token=None,
+            transport=transport,
+            clock=time.time,
+        )
+
+    assert transport.mutations == []
