@@ -144,6 +144,7 @@ def test_delivery_claim_is_fenced_and_payload_preserves_authority_boundary(
         assert claim.payload["frontier"] == packet.frontier
         assert claim.payload["effect_ceiling"] == "SOURCE_ONLY"
         assert claim.payload["protected_effects_authorized"] is False
+        assert claim.payload["source_mutation_authorized"] is False
         assert claim.payload["target_ref_mutation_authorized"] is False
 
         blocked = store.claim_delivery(
@@ -187,7 +188,7 @@ def test_expired_delivery_becomes_outcome_unknown_instead_of_replaying(
         store.close()
 
 
-def test_source_change_receipt_requires_nondefault_result_ref_and_exact_head(
+def test_worker_delivery_cannot_report_source_change_without_promoted_execution(
     tmp_path: Path,
 ) -> None:
     state_db, _projects_path, _transport, packet = _prepared(tmp_path)
@@ -202,7 +203,10 @@ def test_source_change_receipt_requires_nondefault_result_ref_and_exact_head(
         )
         assert claim is not None
 
-        with pytest.raises(ValueError, match="non-default result ref"):
+        with pytest.raises(
+            ValueError,
+            match="source mutation must use Project Runner promoted execution",
+        ):
             store.record_delivery_receipt(
                 run_id="delivery-run",
                 subject_id=packet.subject_id,
@@ -211,22 +215,19 @@ def test_source_change_receipt_requires_nondefault_result_ref_and_exact_head(
                 expected_fencing_token=claim.fencing_token,
                 receipt_class="SUCCEEDED_SOURCE_CHANGE",
                 result_repository=packet.repository,
-                result_ref=packet.ref,
+                result_ref="work/portal/proposal",
                 result_head="b" * 40,
                 evidence_sha256="e" * 64,
-                reason="implemented on default ref",
+                reason="worker attempted to report source mutation",
                 now=115.0,
             )
     finally:
         store.close()
 
-
-def test_source_change_receipt_is_independently_verified_before_completion(
+def test_no_effect_receipt_is_independently_verified_before_completion(
     tmp_path: Path,
 ) -> None:
     state_db, _projects_path, transport, packet = _prepared(tmp_path)
-    result_ref = f"work/portal/{packet.subject_id}"
-    result_head = "b" * 40
 
     store = PortalWaveStore(state_db)
     try:
@@ -244,12 +245,12 @@ def test_source_change_receipt_is_independently_verified_before_completion(
             node_id="alpha",
             holder="worker-alpha",
             expected_fencing_token=claim.fencing_token,
-            receipt_class="SUCCEEDED_SOURCE_CHANGE",
-            result_repository=packet.repository,
-            result_ref=result_ref,
-            result_head=result_head,
+            receipt_class="SUCCEEDED_NO_EFFECT",
+            result_repository=None,
+            result_ref=None,
+            result_head=None,
             evidence_sha256="e" * 64,
-            reason="bounded source branch ready for review",
+            reason="analysis completed without repository mutation",
             now=115.0,
         )
         assert receipt.state == "RECEIPT_RECORDED"
@@ -259,7 +260,6 @@ def test_source_change_receipt_is_independently_verified_before_completion(
     finally:
         store.close()
 
-    transport.heads[(packet.repository, result_ref)] = result_head
     verified = verify_portal_wave_delivery(
         state_db=state_db,
         run_id="delivery-run",
@@ -270,7 +270,7 @@ def test_source_change_receipt_is_independently_verified_before_completion(
         clock=lambda: 120.0,
     )
     assert verified.state == "VERIFIED_COMPLETE"
-    assert verified.result_head == result_head
+    assert verified.result_head is None
 
     store = PortalWaveStore(state_db)
     try:
@@ -281,13 +281,10 @@ def test_source_change_receipt_is_independently_verified_before_completion(
         store.close()
     assert transport.mutations == []
 
-
 def test_verification_marks_stale_when_original_exact_subject_moved(
     tmp_path: Path,
 ) -> None:
     state_db, _projects_path, transport, packet = _prepared(tmp_path)
-    result_ref = f"work/portal/{packet.subject_id}"
-    result_head = "b" * 40
 
     store = PortalWaveStore(state_db)
     try:
@@ -305,19 +302,18 @@ def test_verification_marks_stale_when_original_exact_subject_moved(
             node_id="alpha",
             holder="worker-alpha",
             expected_fencing_token=claim.fencing_token,
-            receipt_class="SUCCEEDED_SOURCE_CHANGE",
-            result_repository=packet.repository,
-            result_ref=result_ref,
-            result_head=result_head,
+            receipt_class="SUCCEEDED_NO_EFFECT",
+            result_repository=None,
+            result_ref=None,
+            result_head=None,
             evidence_sha256="e" * 64,
-            reason="branch ready",
+            reason="analysis completed",
             now=115.0,
         )
     finally:
         store.close()
 
     transport.heads[(packet.repository, packet.ref)] = "c" * 40
-    transport.heads[(packet.repository, result_ref)] = result_head
 
     verified = verify_portal_wave_delivery(
         state_db=state_db,
@@ -329,3 +325,4 @@ def test_verification_marks_stale_when_original_exact_subject_moved(
         clock=lambda: 120.0,
     )
     assert verified.state == "VERIFICATION_STALE"
+
