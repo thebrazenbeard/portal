@@ -479,3 +479,107 @@ def test_refill_uses_adapter_reconciliation_to_free_capacity(
     assert result.summary == {"active": 1, "held": 0, "terminal": 1}
     controller.close()
 
+def test_refill_preserves_adapter_outcome_unknown_over_internal_pending(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prepare_calls: list[dict[str, object]] = []
+
+    def fake_prepare(**kwargs):
+        prepare_calls.append(kwargs)
+        packets = ()
+        if not kwargs["active_subjects"]:
+            packets = (_packet(kwargs["run_id"]),)
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=len(packets),
+            claimed=len(packets),
+            held=0,
+            packets=packets,
+        )
+
+    class FakeWaveStore:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def load_delivery(self, *, run_id, subject_id):
+            return {"state": "PENDING"}
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+    monkeypatch.setattr(portal_session, "PortalWaveStore", FakeWaveStore)
+
+    class AmbiguousAdapter:
+        def __init__(self):
+            self.reconciled = False
+
+        def select_routes(self, result):
+            return (
+                PortalRouteBinding(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                ),
+            )
+
+        def dispatch(self, result, routes):
+            return (
+                PortalDispatchRecord(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                    state="DISPATCHED",
+                    evidence_id="executor:task-ambiguous",
+                ),
+            )
+
+        def reconcile(self, status):
+            if self.reconciled:
+                return ()
+            self.reconciled = True
+            return (
+                PortalReconciliationRecord(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="executor",
+                    route_id="WorkLaptop:g9",
+                    state="OUTCOME_UNKNOWN",
+                    evidence_id="executor:task-ambiguous:unknown",
+                ),
+            )
+
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    result = controller.run_until_idle(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        verifier="vera-review",
+        max_cycles=2,
+        max_idle_cycles=1,
+        poll_seconds=0.0,
+        execution_adapter=AmbiguousAdapter(),
+    )
+
+    subject = controller.status("portal")["subjects"][0]
+    assert result.stop_reason == "WAITING_ACTIVE"
+    assert subject["state"] == "ACTIVE"
+    assert subject["verification_state"] == "OUTCOME_UNKNOWN"
+    assert subject["adapter_id"] == "executor"
+    assert subject["route_id"] == "WorkLaptop:g9"
+    assert prepare_calls[1]["active_subjects"] == (
+        ("repository", "project-runner"),
+    )
+    controller.close()
+
