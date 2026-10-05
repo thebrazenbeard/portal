@@ -239,7 +239,6 @@ def _parser() -> argparse.ArgumentParser:
     wave_receipt.add_argument(
         "--receipt-class",
         choices=(
-            "SUCCEEDED_SOURCE_CHANGE",
             "SUCCEEDED_NO_EFFECT",
             "HELD",
             "FAILED_RETRYABLE",
