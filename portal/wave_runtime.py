@@ -34,6 +34,10 @@ from runner.work_units import WorkUnitStatus
 
 from .coordinator import plan_portal_wave
 from .models import ExecutionNode
+from .source_proposal import (
+    PortalSourceTreeProposal,
+    source_tree_proposal_to_execution_request,
+)
 
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -43,12 +47,13 @@ _SUCCESS_RECEIPTS = {
     "SUCCEEDED_NO_EFFECT",
     "HELD",
 }
+_PROPOSAL_RECEIPTS = {"PROPOSED_SOURCE_TREE"}
 _FAILURE_RECEIPTS = {
     "FAILED_RETRYABLE",
     "FAILED_DETERMINISTIC",
     "OUTCOME_UNKNOWN",
 }
-_RECEIPT_CLASSES = _SUCCESS_RECEIPTS | _FAILURE_RECEIPTS
+_RECEIPT_CLASSES = _SUCCESS_RECEIPTS | _PROPOSAL_RECEIPTS | _FAILURE_RECEIPTS
 
 
 @dataclass(frozen=True)
@@ -192,6 +197,23 @@ CREATE TABLE IF NOT EXISTS portal_wave_deliveries (
         REFERENCES portal_wave_packets(run_id, subject_id)
         ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS portal_wave_proposals (
+    run_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('AWAITING_PROMOTION')),
+    receipt_sha256 TEXT NOT NULL,
+    proposal_json TEXT NOT NULL,
+    proposal_sha256 TEXT NOT NULL,
+    execution_request_json TEXT NOT NULL,
+    execution_request_sha256 TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (run_id, subject_id),
+    FOREIGN KEY (run_id, subject_id)
+        REFERENCES portal_wave_deliveries(run_id, subject_id)
+        ON DELETE CASCADE
+);
 """
 
 
@@ -282,6 +304,127 @@ def _delivery_payload(
             "original_source_must_remain_exact_for_completion": True,
         },
     }
+
+
+
+def _advisory_delivery_payload(
+    packet: PortalWavePacket,
+    *,
+    delivery_fencing_token: int,
+) -> dict[str, object]:
+    return {
+        "schema": "PORTAL_WAVE_WORK_PACKET_V1",
+        "run_id": packet.run_id,
+        "subject_id": packet.subject_id,
+        "repository": packet.repository,
+        "source_ref": packet.ref,
+        "exact_head": packet.exact_head,
+        "node_id": packet.node_id,
+        "lane_id": packet.lane_id,
+        "action": packet.action,
+        "frontier": packet.frontier,
+        "effect_ceiling": packet.effect_ceiling,
+        "review_gate": packet.review_gate,
+        "lead_identity": packet.lead_identity,
+        "reviewer_identities": list(packet.reviewer_identities),
+        "plan_sha256": packet.plan_sha256,
+        "project_runner_claim": {
+            "fencing_token": packet.fencing_token,
+            "lineage_id": packet.lineage_id,
+            "work_fingerprint": packet.work_fingerprint,
+        },
+        "delivery_fencing_token": delivery_fencing_token,
+        "advisory_only": True,
+        "execution_authorized": False,
+        "execution_effect_class": None,
+        "protected_effects_authorized": False,
+        "source_mutation_authorized": False,
+        "target_ref_mutation_authorized": False,
+        "completion_contract": {
+            "worker_receipt_is_completion": False,
+            "proposal_requires_independent_validation": True,
+            "proposal_requires_execution_promotion": True,
+            "original_source_must_remain_exact_for_promotion": True,
+        },
+    }
+
+
+def _require_advisory_claim(
+    *,
+    state_db: Path,
+    packet: PortalWavePacket,
+    now: float,
+) -> None:
+    if packet.effect_ceiling != "SOURCE_ONLY":
+        raise ValueError("advisory source proposal requires SOURCE_ONLY packet")
+
+    store = SqliteDispatchAdmissionStore(Path(state_db))
+    try:
+        row = store.connection.execute(
+            """
+            SELECT work_json, status
+            FROM recursive_work_state
+            WHERE lineage_id = ? AND work_fingerprint = ?
+            """,
+            (packet.lineage_id, packet.work_fingerprint),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Project Runner advisory claim state is missing")
+        if WorkUnitStatus(str(row[1])) is not WorkUnitStatus.CLAIMED:
+            raise ValueError("Project Runner advisory claim is no longer CLAIMED")
+        try:
+            work_payload = json.loads(str(row[0]))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Project Runner advisory claim payload is invalid") from exc
+        if not isinstance(work_payload, Mapping):
+            raise ValueError("Project Runner advisory claim payload is invalid")
+        claim = work_payload.get("payload")
+        if not isinstance(claim, Mapping):
+            raise ValueError("Project Runner advisory claim metadata is missing")
+        if claim.get("schema") != "PROJECT_RUNNER_BOUND_PLAN_CLAIM_V1":
+            raise ValueError("Project Runner advisory claim schema is invalid")
+        if (
+            claim.get("repository") != packet.repository
+            or claim.get("ref") != packet.ref
+            or claim.get("exact_head") != packet.exact_head
+        ):
+            raise ValueError("Project Runner advisory claim diverges from packet")
+
+        lease = store.connection.execute(
+            """
+            SELECT fencing_token, expires_at, completed
+            FROM leases
+            WHERE work_fingerprint = ?
+            """,
+            (packet.work_fingerprint,),
+        ).fetchone()
+        if lease is None:
+            raise ValueError("Project Runner advisory claim fence is missing")
+        if int(lease[0]) != packet.fencing_token or bool(lease[2]):
+            raise ValueError("Project Runner advisory claim fence is stale")
+        if now >= float(lease[1]):
+            raise ValueError("Project Runner advisory claim fence is expired")
+
+        promotion = store.connection.execute(
+            """
+            SELECT 1
+            FROM execution_promotions
+            WHERE lineage_id = ? AND work_fingerprint = ?
+              AND fencing_token = ?
+            LIMIT 1
+            """,
+            (
+                packet.lineage_id,
+                packet.work_fingerprint,
+                packet.fencing_token,
+            ),
+        ).fetchone()
+        if promotion is not None:
+            raise ValueError(
+                "advisory proposal cannot run after execution promotion"
+            )
+    finally:
+        store.close()
 
 
 class _PortalWorkerReceiptBackend:
@@ -774,6 +917,132 @@ class PortalWaveStore:
             self.connection.rollback()
             raise
 
+    def claim_advisory_delivery(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        holder: str,
+        now: float,
+        ttl: float,
+    ) -> PortalWaveDeliveryClaim | None:
+        if not run_id.strip() or not node_id.strip() or not holder.strip():
+            raise ValueError("run_id, node_id, and delivery holder are required")
+        if ttl <= 0:
+            raise ValueError("delivery ttl must be positive")
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self.connection.execute(
+                """
+                UPDATE portal_wave_deliveries
+                SET state = 'OUTCOME_UNKNOWN',
+                    reason = ?,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE run_id = ? AND node_id = ?
+                  AND state = 'DELIVERED'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at <= ?
+                """,
+                (
+                    "advisory delivery lease expired; local outcome requires reconciliation",
+                    now,
+                    run_id,
+                    node_id,
+                    now,
+                ),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+        selected = self.connection.execute(
+            """
+            SELECT
+                p.subject_id,
+                p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
+                p.state, p.plan_sha256, p.fencing_token, p.lineage_id,
+                p.work_fingerprint, p.action, p.effect_ceiling,
+                p.review_gate, p.frontier, p.lead_identity,
+                p.reviewer_identities_json,
+                d.fencing_token
+            FROM portal_wave_packets AS p
+            JOIN portal_wave_deliveries AS d
+              ON d.run_id = p.run_id AND d.subject_id = p.subject_id
+            LEFT JOIN portal_wave_proposals AS q
+              ON q.run_id = p.run_id AND q.subject_id = p.subject_id
+            WHERE p.run_id = ?
+              AND p.node_id = ?
+              AND p.state = 'CLAIMED'
+              AND d.state = 'PENDING'
+              AND q.subject_id IS NULL
+            ORDER BY p.subject_id
+            LIMIT 1
+            """,
+            (run_id, node_id),
+        ).fetchone()
+        if selected is None:
+            return None
+
+        subject_id = str(selected[0])
+        packet = _packet_from_row(run_id, subject_id, tuple(selected[1:17]))
+        _require_advisory_claim(
+            state_db=self.path,
+            packet=packet,
+            now=now,
+        )
+
+        previous_fence = int(selected[17])
+        new_fence = previous_fence + 1
+        expires_at = now + ttl
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = self.connection.execute(
+                """
+                UPDATE portal_wave_deliveries
+                SET state = 'DELIVERED',
+                    holder = ?,
+                    fencing_token = ?,
+                    lease_expires_at = ?,
+                    reason = NULL,
+                    updated_at = ?
+                WHERE run_id = ? AND subject_id = ?
+                  AND state = 'PENDING'
+                  AND fencing_token = ?
+                """,
+                (
+                    holder,
+                    new_fence,
+                    expires_at,
+                    now,
+                    run_id,
+                    subject_id,
+                    previous_fence,
+                ),
+            )
+            if cursor.rowcount != 1:
+                self.connection.rollback()
+                return None
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+        return PortalWaveDeliveryClaim(
+            run_id=run_id,
+            subject_id=subject_id,
+            node_id=node_id,
+            holder=holder,
+            fencing_token=new_fence,
+            lease_expires_at=expires_at,
+            payload=_advisory_delivery_payload(
+                packet,
+                delivery_fencing_token=new_fence,
+            ),
+        )
+
     def claim_delivery(
         self,
         *,
@@ -1064,7 +1333,7 @@ class PortalWaveStore:
                     raise ValueError(
                         "source-change receipt requires an exact result head"
                     )
-            elif receipt_class in {"SUCCEEDED_NO_EFFECT", "HELD"}:
+            elif receipt_class in {"SUCCEEDED_NO_EFFECT", "HELD", "PROPOSED_SOURCE_TREE"}:
                 if any(
                     value is not None
                     for value in (result_repository, result_ref, result_head)
@@ -1080,7 +1349,7 @@ class PortalWaveStore:
                     "failed/unknown receipt must not claim a result ref"
                 )
 
-            if receipt_class in _SUCCESS_RECEIPTS:
+            if receipt_class in _SUCCESS_RECEIPTS or receipt_class in _PROPOSAL_RECEIPTS:
                 next_state = "RECEIPT_RECORDED"
             else:
                 next_state = receipt_class
@@ -1130,6 +1399,176 @@ class PortalWaveStore:
             if self.connection.in_transaction:
                 self.connection.rollback()
             raise
+
+    def record_source_proposal(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+        proposal: PortalSourceTreeProposal,
+        now: float,
+    ) -> dict[str, object]:
+        execution_request = source_tree_proposal_to_execution_request(proposal)
+        request_json = json.dumps(
+            execution_request,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        request_sha256 = hashlib.sha256(
+            request_json.encode("utf-8")
+        ).hexdigest()
+        proposal_json = proposal.canonical_bytes.decode("utf-8")
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT
+                    p.repository, p.ref, p.exact_head,
+                    d.state, d.receipt_class, d.receipt_sha256
+                FROM portal_wave_packets AS p
+                JOIN portal_wave_deliveries AS d
+                  ON d.run_id = p.run_id AND d.subject_id = p.subject_id
+                WHERE p.run_id = ? AND p.subject_id = ?
+                """,
+                (run_id, subject_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("source proposal subject does not exist")
+            if (
+                str(row[0]) != proposal.repository
+                or str(row[1]) != proposal.source_ref
+                or str(row[2]) != proposal.expected_head
+            ):
+                raise ValueError("source proposal diverges from exact packet")
+            if str(row[3]) != "RECEIPT_RECORDED":
+                existing = self.connection.execute(
+                    """
+                    SELECT state, proposal_sha256, execution_request_sha256
+                    FROM portal_wave_proposals
+                    WHERE run_id = ? AND subject_id = ?
+                    """,
+                    (run_id, subject_id),
+                ).fetchone()
+                if (
+                    existing is not None
+                    and str(existing[0]) == "AWAITING_PROMOTION"
+                    and str(existing[1]) == proposal.sha256
+                    and str(existing[2]) == request_sha256
+                ):
+                    self.connection.commit()
+                    return {
+                        "state": "AWAITING_PROMOTION",
+                        "sha256": proposal.sha256,
+                        "execution_request_sha256": request_sha256,
+                        "execution_request": execution_request,
+                    }
+                raise ValueError("source proposal receipt is not awaiting persistence")
+            if str(row[4]) != "PROPOSED_SOURCE_TREE":
+                raise ValueError("delivery receipt is not a source-tree proposal")
+            receipt_sha256 = str(row[5])
+
+            existing = self.connection.execute(
+                """
+                SELECT proposal_sha256, execution_request_sha256,
+                       proposal_json, execution_request_json, receipt_sha256
+                FROM portal_wave_proposals
+                WHERE run_id = ? AND subject_id = ?
+                """,
+                (run_id, subject_id),
+            ).fetchone()
+            immutable = (
+                proposal.sha256,
+                request_sha256,
+                proposal_json,
+                request_json,
+                receipt_sha256,
+            )
+            if existing is None:
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_wave_proposals(
+                        run_id, subject_id, state, receipt_sha256,
+                        proposal_json, proposal_sha256,
+                        execution_request_json, execution_request_sha256,
+                        created_at, updated_at
+                    ) VALUES (?, ?, 'AWAITING_PROMOTION', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        subject_id,
+                        receipt_sha256,
+                        proposal_json,
+                        proposal.sha256,
+                        request_json,
+                        request_sha256,
+                        now,
+                        now,
+                    ),
+                )
+            elif (
+                str(existing[0]),
+                str(existing[1]),
+                str(existing[2]),
+                str(existing[3]),
+                str(existing[4]),
+            ) != immutable:
+                raise ValueError("durable source proposal diverges from existing proposal")
+            else:
+                self.connection.execute(
+                    """
+                    UPDATE portal_wave_proposals
+                    SET updated_at = ?
+                    WHERE run_id = ? AND subject_id = ?
+                    """,
+                    (now, run_id, subject_id),
+                )
+            self.connection.commit()
+            return {
+                "state": "AWAITING_PROMOTION",
+                "sha256": proposal.sha256,
+                "execution_request_sha256": request_sha256,
+                "execution_request": execution_request,
+            }
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def load_source_proposal(
+        self,
+        *,
+        run_id: str,
+        subject_id: str,
+    ) -> dict[str, object]:
+        row = self.connection.execute(
+            """
+            SELECT state, receipt_sha256, proposal_json, proposal_sha256,
+                   execution_request_json, execution_request_sha256
+            FROM portal_wave_proposals
+            WHERE run_id = ? AND subject_id = ?
+            """,
+            (run_id, subject_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Portal source proposal does not exist")
+        try:
+            proposal = json.loads(str(row[2]))
+            execution_request = json.loads(str(row[4]))
+        except json.JSONDecodeError as exc:
+            raise ValueError("durable source proposal JSON is invalid") from exc
+        if _canonical_digest(proposal) != str(row[3]):
+            raise ValueError("durable source proposal digest mismatch")
+        if _canonical_digest(execution_request) != str(row[5]):
+            raise ValueError("durable execution request digest mismatch")
+        return {
+            "state": str(row[0]),
+            "receipt_sha256": str(row[1]),
+            "proposal": proposal,
+            "sha256": str(row[3]),
+            "execution_request": execution_request,
+            "execution_request_sha256": str(row[5]),
+        }
 
     def load_delivery(
         self,
@@ -1262,22 +1701,41 @@ class PortalWaveStore:
         states = {str(state): int(count) for state, count in rows}
         delivery_rows = self.connection.execute(
             """
-            SELECT state, COUNT(*)
-            FROM portal_wave_deliveries
-            WHERE run_id = ?
-            GROUP BY state
-            ORDER BY state
+            SELECT
+                CASE
+                    WHEN q.state = 'AWAITING_PROMOTION'
+                    THEN 'AWAITING_PROMOTION'
+                    ELSE d.state
+                END AS effective_state,
+                COUNT(*)
+            FROM portal_wave_deliveries AS d
+            LEFT JOIN portal_wave_proposals AS q
+              ON q.run_id = d.run_id AND q.subject_id = d.subject_id
+            WHERE d.run_id = ?
+            GROUP BY effective_state
+            ORDER BY effective_state
             """,
             (run_id,),
         ).fetchall()
         delivery_states = {
             str(state): int(count) for state, count in delivery_rows
         }
+        proposals = int(
+            self.connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM portal_wave_proposals
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()[0]
+        )
         return {
             "run_id": run_id,
             "packets": sum(states.values()),
             "states": states,
             "delivery_states": delivery_states,
+            "proposals": proposals,
         }
 
 
