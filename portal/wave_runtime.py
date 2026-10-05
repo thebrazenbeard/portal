@@ -249,6 +249,7 @@ def _delivery_payload(
         },
         "delivery_fencing_token": delivery_fencing_token,
         "protected_effects_authorized": False,
+        "source_mutation_authorized": False,
         "target_ref_mutation_authorized": False,
         "completion_contract": {
             "worker_receipt_is_completion": False,
@@ -742,6 +743,10 @@ class PortalWaveStore:
                     "delivery lease expired before receipt; reconciliation required"
                 )
 
+            if receipt_class == "SUCCEEDED_SOURCE_CHANGE":
+                raise ValueError(
+                    "source mutation must use Project Runner promoted execution"
+                )
             if receipt_class == "SUCCEEDED_SOURCE_CHANGE":
                 if result_repository != repository:
                     raise ValueError(
