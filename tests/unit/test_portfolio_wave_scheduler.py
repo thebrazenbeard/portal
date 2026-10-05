@@ -350,3 +350,99 @@ def test_excluded_subject_identity_is_kind_scoped():
     assert [selected.subject_kind for selected in planned.selected] == [
         "workstream"
     ]
+
+
+
+def test_active_subjects_seed_global_identity_family_lane_and_collision_loads():
+    active = item(
+        "active",
+        priority="P0",
+        lead="ONE",
+        repository="owner/active",
+        family="family-a",
+    )
+    same_identity = item(
+        "same-identity",
+        priority="P0",
+        lead="ONE",
+        repository="owner/other",
+        family="family-b",
+    )
+    other_identity = item(
+        "other-identity",
+        priority="P0",
+        lead="VOSS",
+        repository="owner/voss",
+        family="family-c",
+    )
+    colliding_workstream = item(
+        "colliding-workstream",
+        priority="P0",
+        lead="REZON",
+        repository="owner/active",
+        kind="workstream",
+        family="family-d",
+    )
+
+    planned = plan_wave_admission(
+        wave(active, same_identity, other_identity, colliding_workstream),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=1,
+            max_per_family=2,
+            max_per_lane=1,
+        ),
+        active_subjects=(("repository", "active"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == [
+        "other-identity"
+    ]
+    reasons = {
+        deferred.subject_id: deferred.reason
+        for deferred in planned.deferred
+    }
+    assert reasons["active"] == "ALREADY_ACTIVE"
+    assert reasons["same-identity"] == "LANE_BUDGET"
+    assert reasons["colliding-workstream"] == "COLLISION"
+    assert planned.active_subjects == (("repository", "active"),)
+    assert planned.summary()["active_subjects"] == ["repository:active"]
+
+
+def test_active_subjects_consume_global_parallel_budget():
+    planned = plan_wave_admission(
+        wave(
+            item("active", repository="owner/active", family="a"),
+            item(
+                "next",
+                repository="owner/next",
+                lead="VOSS",
+                family="b",
+            ),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        active_subjects=(("repository", "active"),),
+    )
+
+    assert planned.selected == ()
+    deferred = next(
+        item for item in planned.deferred if item.subject_id == "next"
+    )
+    assert deferred.reason == "GLOBAL_BUDGET"
+
+
+def test_active_subject_must_exist_in_wave():
+    with pytest.raises(ValueError, match="active subject is absent"):
+        plan_wave_admission(
+            wave(item("known")),
+            budget=WaveExecutionBudget(
+                max_parallel=1,
+                max_per_identity=1,
+                max_per_family=1,
+            ),
+            active_subjects=(("repository", "missing"),),
+        )
