@@ -16,7 +16,7 @@ from runner.portfolio_wave_scheduler import (
 )
 
 from .models import ExecutionNode
-from .wave_runtime import prepare_portal_wave
+from .wave_runtime import PortalWaveStore, prepare_portal_wave
 from .worker_backend import ProcessWorkerSpec
 from .worker_runtime import run_wave_proposal_workers_once
 
@@ -146,6 +146,8 @@ class PortalEcosystemStore:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        wave_store = PortalWaveStore(self.path)
+        wave_store.close()
         self.connection = sqlite3.connect(
             self.path,
             timeout=5.0,
