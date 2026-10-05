@@ -189,6 +189,7 @@ def test_portal_wave_claim_writes_worker_payload_and_hides_repo_from_stdout(
 
 def test_portal_wave_receipt_records_exact_delivery_fence(
     tmp_path: Path,
+    monkeypatch,
     capsys,
 ) -> None:
     db = tmp_path / "portal.sqlite3"
@@ -213,6 +214,8 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
         assert claim is not None
     finally:
         store.close()
+
+    monkeypatch.setattr(portal_cli.time, "time", lambda: 3.0)
 
     code = portal_cli.entrypoint(
         [
