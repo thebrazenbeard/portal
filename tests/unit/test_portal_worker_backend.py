@@ -275,3 +275,55 @@ def test_process_worker_rejects_unpromoted_packet(tmp_path: Path) -> None:
             ),
             workspace_root=tmp_path / "workspace",
         )
+
+
+
+def test_process_worker_allows_explicit_advisory_zero_mutation_packet(
+    tmp_path: Path,
+) -> None:
+    worker = tmp_path / "worker.py"
+    _write_worker(
+        worker,
+        """
+import argparse
+import json
+from pathlib import Path
+
+p = argparse.ArgumentParser()
+p.add_argument("--portal-packet", required=True)
+p.add_argument("--portal-receipt", required=True)
+args = p.parse_args()
+packet = json.loads(Path(args.portal_packet).read_text(encoding="utf-8"))
+assert packet["advisory_only"] is True
+assert packet["execution_authorized"] is False
+assert packet["execution_effect_class"] is None
+Path(args.portal_receipt).write_text(
+    json.dumps(
+        {
+            "schema": "PORTAL_WORKER_RECEIPT_V1",
+            "receipt_class": "HELD",
+            "reason": "advisory packet accepted",
+            "artifacts": [],
+        }
+    ),
+    encoding="utf-8",
+)
+""",
+    )
+    packet = _packet()
+    packet["advisory_only"] = True
+    packet["execution_authorized"] = False
+    packet["execution_effect_class"] = None
+    packet.pop("execution_promotion")
+
+    result = run_process_worker(
+        packet=packet,
+        spec=ProcessWorkerSpec(
+            command=(sys.executable, str(worker)),
+            timeout_seconds=10.0,
+            pass_env=(),
+        ),
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert result.receipt_class == "HELD"
