@@ -1,0 +1,21 @@
+dependencies:
+- id: bus-to-project-runner-ready
+  provider: chat-communication-bus
+  consumer: project-runner
+  kind: routing-contract
+  selector:
+    repository: thebrazenbeard/chat-communication-bus
+    ref: main
+    path_prefix: architecture/contracts/
+  reaction: INSPECT
+  evidence: fixture/m3
+- id: bus-to-unregistered-consumer
+  provider: chat-communication-bus
+  consumer: unregistered-consumer
+  kind: routing-contract
+  selector:
+    repository: thebrazenbeard/chat-communication-bus
+    ref: main
+    path_prefix: architecture/contracts/
+  reaction: REREVIEW
+  evidence: fixture/m3

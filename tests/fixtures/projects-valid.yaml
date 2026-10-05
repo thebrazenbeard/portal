@@ -1,0 +1,8 @@
+projects:
+  - id: project-runner
+    name: Project Runner
+    visibility: public
+    repositories:
+      - thebrazenbeard/project-runner
+    capabilities:
+      - read

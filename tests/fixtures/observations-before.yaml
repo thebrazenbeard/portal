@@ -1,0 +1,20 @@
+observations:
+- target: chat-communication-bus
+  evidence_class: AUTHORITATIVE
+  subject:
+    repository: thebrazenbeard/chat-communication-bus
+    ref: main
+    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    path: architecture/contracts/RADAR_TOPOLOGY_V1.json
+  observed_value: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  observed_at: "2026-09-17T20:00:00Z"
+  observer: fixture/m2
+- target: vera-control-plane
+  evidence_class: AUTHORITATIVE
+  subject:
+    repository: thebrazenbeard/vera-control-plane
+    ref: main
+    commit: cccccccccccccccccccccccccccccccccccccccc
+  observed_value: cccccccccccccccccccccccccccccccccccccccc
+  observed_at: "2026-09-17T20:00:00Z"
+  observer: fixture/m2

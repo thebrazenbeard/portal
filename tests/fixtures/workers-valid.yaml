@@ -1,0 +1,9 @@
+workers:
+  - id: fixture-human
+    name: Fixture Human
+    worker_type: HUMAN
+    lifecycle: REGISTERED
+    locators:
+      handle: fixture
+    roles: []
+    routes: {}

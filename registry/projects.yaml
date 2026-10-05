@@ -1,0 +1,151 @@
+projects:
+- id: project-runner
+  name: Project Runner
+  visibility: public
+  repositories:
+  - thebrazenbeard/project-runner
+  capabilities:
+  - read
+  - analyze
+  - propose
+  - create_branch
+  - write_branch
+  - open_pr
+  - comment
+  - request_review
+  - merge
+  execution_targets:
+  - work_type: INSPECT
+    repository: thebrazenbeard/project-runner
+    ref: main
+  - work_type: REREVIEW
+    repository: thebrazenbeard/project-runner
+    ref: main
+    worker_id: project-runner-reference-read-worker
+    worker_route: RUNNER_ACTION_PULL
+- id: chat-communication-bus
+  name: Chat Communication Bus
+  visibility: private
+  repositories:
+  - thebrazenbeard/chat-communication-bus
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: vera
+  name: Vera
+  visibility: private
+  repositories:
+  - thebrazenbeard/vera
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: vera-control-plane
+  name: Vera Control Plane
+  visibility: private
+  repositories:
+  - thebrazenbeard/vera-control-plane
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: hc-brain
+  name: HC Brain
+  visibility: public
+  repositories:
+  - thebrazenbeard/hc-brain
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: roots
+  name: Roots
+  visibility: public
+  repositories:
+  - thebrazenbeard/roots
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: testament
+  name: Testament
+  visibility: public
+  repositories:
+  - thebrazenbeard/testament
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: transcendence
+  name: Transcendence
+  visibility: public
+  repositories:
+  - thebrazenbeard/transcendence
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: rezon
+  name: Rezon
+  visibility: public
+  repositories:
+  - thebrazenbeard/rezon
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: world-zero
+  name: World Zero
+  visibility: public
+  repositories:
+  - thebrazenbeard/world-zero
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: on-theo
+  name: On Theo
+  visibility: public
+  repositories:
+  - thebrazenbeard/on-theo
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: wip
+  name: WIP
+  visibility: public
+  repositories:
+  - thebrazenbeard/wip
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: mosaic
+  name: Mosaic
+  visibility: public
+  repositories:
+  - thebrazenbeard/mosaic
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: driftguard
+  name: DriftGuard
+  visibility: public
+  repositories:
+  - thebrazenbeard/driftguard
+  capabilities:
+  - read
+  - analyze
+  - propose
+- id: discovery
+  name: Discovery
+  visibility: public
+  repositories:
+  - thebrazenbeard/discovery
+  capabilities:
+  - read
+  - analyze
+  - propose

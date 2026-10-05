@@ -1,0 +1,176 @@
+{
+  "schema": "PROJECT_RUNNER_REPOSITORY_RECONCILIATION_V1",
+  "status": "DRAFT_CANONICALIZATION_CANDIDATE_NO_MERGE_AUTHORITY",
+  "generated_date": "2026-09-20",
+  "repository": "thebrazenbeard/project-runner",
+  "current_main": {
+    "sha": "bc05812b560b4fcde3a362e72fba04c626cafac8",
+    "meaning": "early persistent SQLite budgets and fenced leases; materially behind active M6/Exodus work"
+  },
+  "candidate": {
+    "branch": "bt2/project-runner-canonical-main-candidate-v1-20260920",
+    "source_parent_pr": 22,
+    "source_parent_sha": "bee7e720ba923ef38ce87fca4c9c2560163a9360",
+    "currentness_repair_commit": "5a5f907b25fc1a5a7d302a12347d251cc6962b00",
+    "composition_policy": "smallest independently supportable M6/Exodus baseline; keep Discovery/Rezon experiments off canonical main unless separately promoted"
+  },
+  "live_estate_observation": {
+    "observed_date": "2026-09-20",
+    "total_repositories": 58,
+    "public_repositories": 14,
+    "private_repositories": 44,
+    "archived_repositories": 1,
+    "source": "fresh GitHub owner inventory",
+    "privacy": "aggregate counts only; private repository names are not published by this public manifest"
+  },
+  "source_dag": {
+    "canonical_baseline_path": [
+      2,
+      8,
+      9,
+      12,
+      16,
+      20,
+      22
+    ],
+    "absorbed_nonancestor_subjects": [
+      {
+        "pr": 21,
+        "classification": "ABSORBED_BY_22",
+        "reason": "chatless orchestration and portfolio-discovery documents were composed into PR22; PR21 remains divergent provenance"
+      },
+      {
+        "pr": 16,
+        "classification": "ABSORBED_CURRENT_HEAD_BY_22",
+        "reason": "PR20 branched from an earlier PR16 head, but PR16's later UTF-8 worker-label commit produces the same registry/workers.yaml blob present at PR22"
+      }
+    ],
+    "divergent_or_historical": [
+      {
+        "pr": 10,
+        "classification": "SUPERSEDED_BY_12",
+        "reason": "parallel M6 PUT_FILE+SQLite composition diverged from the current combined repair; PR12 is the current integrated M6 source ancestor"
+      },
+      {
+        "pr": 14,
+        "classification": "SUPERSEDED_BY_12",
+        "reason": "parallel Windows SQLite lifecycle repair is represented by the current combined M6 line; preserve branch as repair provenance"
+      },
+      {
+        "pr": 15,
+        "classification": "HISTORICAL_QUALIFICATION_PROVENANCE",
+        "reason": "qualification child of PR12 adding Windows CI evidence; no required implementation delta for canonical baseline"
+      },
+      {
+        "pr": 19,
+        "classification": "HISTORICAL_PROVENANCE",
+        "reason": "Rezon/Project Runner overlap audit is documentation/research, not a runtime dependency of the M6 baseline"
+      }
+    ],
+    "experimental_fanout_from_22": [
+      {
+        "pr": 23,
+        "classification": "BLOCKED_STALE_EXTERNAL_CURRENTNESS",
+        "reason": "exact Discovery census binding says 57 repositories; live estate is 58 and Discovery refresh_rule invalidates currentness claims when count/digest changes"
+      },
+      {
+        "pr": 24,
+        "classification": "EXPERIMENTAL_ALTERNATIVE",
+        "reason": "one-way Discovery effect-envelope producer; Discovery later recorded STOP_EFFECT_ENVELOPE_CENTRALIZATION_PENDING_ORGANIC_REPLACEMENT_TARGET"
+      },
+      {
+        "pr": 25,
+        "classification": "EXPERIMENTAL_ALTERNATIVE_SUPERSEDED_FOR_CURRENT_DISCOVERY_BY_26",
+        "reason": "parallel Rezon PLAN observer; current Discovery Rezon boundary uses PR26 instead"
+      },
+      {
+        "pr": 26,
+        "classification": "CURRENT_EXPERIMENTAL_REZON_SUCCESS_PATH",
+        "reason": "mechanical verifier of exact Rezon R51 evidence; deliberately non-promotional and not a Project Runner backend"
+      },
+      {
+        "pr": 27,
+        "classification": "CURRENT_EXPERIMENTAL_REZON_FAILURE_PATH_CHILD",
+        "reason": "child of PR26 adding real failure-path fixtures/tests without changing the production verifier"
+      }
+    ]
+  },
+  "pr_dispositions": {
+    "2": "CURRENT_STACK_DEPENDENCY",
+    "8": "CURRENT_STACK_DEPENDENCY",
+    "9": "CURRENT_STACK_DEPENDENCY",
+    "10": "SUPERSEDED_BY_12",
+    "12": "CURRENT_STACK_DEPENDENCY",
+    "14": "SUPERSEDED_BY_12",
+    "15": "HISTORICAL_QUALIFICATION_PROVENANCE",
+    "16": "ABSORBED_BY_20_AND_22",
+    "19": "HISTORICAL_PROVENANCE",
+    "20": "CURRENT_STACK_DEPENDENCY",
+    "21": "ABSORBED_BY_22",
+    "22": "CURRENT_CANONICAL_MAIN_SOURCE_CANDIDATE",
+    "23": "BLOCKED_STALE_EXTERNAL_CURRENTNESS",
+    "24": "EXPERIMENTAL_ALTERNATIVE",
+    "25": "EXPERIMENTAL_ALTERNATIVE_SUPERSEDED_FOR_CURRENT_DISCOVERY_BY_26",
+    "26": "CURRENT_EXPERIMENTAL_REZON_SUCCESS_PATH",
+    "27": "CURRENT_EXPERIMENTAL_REZON_FAILURE_PATH_CHILD"
+  },
+  "external_bindings": {
+    "discovery": {
+      "main": "96e6f8e9c776047f9068c897eab0406324187166",
+      "canonicalization_pr": 19,
+      "canonicalization_head": "aa51c4bf2b6b34d0ae0d8063119ae685b84bf2e2",
+      "stale_census_blob": "34cd2ab55d46f5a1ecc2c894f3e8cfdb8afa41df",
+      "stale_census_count": 57,
+      "live_estate_count": 58,
+      "disposition": "PR23 exact bytes remain historical interoperability evidence, not current portfolio state"
+    },
+    "rezon": {
+      "main": "e3d7a41eccb49a9f403ef66f511faef677ceec1b",
+      "project_runner_bound_pr": 79,
+      "bound_head": "8289914ec500a1392b10fe1a3774dee166e73b40",
+      "canonicalization_pr": 80,
+      "canonicalization_head": "90140fa109bdfe5bd5aba24dec4afab799b25848",
+      "ancestry": "PR80 is 56 commits ahead and 0 behind exact PR79; immutable PR79 fixture remains valid as historical exact producer evidence but is not current Rezon canonical state"
+    }
+  },
+  "exact_evidence": {
+    "pr22_hosted": {
+      "run_id": 35504268147,
+      "conclusion": "success",
+      "test_step": "PASS",
+      "registry_validation": "PASS",
+      "recursive_restart_proof": "PASS",
+      "live_read_only_github_smoke": "SKIPPED_IN_PR_CONTEXT",
+      "live_hc_transcendence_proof": "SKIPPED_IN_PR_CONTEXT"
+    },
+    "pr22_local_windows_python312": {
+      "tests": "213/213 PASS",
+      "registry_validation": "15 projects / 12 workers PASS",
+      "recursive_restart_proof": "COMPLETE",
+      "compileall": "PASS_BEFORE_DIFF_CHECK",
+      "diff_check": "FAIL_ONLY_PREEXISTING_TRAILING_WHITESPACE_IN_PORTFOLIO_DISCOVERY_DOC",
+      "repair": "candidate removes trailing whitespace and refreshes stale 57-repository prose to 58"
+    }
+  },
+  "canonical_main_target": {
+    "include": [
+      "PR22 M6 durable execution fabric",
+      "durable worker reconstruction and chatless runtime contracts",
+      "public-safe seed registries and discovery policy",
+      "repository reconciliation/currentness artifacts"
+    ],
+    "exclude_from_minimal_main": [
+      "PR23 stale Discovery census consumer",
+      "PR24 Discovery effect-envelope producer experiment",
+      "PR25 alternate Rezon observer",
+      "PR26 Rezon mechanical verifier experiment",
+      "PR27 Rezon failure-path experiment"
+    ],
+    "rationale": "main should expose the current orchestration kernel and reconstruction/currentness contract without turning cross-repository experiments into mandatory runtime or architectural dependencies"
+  },
+  "protected_effect_queue": [
+    "Future merge of this exact candidate into main requires Patrick's explicit authorization after fresh exact-head review.",
+    "Only after canonical verification should superseded/historical PRs become closure candidates.",
+    "No external binding is silently upgraded when Discovery or Rezon advances."
+  ]
+}

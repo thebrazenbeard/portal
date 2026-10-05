@@ -1,0 +1,10 @@
+dependencies:
+- id: hc-brain-to-transcendence-reference-inspection
+  provider: hc-brain
+  consumer: transcendence
+  kind: imported-reference-substrate
+  selector:
+    repository: thebrazenbeard/hc-brain
+    ref: main
+  reaction: INSPECT
+  evidence: Transcendence treats HC as a candidate reference ontology and does not establish an exact imported upstream HC commit, so provider movement requires bounded inspection rather than automatic adoption or validation.

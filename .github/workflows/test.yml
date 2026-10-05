@@ -1,0 +1,121 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact workflow subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Test
+        run: python -m pytest -q
+      - name: Validate registries
+        run: project-runner validate
+      - name: Live read-only GitHub backend smoke
+        env:
+          PROJECT_RUNNER_GITHUB_TOKEN: ${{ github.token }}
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          PR_EXPECTED_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: project-runner github-read-smoke --repository "$PR_REPOSITORY" --ref "$PR_REF" --expected-head "$PR_EXPECTED_HEAD"
+      - name: M6 live reference worker proof
+        env:
+          PROJECT_RUNNER_GITHUB_TOKEN: ${{ github.token }}
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          PR_EXPECTED_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/m6_reference_worker_live_proof.py
+      - name: M6 two-level recursive restart proof
+        run: python scripts/m6_recursive_restart_proof.py
+      - name: M6 live HC to Transcendence proof
+        if: github.event_name == 'push'
+        env:
+          PROJECT_RUNNER_GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/m6_hc_transcendence_live_proof.py
+
+  task-monitor-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out exact workflow subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Exercise registered Windows task lifecycle
+        shell: pwsh
+        run: |
+          function Wait-ForTaskHistory {
+            param(
+              [string]$TasksRoot,
+              [string]$Name,
+              [int]$TimeoutSeconds = 30
+            )
+            $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+            do {
+              $history = project-runner task-history --tasks-root $TasksRoot | ConvertFrom-Json
+              $match = @($history.tasks | Where-Object { $_.name -eq $Name }) | Select-Object -First 1
+              if ($null -ne $match) {
+                return $match
+              }
+              Start-Sleep -Milliseconds 500
+            } while ([DateTime]::UtcNow -lt $deadline)
+            return $null
+          }
+
+          $tasksRoot = Join-Path $env:RUNNER_TEMP "project-runner-task-monitor"
+          $env:PROJECT_RUNNER_TASKS_ROOT = $tasksRoot
+          $monitorScript = Join-Path $env:GITHUB_WORKSPACE "scripts\Watch-ProjectRunnerTasks.ps1"
+
+          Push-Location (Join-Path $env:WINDIR "System32")
+          try {
+            project-runner task-start `
+              --name "ci-task-monitor" `
+              --owner "github-actions" `
+              --repository "$env:GITHUB_REPOSITORY" `
+              --lane "windows-ci" `
+              --working-directory "$env:GITHUB_WORKSPACE" `
+              --command "ping -n 3 127.0.0.1 >nul & exit /b 0" | Out-Null
+            $snapshot = & $monitorScript -TasksRoot $tasksRoot -Once | Out-String
+            Write-Host $snapshot
+            if ($snapshot -notmatch "ci-task-monitor" -or $snapshot -notmatch "RUNNING") {
+              throw "task monitor did not observe the supervised task as RUNNING"
+            }
+
+            $completed = Wait-ForTaskHistory -TasksRoot $tasksRoot -Name "ci-task-monitor"
+            if ($null -eq $completed -or $completed.state -ne "COMPLETED" -or $completed.exit_code -ne 0) {
+              throw "completed task did not receive an authoritative terminal receipt"
+            }
+            $liveAfter = & $monitorScript -TasksRoot $tasksRoot -Once | Out-String
+            Write-Host $liveAfter
+            if ($liveAfter -match "ci-task-monitor") {
+              throw "completed task remained in the live task set"
+            }
+
+            project-runner task-start `
+              --name "ci-task-failure" `
+              --owner "github-actions" `
+              --working-directory "$env:GITHUB_WORKSPACE" `
+              --command "exit /b 7" | Out-Null
+            $failed = Wait-ForTaskHistory -TasksRoot $tasksRoot -Name "ci-task-failure"
+            if ($null -eq $failed -or $failed.state -ne "FAILED" -or $failed.exit_code -ne 7) {
+              throw "failed task did not preserve its nonzero exit code"
+            }
+          }
+          finally {
+            Pop-Location
+          }

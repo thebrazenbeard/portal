@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thebrazenbeard/project-runner/schemas/p0-project-manifest.schema.json",
+  "type": "object",
+  "required": ["schema","corpus_id","classification","role","governance","build_tracks"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "PROJECT_RUNNER_P0_PROJECT_MANIFEST_V1"},
+    "corpus_id": {"const": "PROJECT_RUNNER_PORTFOLIO_CORPUS_V1"},
+    "classification": {
+      "type": "object",
+      "required": ["project_id","repository","priority","family_id","activity_state","observed_at","source_kind","source_subject"],
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+        "repository": {"type":"string","pattern":"^[^/\\\\s]+/[^/\\\\s]+$"},
+        "priority": {"const":"P0"},
+        "family_id": {"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+        "activity_state": {"enum":["ACTIVE_HEAVY","ACTIVE","STABLE","INCUBATOR","QUIET","PAUSED","UNKNOWN"]},
+        "observed_at": {"type":"string","minLength":1},
+        "source_kind": {"enum":["PUBLIC_CORPUS_SNAPSHOT","PRIVATE_CORPUS_SNAPSHOT"]},
+        "source_subject": {"type":"string","minLength":1}
+      }
+    },
+    "role": {
+      "type": "object",
+      "required": ["purpose","status","current_frontier"],
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {"type":"string","minLength":1},
+        "status": {"type":"string","minLength":1},
+        "current_frontier": {"type":"string","minLength":1}
+      }
+    },
+    "governance": {
+      "type": "object",
+      "required": ["priority_is_authority","scheduling_requires_currentness","effect_requires_explicit_authority","merge_deploy_not_granted"],
+      "additionalProperties": false,
+      "properties": {
+        "priority_is_authority": {"const": false},
+        "scheduling_requires_currentness": {"const": true},
+        "effect_requires_explicit_authority": {"const": true},
+        "merge_deploy_not_granted": {"const": true}
+      }
+    },
+    "build_tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id","goal","acceptance"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+          "goal": {"type":"string","minLength":1},
+          "acceptance": {"type":"array","minItems":1,"items":{"type":"string","minLength":1}}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+observations:
+- target: hc-brain
+  evidence_class: AUTHORITATIVE
+  subject:
+    repository: thebrazenbeard/hc-brain
+    ref: main
+    commit: 007b3fad7504e50640e6be049a52e27996ccffca
+  observed_value: 007b3fad7504e50640e6be049a52e27996ccffca
+  observed_at: "2026-09-18T18:25:05Z"
+  observer: github/hc-brain-main
