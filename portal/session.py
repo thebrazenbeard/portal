@@ -300,10 +300,11 @@ class PortalCommandSession:
         lease_ttl: float,
         token: str | None,
         occupied_node_slots: Mapping[str, int] | None = None,
+        execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
-        return self._advance(
+        result = self._advance(
             session_id=session_id,
             holder=holder,
             wave_path=wave_path,
@@ -318,6 +319,15 @@ class PortalCommandSession:
             clock=clock,
             allow_restart=True,
         )
+        if execution_adapter is not None:
+            self._dispatch_generation(
+                session_id=session_id,
+                holder=holder,
+                result=result,
+                execution_adapter=execution_adapter,
+                clock=clock,
+            )
+        return result
 
     def continue_run(
         self,
@@ -332,10 +342,11 @@ class PortalCommandSession:
         lease_ttl: float,
         token: str | None,
         occupied_node_slots: Mapping[str, int] | None = None,
+        execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
-        return self._advance(
+        result = self._advance(
             session_id=session_id,
             holder=holder,
             wave_path=wave_path,
@@ -350,6 +361,15 @@ class PortalCommandSession:
             clock=clock,
             allow_restart=False,
         )
+        if execution_adapter is not None:
+            self._dispatch_generation(
+                session_id=session_id,
+                holder=holder,
+                result=result,
+                execution_adapter=execution_adapter,
+                clock=clock,
+            )
+        return result
 
     def _require_session(
         self,
