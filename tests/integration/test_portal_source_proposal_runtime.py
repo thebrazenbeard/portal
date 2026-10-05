@@ -6,6 +6,8 @@ import sqlite3
 import sys
 import time
 
+import pytest
+
 from portal.discovery import (
     RepositoryInventoryItem,
     build_live_project_registry,
