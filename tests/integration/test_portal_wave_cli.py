@@ -234,13 +234,7 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
             "--fencing-token",
             str(claim.fencing_token),
             "--receipt-class",
-            "SUCCEEDED_SOURCE_CHANGE",
-            "--result-repository",
-            "thebrazenbeard/project-runner",
-            "--result-ref",
-            "work/portal/project-runner",
-            "--result-head",
-            "d" * 40,
+            "SUCCEEDED_NO_EFFECT",
             "--evidence-sha256",
             "e" * 64,
             "--reason",
@@ -252,7 +246,7 @@ def test_portal_wave_receipt_records_exact_delivery_fence(
     payload = json.loads(capsys.readouterr().out)
     assert payload["mode"] == "PORTAL_WAVE_RECEIPT_V1"
     assert payload["state"] == "RECEIPT_RECORDED"
-    assert payload["receipt_class"] == "SUCCEEDED_SOURCE_CHANGE"
+    assert payload["receipt_class"] == "SUCCEEDED_NO_EFFECT"
 
 
 def test_portal_wave_verify_cli_uses_independent_verifier(
