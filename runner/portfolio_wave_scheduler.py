@@ -74,6 +74,7 @@ class WaveAdmissionPlan:
     deferred: tuple[WaveDeferral, ...]
     budget: WaveExecutionBudget
     occupied_collision_keys: tuple[str, ...]
+    excluded_subjects: tuple[tuple[str, str], ...] = ()
 
     def summary(self) -> dict[str, object]:
         return {
@@ -99,6 +100,10 @@ class WaveAdmissionPlan:
                 item.reason for item in self.deferred
             ).items())),
             "occupied_collision_keys": list(self.occupied_collision_keys),
+            "excluded_subjects": [
+                f"{kind}:{subject_id}"
+                for kind, subject_id in self.excluded_subjects
+            ],
         }
 
 
@@ -131,6 +136,7 @@ def plan_wave_admission(
     *,
     budget: WaveExecutionBudget,
     occupied_collision_keys: Iterable[str] = (),
+    excluded_subjects: Iterable[tuple[str, str]] = (),
 ) -> WaveAdmissionPlan:
     """Select a deterministic, collision-free source-work slice.
 
@@ -143,6 +149,18 @@ def plan_wave_admission(
     if "" in occupied:
         raise ValueError("occupied collision keys must be non-empty strings")
 
+    excluded: set[tuple[str, str]] = set()
+    for value in excluded_subjects:
+        if (
+            not isinstance(value, tuple)
+            or len(value) != 2
+            or not all(isinstance(part, str) and part.strip() for part in value)
+        ):
+            raise ValueError(
+                "excluded subjects must be (subject_kind, subject_id) string pairs"
+            )
+        excluded.add((value[0].strip(), value[1].strip()))
+
     selected: list[WaveAdmission] = []
     deferred: list[WaveDeferral] = []
     reserved = set(occupied)
@@ -153,6 +171,19 @@ def plan_wave_admission(
     for item in sorted(wave.items, key=_admission_sort_key):
         keys = collision_keys(item)
         lane_id = item.effective_lane
+
+        if (item.subject_kind, item.subject_id) in excluded:
+            deferred.append(WaveDeferral(
+                subject_kind=item.subject_kind,
+                subject_id=item.subject_id,
+                family_id=item.family_id,
+                lead_identity=item.lead_identity,
+                lane_id=lane_id,
+                priority=item.priority,
+                reason="EXCLUDED_TERMINAL",
+                collision_keys=keys,
+            ))
+            continue
 
         if item.execution_state != "QUEUED":
             deferred.append(WaveDeferral(
@@ -279,4 +310,5 @@ def plan_wave_admission(
         deferred=tuple(deferred),
         budget=budget,
         occupied_collision_keys=tuple(sorted(occupied)),
+        excluded_subjects=tuple(sorted(excluded)),
     )
