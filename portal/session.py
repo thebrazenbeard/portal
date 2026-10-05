@@ -838,7 +838,9 @@ class PortalCommandSession:
         self._require_session(session_id=session_id, holder=holder)
         rows = self.connection.execute(
             """
-            SELECT subject_kind, subject_id, wave_run_id
+            SELECT
+                subject_kind, subject_id, wave_run_id,
+                adapter_id, route_id
             FROM portal_command_subjects
             WHERE session_id = ? AND state = 'ACTIVE'
             ORDER BY subject_kind, subject_id
@@ -853,7 +855,21 @@ class PortalCommandSession:
 
         store = PortalWaveStore(self.path)
         try:
-            for subject_kind, subject_id, wave_run_id in rows:
+            for (
+                subject_kind,
+                subject_id,
+                wave_run_id,
+                adapter_id,
+                route_id,
+            ) in rows:
+                if adapter_id is not None or route_id is not None:
+                    if adapter_id is None or route_id is None:
+                        raise ValueError(
+                            "active subject has incomplete adapter route binding"
+                        )
+                    unresolved += 1
+                    continue
+
                 if wave_run_id is None:
                     unresolved += 1
                     self.connection.execute(
