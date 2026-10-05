@@ -45,6 +45,14 @@ class PortalCycleResult:
     progress_made: bool
 
 
+@dataclass(frozen=True)
+class PortalRunResult:
+    run_id: str
+    cycles: tuple[PortalCycleResult, ...]
+    stop_reason: str
+    idle_cycles: int
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS portal_runs (
     run_id TEXT PRIMARY KEY,
@@ -654,3 +662,89 @@ def run_portal_once(
         raise
     finally:
         run_store.close()
+
+
+
+def run_portal_until_idle(
+    *,
+    projects: Iterable[ProjectDefinition],
+    dependencies: Iterable[DependencyEdge],
+    workers: Iterable[WorkerDefinition],
+    registry_digest: str,
+    dependency_digest: str,
+    worker_registry_digest: str,
+    state_db: Path,
+    nodes: Iterable[ExecutionNode],
+    run_id: str,
+    holder: str,
+    lease_ttl: float,
+    max_parallel: int,
+    max_cycles: int,
+    max_idle_cycles: int,
+    poll_seconds: float,
+    token: str | None,
+    transport: GitHubTransport | None = None,
+    private_collision_key: str | None = None,
+    clock: Callable[[], float] = time.time,
+    sleep: Callable[[float], None] = time.sleep,
+) -> PortalRunResult:
+    """Run bounded Portal cycles until verified idle or a circuit breaker trips.
+
+    Each iteration is a complete durable cycle. Work is never kept only in
+    process memory between iterations, so a later invocation can resume the
+    same run_id from the shared state database.
+    """
+    if type(max_cycles) is not int or max_cycles < 1:
+        raise ValueError("max_cycles must be a positive integer")
+    if type(max_idle_cycles) is not int or max_idle_cycles < 1:
+        raise ValueError("max_idle_cycles must be a positive integer")
+    if poll_seconds < 0:
+        raise ValueError("poll_seconds must be non-negative")
+
+    project_tuple = tuple(projects)
+    dependency_tuple = tuple(dependencies)
+    worker_tuple = tuple(workers)
+    node_tuple = tuple(nodes)
+
+    cycles: list[PortalCycleResult] = []
+    idle_cycles = 0
+    stop_reason = "MAX_CYCLES"
+
+    for index in range(max_cycles):
+        result = run_portal_once(
+            projects=project_tuple,
+            dependencies=dependency_tuple,
+            workers=worker_tuple,
+            registry_digest=registry_digest,
+            dependency_digest=dependency_digest,
+            worker_registry_digest=worker_registry_digest,
+            state_db=Path(state_db),
+            nodes=node_tuple,
+            run_id=run_id,
+            holder=holder,
+            lease_ttl=lease_ttl,
+            max_parallel=max_parallel,
+            token=token,
+            transport=transport,
+            private_collision_key=private_collision_key,
+            clock=clock,
+        )
+        cycles.append(result)
+
+        if result.progress_made:
+            idle_cycles = 0
+        else:
+            idle_cycles += 1
+            if idle_cycles >= max_idle_cycles:
+                stop_reason = "IDLE"
+                break
+
+        if index + 1 < max_cycles and poll_seconds:
+            sleep(poll_seconds)
+
+    return PortalRunResult(
+        run_id=run_id,
+        cycles=tuple(cycles),
+        stop_reason=stop_reason,
+        idle_cycles=idle_cycles,
+    )
