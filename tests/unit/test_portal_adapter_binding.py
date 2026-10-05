@@ -205,3 +205,143 @@ def test_dispatch_exception_leaves_route_bound_for_reconciliation(
     assert subject["dispatch_state"] == "BOUND"
     assert subject["state"] == "ACTIVE"
     controller.close()
+
+def test_adapter_reconciliation_can_verify_completion_and_free_subject(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_prepare(monkeypatch, tmp_path)
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    result = controller.run(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+    )
+    controller.bind_routes(
+        session_id="portal",
+        holder="vera",
+        wave_run_id=result.wave_run_id,
+        bindings=(
+            PortalRouteBinding(
+                subject_kind="repository",
+                subject_id="project-runner",
+                adapter_id="executor",
+                route_id="WorkLaptop:g9",
+            ),
+        ),
+    )
+    controller.record_dispatches(
+        session_id="portal",
+        holder="vera",
+        records=(
+            PortalDispatchRecord(
+                subject_kind="repository",
+                subject_id="project-runner",
+                adapter_id="executor",
+                route_id="WorkLaptop:g9",
+                state="DISPATCHED",
+                evidence_id="executor:task-123",
+            ),
+        ),
+    )
+
+    from portal.adapters import PortalReconciliationRecord
+
+    controller.record_reconciliations(
+        session_id="portal",
+        holder="vera",
+        records=(
+            PortalReconciliationRecord(
+                subject_kind="repository",
+                subject_id="project-runner",
+                adapter_id="executor",
+                route_id="WorkLaptop:g9",
+                state="VERIFIED_COMPLETE",
+                evidence_id="executor:task-123:verified",
+            ),
+        ),
+    )
+
+    subject = controller.status("portal")["subjects"][0]
+    assert subject["state"] == "TERMINAL"
+    assert subject["verification_state"] == "VERIFIED_COMPLETE"
+    assert subject["dispatch_evidence_id"] == "executor:task-123:verified"
+    controller.close()
+
+
+def test_outcome_unknown_reconciliation_stays_active_and_route_pinned(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_prepare(monkeypatch, tmp_path)
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    result = controller.run(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+    )
+    controller.bind_routes(
+        session_id="portal",
+        holder="vera",
+        wave_run_id=result.wave_run_id,
+        bindings=(
+            PortalRouteBinding(
+                subject_kind="repository",
+                subject_id="project-runner",
+                adapter_id="executor",
+                route_id="WorkLaptop:g9",
+            ),
+        ),
+    )
+
+    from portal.adapters import PortalReconciliationRecord
+
+    controller.record_reconciliations(
+        session_id="portal",
+        holder="vera",
+        records=(
+            PortalReconciliationRecord(
+                subject_kind="repository",
+                subject_id="project-runner",
+                adapter_id="executor",
+                route_id="WorkLaptop:g9",
+                state="OUTCOME_UNKNOWN",
+                evidence_id="executor:ambiguous-123",
+            ),
+        ),
+    )
+
+    subject = controller.status("portal")["subjects"][0]
+    assert subject["state"] == "ACTIVE"
+    assert subject["verification_state"] == "OUTCOME_UNKNOWN"
+    assert subject["adapter_id"] == "executor"
+    assert subject["route_id"] == "WorkLaptop:g9"
+
+    with pytest.raises(ValueError, match="route already bound"):
+        controller.bind_routes(
+            session_id="portal",
+            holder="vera",
+            wave_run_id=result.wave_run_id,
+            bindings=(
+                PortalRouteBinding(
+                    subject_kind="repository",
+                    subject_id="project-runner",
+                    adapter_id="workbridge",
+                    route_id="WorkLaptop:bridge",
+                ),
+            ),
+        )
+    controller.close()
+
