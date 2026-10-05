@@ -23,7 +23,7 @@ from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 from runner.execution_promotion import sign_evidence
 from runner.promoted_github_tree import source_tree_write_request_sha256
-from portal.source_promotion import execute_portal_source_proposal
+from portal.wave_runtime import execute_portal_source_proposal
 
 
 ROOT = Path(__file__).resolve().parents[2]
