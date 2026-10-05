@@ -17,6 +17,7 @@ def build_bound_wave_plan_payload(
     *,
     budget: WaveExecutionBudget,
     occupied_collision_keys: Iterable[str] = (),
+    excluded_subjects: Iterable[tuple[str, str]] = (),
 ) -> dict[str, object]:
     """Build the canonical digest-bound Project Runner admission plan payload."""
 
@@ -28,6 +29,7 @@ def build_bound_wave_plan_payload(
         wave,
         budget=budget,
         occupied_collision_keys=occupied_collision_keys,
+        excluded_subjects=excluded_subjects,
     )
     payload: dict[str, object] = {
         "mode": "PORTFOLIO_WAVE_ADMISSION_PLAN_V1",
