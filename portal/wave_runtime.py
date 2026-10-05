@@ -405,21 +405,17 @@ def _require_advisory_claim(
         if now >= float(lease[1]):
             raise ValueError("Project Runner advisory claim fence is expired")
 
-        promotion = store.connection.execute(
-            """
-            SELECT 1
-            FROM execution_promotions
-            WHERE lineage_id = ? AND work_fingerprint = ?
-              AND fencing_token = ?
-            LIMIT 1
-            """,
-            (
-                packet.lineage_id,
-                packet.work_fingerprint,
-                packet.fencing_token,
-            ),
-        ).fetchone()
-        if promotion is not None:
+        try:
+            load_durable_promotion_receipt(
+                state_db=Path(state_db),
+                lineage_id=packet.lineage_id,
+                work_fingerprint_value=packet.work_fingerprint,
+                fencing_token=packet.fencing_token,
+            )
+        except ValueError as exc:
+            if str(exc) != "execution promotion receipt is not durable":
+                raise
+        else:
             raise ValueError(
                 "advisory proposal cannot run after execution promotion"
             )
