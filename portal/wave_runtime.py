@@ -943,22 +943,45 @@ class PortalWaveStore:
         holder: str,
         now: float,
         ttl: float,
+        allowed_subject_ids: Iterable[str] | None = None,
     ) -> PortalWaveDeliveryClaim | None:
         if not run_id.strip() or not node_id.strip() or not holder.strip():
             raise ValueError("run_id, node_id, and delivery holder are required")
         if ttl <= 0:
             raise ValueError("delivery ttl must be positive")
 
+        allowed: tuple[str, ...] | None = None
+        if allowed_subject_ids is not None:
+            normalized: set[str] = set()
+            for raw_subject_id in allowed_subject_ids:
+                if not isinstance(raw_subject_id, str) or not raw_subject_id.strip():
+                    raise ValueError(
+                        "allowed advisory subject ids must be non-empty strings"
+                    )
+                normalized.add(raw_subject_id.strip())
+            allowed = tuple(sorted(normalized))
+            if not allowed:
+                return None
+
+        if allowed is None:
+            subject_clause = ""
+            subject_params: tuple[str, ...] = ()
+        else:
+            placeholders = ", ".join("?" for _ in allowed)
+            subject_clause = f" AND subject_id IN ({placeholders})"
+            subject_params = allowed
+
         self.connection.execute("BEGIN IMMEDIATE")
         try:
             self.connection.execute(
-                """
+                f"""
                 UPDATE portal_wave_deliveries
                 SET state = 'OUTCOME_UNKNOWN',
                     reason = ?,
                     lease_expires_at = NULL,
                     updated_at = ?
                 WHERE run_id = ? AND node_id = ?
+                  {subject_clause}
                   AND state = 'DELIVERED'
                   AND lease_expires_at IS NOT NULL
                   AND lease_expires_at <= ?
@@ -968,6 +991,7 @@ class PortalWaveStore:
                     now,
                     run_id,
                     node_id,
+                    *subject_params,
                     now,
                 ),
             )
@@ -976,8 +1000,14 @@ class PortalWaveStore:
             self.connection.rollback()
             raise
 
+        if allowed is None:
+            packet_subject_clause = ""
+        else:
+            placeholders = ", ".join("?" for _ in allowed)
+            packet_subject_clause = f" AND p.subject_id IN ({placeholders})"
+
         selected = self.connection.execute(
-            """
+            f"""
             SELECT
                 p.subject_id,
                 p.repository, p.ref, p.exact_head, p.node_id, p.lane_id,
@@ -993,13 +1023,14 @@ class PortalWaveStore:
               ON q.run_id = p.run_id AND q.subject_id = p.subject_id
             WHERE p.run_id = ?
               AND p.node_id = ?
+              {packet_subject_clause}
               AND p.state = 'CLAIMED'
               AND d.state = 'PENDING'
               AND q.subject_id IS NULL
             ORDER BY p.subject_id
             LIMIT 1
             """,
-            (run_id, node_id),
+            (run_id, node_id, *subject_params),
         ).fetchone()
         if selected is None:
             return None
