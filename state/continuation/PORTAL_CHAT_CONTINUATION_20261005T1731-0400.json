@@ -1,0 +1,101 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V1",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261005T1731-0400",
+  "restore_command": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261005T1731-0400",
+  "created_local": "2026-10-05T17:31:00-04:00",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "implementation_head_before_checkpoint": "45c35744ec6161764052afe34226ed034b5ad291",
+  "pull_request": {
+    "number": 1,
+    "title": "P.O.R.T.A.L. portfolio coordinator v1",
+    "state": "open",
+    "draft": true,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "ownership": {
+    "current": "next P.O.R.T.A.L. chat after intentional restore",
+    "previous_work_chat": "thread://01a10dc9-3926-79b3-8a0e-bb92c54da9f8?hostId=local",
+    "work_chat_rate_limited": true,
+    "mutation_owner_reassigned_by_patrick": true
+  },
+  "product": {
+    "name": "P.O.R.T.A.L.",
+    "expansion": "Portfolio Orchestration & Repository Tracking Access Layer",
+    "current_autonomy_model": "Patrick issues top-level commands; Portal autonomously schedules/routes/verifies/refills beneath them.",
+    "future_autonomy_model": "A later self-command policy may invoke the same command-session API.",
+    "required_commands": [
+      "run",
+      "continue",
+      "hold",
+      "complete",
+      "status",
+      "stop"
+    ],
+    "chatgpt_web_html_required": true,
+    "desktop_required": false
+  },
+  "topology": {
+    "WorkLaptop": {
+      "transport": "Executor",
+      "other_transports_inferred": false,
+      "last_reported_generation": 9,
+      "last_reported_capacity": 8,
+      "last_reported_active": 0,
+      "last_reported_queued": 0
+    }
+  },
+  "recent_active_subject_commits": [
+    "b078f974cd849c8e0e055e6b8ae7825c3142ccd5",
+    "6d1540ff7bb1cac375b4e7ba61b21024fa8b7242",
+    "aaaaff41781f828dab093062c2720c3186ef901e",
+    "f0640a2cf8fc185ecb04e18c2eb6a8e83ff8afe0",
+    "fcde5ed5d8e67f026e54b38c6389e7674a5005c0",
+    "45c35744ec6161764052afe34226ed034b5ad291"
+  ],
+  "ci_at_checkpoint": {
+    "head": "45c35744ec6161764052afe34226ed034b5ad291",
+    "successful": [
+      "test #195",
+      "test #194",
+      "Dependency Review #91",
+      "PR #1 #96"
+    ],
+    "unresolved": "Code scanning AI findings workflows include failures and one in-progress run; inspect logs before interpreting."
+  },
+  "architecture": {
+    "portal_owns": [
+      "durable command/control intent",
+      "portfolio coordination",
+      "active/held/terminal projection",
+      "safe admission/refill",
+      "execution-adapter routing",
+      "status/frontier projection"
+    ],
+    "existing_substrates_own": [
+      "execution",
+      "leases/fencing",
+      "effect/result evidence",
+      "verification/reconciliation"
+    ],
+    "optional_experimental_adapters": [
+      "portal/worker_backend.py",
+      "portal/worker_registry.py",
+      "portal/worker_runtime.py",
+      "portal/source_proposal.py",
+      "proposal-specific portal/wave_runtime.py machinery",
+      "ecosystem proposal-generation loop"
+    ]
+  },
+  "next_frontier": "Build the smallest durable, client-independent Portal command session supporting Patrick-issued run/continue/hold/complete/status/stop with autonomous scheduling/refill underneath, reusing Project Runner and treating worker/source-proposal machinery as optional adapters.",
+  "restore_steps": [
+    "Read this JSON and matching Markdown continuation file.",
+    "Refresh branch and PR; inspect all commits after implementation_head_before_checkpoint before mutation.",
+    "Refresh CI and WorkLaptop Executor topology if material.",
+    "Verify active_subjects propagation scheduler -> Portal planner -> canonical plan -> durable wave prep.",
+    "Implement canonical command session and thin client adapters.",
+    "Run focused/full tests.",
+    "Do not merge/deploy without Patrick's exact authority."
+  ]
+}
