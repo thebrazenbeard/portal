@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "project-runner"
 version = "0.1.0"
-description = "Public-safe orchestration kernel for a multi-repository project ecosystem"
+description = "P.O.R.T.A.L. portfolio coordination built on the governed Project Runner execution kernel"
 requires-python = ">=3.12"
 dependencies = [
   "PyYAML>=6,<7",
