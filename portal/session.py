@@ -1020,6 +1020,23 @@ class PortalCommandSession:
                 stop_reason = "STOPPED"
                 break
 
+            adapter_changed = 0
+            if execution_adapter is not None:
+                reconcile_adapter = getattr(execution_adapter, "reconcile", None)
+                if reconcile_adapter is not None:
+                    adapter_records = tuple(reconcile_adapter(current))
+                    if adapter_records:
+                        adapter_changed = sum(
+                            record.state in {"VERIFIED_COMPLETE", "VERIFIED_HELD"}
+                            for record in adapter_records
+                        )
+                        self.record_reconciliations(
+                            session_id=session_id,
+                            holder=holder,
+                            records=adapter_records,
+                            clock=clock,
+                        )
+
             reconciled = self.reconcile_active(
                 session_id=session_id,
                 holder=holder,
@@ -1051,7 +1068,11 @@ class PortalCommandSession:
                 idle_cycles = 0
                 break
 
-            progress = bool(advanced.packets) or reconciled["changed"] > 0
+            progress = (
+                bool(advanced.packets)
+                or adapter_changed > 0
+                or reconciled["changed"] > 0
+            )
             if progress:
                 idle_cycles = 0
             else:
