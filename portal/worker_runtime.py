@@ -271,6 +271,7 @@ def run_wave_workers_once(
                 transport=transport,
                 clock=clock,
                 claim_attempts=len(slots) + 1,
+                allowed_subject_ids=allowed_subject_ids,
             )
             for node_id, slot in slots
         ]
@@ -320,6 +321,7 @@ def _run_proposal_slot(
     transport: GitHubTransport | None,
     clock: Callable[[], float],
     claim_attempts: int,
+    allowed_subject_ids: tuple[str, ...] | None = None,
 ) -> PortalWorkerSlotResult:
     holder = f"{holder_prefix}:{node_id}:{slot}"
     claim = None
@@ -332,6 +334,7 @@ def _run_proposal_slot(
                 holder=holder,
                 now=float(clock()),
                 ttl=delivery_lease_ttl,
+                allowed_subject_ids=allowed_subject_ids,
             )
         finally:
             store.close()
@@ -462,6 +465,7 @@ def run_wave_proposal_workers_once(
     holder_prefix: str,
     delivery_lease_ttl: float,
     token: str | None,
+    allowed_subject_ids: tuple[str, ...] | None = None,
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
 ) -> PortalWorkerPassResult:
