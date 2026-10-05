@@ -7,11 +7,21 @@ from .models import (
     PortalNodeDeferral,
     PortalPlan,
 )
+from .runtime import (
+    PortalCycleResult,
+    PortalLaneResult,
+    PortalRunStore,
+    run_portal_once,
+)
 
 __all__ = [
     "ExecutionNode",
     "PortalAssignment",
     "PortalNodeDeferral",
     "PortalPlan",
+    "PortalCycleResult",
+    "PortalLaneResult",
+    "PortalRunStore",
     "plan_portal_wave",
+    "run_portal_once",
 ]
