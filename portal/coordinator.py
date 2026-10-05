@@ -23,6 +23,7 @@ def plan_portal_wave(
     budget: WaveExecutionBudget,
     nodes: Iterable[ExecutionNode],
     occupied_collision_keys: Iterable[str] = (),
+    excluded_subjects: Iterable[tuple[str, str]] = (),
 ) -> PortalPlan:
     """Assign Project Runner-admitted work to bounded execution nodes.
 
@@ -39,6 +40,7 @@ def plan_portal_wave(
         wave,
         budget=budget,
         occupied_collision_keys=occupied_collision_keys,
+        excluded_subjects=excluded_subjects,
     )
 
     load: Counter[str] = Counter()
