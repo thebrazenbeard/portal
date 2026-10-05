@@ -26,9 +26,13 @@ Implemented coordinator core:
 - atomic exact-head multi-file GitHub source publication;
 - independent effect verification and ambiguous-outcome reconciliation;
 - durable parent ecosystem sessions that exclude previously admitted subjects and refill repository lanes across successive child waves;
-- CLI surfaces for discovery, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
+- a durable command-session projection with `run`, `continue`, `hold`, `complete`, `status`, and `stop` semantics;
+- verification-gated completion: a worker/process result never frees a subject until owning-substrate evidence verifies terminal or held state;
+- resident bounded refill that reconciles active subjects, admits the next safe generation, and stops on verified idle, STOP, bounded waiting, or cycle limits;
+- live occupied-node accounting so saturated/backlogged nodes are not treated as free merely because their declared maximum capacity is larger;
+- CLI surfaces for discovery, command sessions, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
 
-This is no longer a planning-only implementation. Remaining work before a complete whole-ecosystem claim is concentrated in qualified intelligent proposal authorship for arbitrary repositories, first-class multi-repository workstream execution, and live node/backend qualification at run time.
+This is no longer a planning-only implementation. The remaining gap is qualified execution-adapter breadth and live host qualification for arbitrary semantic work and multi-repository workstreams; source presence alone is not an installed or continuously running P.O.R.T.A.L. runtime.
 
 ## Existing execution-loop substrate
 
@@ -42,7 +46,7 @@ The inherited `runner/` already exposes the critical loop primitives:
 - `reconcile-queue`;
 - `task-start` / `task-status` / `task-finalize` / `task-reconcile`.
 
-The next Portal implementation should compose those mechanisms with resident-loop, checkpoint/recovery, bus, and multi-device mechanisms already present elsewhere in Patrick's portfolio.
+The command-session/refill layer composes those mechanisms rather than replacing them. Remaining execution-adapter work should bind qualified repository/workstation/service routes behind a small capability/evidence/reconciliation contract rather than adding another scheduler.
 
 ## Single-chat control boundary
 
@@ -50,7 +54,22 @@ The single P.O.R.T.A.L. chat is an operator/control surface, not canonical persi
 
 A fresh chat must be able to reconstruct the run from durable state and continue without requiring the prior transcript.
 
-Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution backends are bound per node and must be independently current and authorized. Capability is never inferred across transports. In the current workstation topology, WorkLaptop is an Executor-backed node only; WorkBridge/Desktop Commander capability must not be inferred for it.
+Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution routes are selected per target/effect from currently qualified repository, workstation, or service adapters. Discovery or connector presence is not capability, attachment, currentness, or authority. No workstation or repository is permanently married to one transport.
+
+After dispatch, a timeout/disconnect or otherwise ambiguous effect remains bound to that attempted route/effect until reconciled. P.O.R.T.A.L. must not silently replay the same semantic effect through another adapter.
+
+## Command-session semantics
+
+The durable command session is operator intent, not a second execution engine:
+
+- `run` starts/restarts the session and, by default, performs bounded reconcile/refill generations;
+- `continue` admits the next safe generation around already-active work;
+- `hold` records durable no-refill intent; already-dispatched work continues to occupy scheduling capacity until verified held/terminal evidence exists;
+- `complete` independently verifies the owning wave delivery before moving a subject to terminal;
+- `status` reconstructs control state, generation and subject state from SQLite rather than chat memory;
+- `stop` prevents new admission/refill without cancelling or erasing active/unresolved effects.
+
+`OUTCOME_UNKNOWN` and verification-stale work remains active/unresolved. It is never freed merely to make room for another attempt.
 
 ## Whole-portfolio loop
 
@@ -68,7 +87,7 @@ The loop stops only when:
 
 ## Node and lane rule
 
-Execution nodes declare capacity and lane eligibility. Lane placement never widens effect authority.
+Execution nodes declare capacity and lane eligibility. Live occupied/backlogged slots are separate currentness evidence and reduce fresh placement capacity; declared maximum capacity alone does not make a node free. Lane placement never widens effect authority.
 
 Each lane binds an exact subject, owner, collision domain, authority ceiling, backend/node, and verification contract.
 

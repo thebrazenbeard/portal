@@ -1819,6 +1819,7 @@ def prepare_portal_wave(
     occupied_collision_keys: Iterable[str] = (),
     excluded_subjects: Iterable[tuple[str, str]] = (),
     active_subjects: Iterable[tuple[str, str]] = (),
+    occupied_node_slots: Mapping[str, int] | None = None,
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
 ) -> PortalWavePreparationResult:
@@ -1836,6 +1837,7 @@ def prepare_portal_wave(
     occupied_tuple = tuple(occupied_collision_keys)
     excluded_tuple = tuple(excluded_subjects)
     active_tuple = tuple(active_subjects)
+    occupied_node_slots_map = dict(occupied_node_slots or {})
 
     wave = load_advancement_wave(wave_path)
     corpus = load_portfolio_corpus(corpus_path, public_safe=True)
@@ -1854,6 +1856,7 @@ def prepare_portal_wave(
         occupied_collision_keys=occupied_tuple,
         excluded_subjects=excluded_tuple,
         active_subjects=active_tuple,
+        occupied_node_slots=occupied_node_slots_map,
     )
     plan_payload = build_bound_wave_plan_payload(
         wave_path,
@@ -1906,6 +1909,9 @@ def prepare_portal_wave(
             "active_subjects": sorted(
                 f"{kind}:{subject_id}"
                 for kind, subject_id in active_tuple
+            ),
+            "occupied_node_slots": dict(
+                sorted(occupied_node_slots_map.items())
             ),
         }
     )

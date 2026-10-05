@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from runner.portfolio_advancement import AdvancementWave
 from runner.portfolio_wave_scheduler import (
@@ -25,6 +25,7 @@ def plan_portal_wave(
     occupied_collision_keys: Iterable[str] = (),
     excluded_subjects: Iterable[tuple[str, str]] = (),
     active_subjects: Iterable[tuple[str, str]] = (),
+    occupied_node_slots: Mapping[str, int] | None = None,
 ) -> PortalPlan:
     """Assign Project Runner-admitted work to bounded execution nodes.
 
@@ -36,6 +37,19 @@ def plan_portal_wave(
     if len(node_ids) != len(set(node_ids)):
         raise ValueError("duplicate execution node id")
 
+    occupied: dict[str, int] = {}
+    for raw_node_id, raw_count in dict(occupied_node_slots or {}).items():
+        node_id = str(raw_node_id).strip()
+        if node_id not in node_ids:
+            raise ValueError(
+                f"occupied slots reference unknown execution node: {node_id}"
+            )
+        if type(raw_count) is not int or raw_count < 0:
+            raise ValueError(
+                "occupied execution-node slots must be non-negative integers"
+            )
+        occupied[node_id] = raw_count
+
     ordered_nodes = tuple(sorted(declared_nodes, key=lambda node: node.node_id))
     runner_plan = plan_wave_admission(
         wave,
@@ -45,7 +59,7 @@ def plan_portal_wave(
         active_subjects=active_subjects,
     )
 
-    load: Counter[str] = Counter()
+    load: Counter[str] = Counter(occupied)
     assignments: list[PortalAssignment] = []
     node_deferrals: list[PortalNodeDeferral] = []
 

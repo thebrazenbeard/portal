@@ -13,7 +13,7 @@ See [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_C
 ## Architecture
 
 - `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
-- `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, node placement, and the future single-command continuous run surface.
+- `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
 - Vera owns cross-project coordination and collision/ownership arbitration.
 - Durable state lives outside chat context so a fresh P.O.R.T.A.L. chat can reconstruct and resume the portfolio.
 - Node placement and schedulability do not create protected-effect authority.
@@ -22,11 +22,11 @@ P.O.R.T.A.L. was seeded from Project Runner because the required execution loops
 
 ## Current implementation state
 
-The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, place work on bounded nodes, acquire exact-head Project Runner claims, generate durable source-tree proposals through explicitly zero-mutation advisory workers, separately promote authorized proposals, perform atomic multi-file source writes, verify/reconcile effects, and refill a durable parent ecosystem session with the next eligible repository subjects.
+The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile worker receipts before freeing lanes, and refill newly available capacity across successive generations.
 
-The principal repository-wide coordinator surface is `portal ecosystem propose`. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+The preferred human-facing source surface is now the durable command session. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
 
-Two material classes remain before a complete whole-ecosystem claim: a qualified intelligent proposal-authoring backend for arbitrary repositories, and first-class execution of multi-repository workstream subjects.
+This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters still have to be live, current, target-bound and authorized for the exact work they perform.
 
 ## Internal-first donor policy
 
@@ -55,6 +55,17 @@ Create a node manifest:
         allowed_lanes: []
         enabled: true
 
+Run a durable portfolio command session (the occupied-node values are a current snapshot, not permanent configuration):
+
+    portal run \
+      --session-id portfolio \
+      --nodes tests/fixtures/portal-nodes-valid.yaml \
+      --max-parallel 8 \
+      --occupied-node lappy=54 \
+      --occupied-node worklaptop=0
+
+`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`.
+
 Plan a bounded portfolio wave:
 
     portal plan \
@@ -65,7 +76,7 @@ Plan a bounded portfolio wave:
       --max-per-identity 2 \
       --max-per-family 2
 
-The `plan` command remains the read-only planning surface. The newer `ecosystem` and `wave` commands drive durable repository-wide proposal/refill and governed proposal promotion/execution workflows.
+The `plan` command remains the read-only planning surface. Command sessions own operator intent/refill state; `wave` and `ecosystem` remain lower-level governed execution/proposal workflows.
 
 ## Core invariants
 

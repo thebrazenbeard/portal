@@ -22,6 +22,11 @@ from .runtime import (
     run_portal_once,
     run_portal_until_idle,
 )
+from .session import (
+    PortalCommandSession,
+    PortalRefillResult,
+    PortalSessionResult,
+)
 from .wave_runtime import (
     PortalWavePacket,
     PortalWavePreparationResult,
@@ -33,12 +38,15 @@ __all__ = [
     "ExecutionNode",
     "GitHubRepositoryCatalog",
     "PortalAssignment",
+    "PortalCommandSession",
     "PortalCycleResult",
     "PortalLaneResult",
     "PortalNodeDeferral",
     "PortalPlan",
+    "PortalRefillResult",
     "PortalRunResult",
     "PortalRunStore",
+    "PortalSessionResult",
     "PortalWavePacket",
     "PortalWavePreparationResult",
     "PortalWaveStore",

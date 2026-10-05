@@ -190,11 +190,15 @@ The repository-level coordinator core is now implemented beyond planning:
 - atomic exact-head multi-file source writes;
 - independent verification and ambiguous-effect reconciliation;
 - durable parent ecosystem sessions that exclude previously admitted subjects and refill repository lanes across successive generations;
-- operator CLI surfaces for ecosystem proposal advancement, status, proposal promotion, execution and reconciliation.
+- a client-independent durable command session with `run`, `continue`, `hold`, `complete`, `status`, and `stop`;
+- verified-completion reconciliation before a lane is freed;
+- bounded resident refill across successive command-session generations;
+- live occupied/backlogged-node accounting during placement, with occupancy refreshed by the host when a live provider is available;
+- operator CLI surfaces for command sessions, ecosystem proposal advancement, status, proposal promotion, execution and reconciliation.
 
-Current qualification has exercised the repository coordinator path on WorkLaptop through **Executor**, which is the only currently attached execution transport for that machine. P.O.R.T.A.L. must not infer WorkBridge/Desktop Commander capability for WorkLaptop.
+Execution routing is capability-based and target-bound. Repository-native connectors, Executor, WorkBridge Commander/Relay, Lappy Desktop Commander and future adapters may all be candidate routes when they are live, current, capable and authorized for the exact target/effect. Discovery or plugin presence does not establish any of those facts. A post-dispatch ambiguous outcome remains bound to the attempted route/effect and must be reconciled before any replay or route substitution.
 
-The remaining mission gap is narrower: provide a qualified intelligent proposal-authoring backend that can do real arbitrary-repository work under the advisory packet contract, and add first-class execution for multi-repository workstream subjects. Until those are qualified, P.O.R.T.A.L. can coordinate and advance the repository estate structurally, but it cannot honestly claim autonomous semantic advancement of every project class.
+The remaining mission gap is execution-adapter breadth and live host qualification, not another scheduler: arbitrary semantic work still needs qualified adapters/backends, and multi-repository workstream execution needs first-class binding. Source presence alone does not establish an installed/resident P.O.R.T.A.L. runtime or continuous off-turn activity.
 
 ## Protected-effect boundary
 

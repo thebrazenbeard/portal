@@ -177,3 +177,36 @@ def test_active_subjects_consume_budget_before_new_assignments() -> None:
         (item.subject_id, item.reason)
         for item in plan.runner_plan.deferred
     ]
+
+def test_live_occupied_slots_keep_new_work_off_saturated_node() -> None:
+    wave = _wave(
+        _item("a", "example/a"),
+        _item("b", "example/b"),
+    )
+    plan = plan_portal_wave(
+        wave,
+        budget=_budget(2),
+        nodes=(
+            ExecutionNode(node_id="lappy", max_parallel=8),
+            ExecutionNode(node_id="worklaptop", max_parallel=8),
+        ),
+        occupied_node_slots={
+            "lappy": 54,
+            "worklaptop": 0,
+        },
+    )
+
+    assert [(item.subject_id, item.node_id) for item in plan.assignments] == [
+        ("a", "worklaptop"),
+        ("b", "worklaptop"),
+    ]
+
+
+def test_unknown_live_occupancy_node_fails_closed() -> None:
+    with pytest.raises(ValueError, match="unknown execution node"):
+        plan_portal_wave(
+            _wave(_item("a", "example/a")),
+            budget=_budget(1),
+            nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+            occupied_node_slots={"ghost": 1},
+        )

@@ -39,6 +39,7 @@ from .runtime import (
     PortalRunStore,
     run_portal_until_idle,
 )
+from .session import PortalCommandSession
 from .wave_runtime import (
     PortalWaveStore,
     execute_portal_source_proposal,
@@ -149,6 +150,28 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--holder", default="vera")
     run.add_argument("--lease-ttl", type=float, default=300.0)
     run.add_argument("--max-parallel", type=int, default=6)
+    run.add_argument("--session-id")
+    run.add_argument(
+        "--wave",
+        type=Path,
+        default=ROOT / "portfolio" / "advancement_wave.public.json",
+    )
+    run.add_argument(
+        "--corpus",
+        type=Path,
+        default=ROOT / "portfolio" / "corpus.public.json",
+    )
+    run.add_argument("--max-per-identity", type=int, default=2)
+    run.add_argument("--max-per-family", type=int, default=2)
+    run.add_argument("--max-per-lane", type=int, default=2)
+    run.add_argument("--verifier", default="vera")
+    run.add_argument(
+        "--occupied-node",
+        action="append",
+        default=[],
+        dest="occupied_nodes",
+        metavar="NODE=COUNT",
+    )
     run.add_argument("--max-cycles", type=int, default=100)
     run.add_argument("--max-idle-cycles", type=int, default=1)
     run.add_argument("--poll-seconds", type=float, default=0.0)
@@ -168,6 +191,88 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(".portal/portal.sqlite3"),
     )
     status.add_argument("--run-id", default="portal-default")
+    status.add_argument("--session-id")
+
+    continue_cmd = subcommands.add_parser(
+        "continue",
+        help="refill the next safe generation of an existing command session",
+    )
+    continue_cmd.add_argument("--session-id", default="portal-default")
+    continue_cmd.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    continue_cmd.add_argument("--holder", default="vera")
+    continue_cmd.add_argument(
+        "--wave",
+        type=Path,
+        default=ROOT / "portfolio" / "advancement_wave.public.json",
+    )
+    continue_cmd.add_argument(
+        "--corpus",
+        type=Path,
+        default=ROOT / "portfolio" / "corpus.public.json",
+    )
+    continue_cmd.add_argument(
+        "--projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    continue_cmd.add_argument("--nodes", type=Path, required=True)
+    continue_cmd.add_argument("--lease-ttl", type=float, default=300.0)
+    continue_cmd.add_argument("--max-parallel", type=int, default=6)
+    continue_cmd.add_argument("--max-per-identity", type=int, default=2)
+    continue_cmd.add_argument("--max-per-family", type=int, default=2)
+    continue_cmd.add_argument("--max-per-lane", type=int, default=2)
+    continue_cmd.add_argument(
+        "--occupied-node",
+        action="append",
+        default=[],
+        dest="occupied_nodes",
+        metavar="NODE=COUNT",
+    )
+
+    hold = subcommands.add_parser(
+        "hold",
+        help="durably prevent future refill for a subject without cancelling active effects",
+    )
+    hold.add_argument("--session-id", default="portal-default")
+    hold.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    hold.add_argument("--holder", default="vera")
+    hold.add_argument("--subject-kind", default="repository")
+    hold.add_argument("--subject-id", required=True)
+
+    complete = subcommands.add_parser(
+        "complete",
+        help="verify and close one active command-session subject",
+    )
+    complete.add_argument("--session-id", default="portal-default")
+    complete.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    complete.add_argument("--holder", default="vera")
+    complete.add_argument("--subject-kind", default="repository")
+    complete.add_argument("--subject-id", required=True)
+    complete.add_argument("--verifier", default="vera")
+
+    stop = subcommands.add_parser(
+        "stop",
+        help="stop new admission/refill while preserving active and unresolved work",
+    )
+    stop.add_argument("--session-id", default="portal-default")
+    stop.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    stop.add_argument("--holder", default="vera")
 
     wave = subcommands.add_parser(
         "wave",
@@ -511,7 +616,172 @@ def _run_project_snapshot(args: argparse.Namespace):
     return snapshot, "live-discovery"
 
 
+def _occupied_node_slots(values: Sequence[str]) -> dict[str, int]:
+    occupied: dict[str, int] = {}
+    for raw in values:
+        node_id, separator, count_text = raw.partition("=")
+        node_id = node_id.strip()
+        if not separator or not node_id:
+            raise ValueError("occupied node must use NODE=COUNT")
+        try:
+            count = int(count_text)
+        except ValueError as exc:
+            raise ValueError("occupied node count must be an integer") from exc
+        if count < 0:
+            raise ValueError("occupied node count must be non-negative")
+        if node_id in occupied:
+            raise ValueError(f"duplicate occupied node: {node_id}")
+        occupied[node_id] = count
+    return occupied
+
+
+def _session_budget(args: argparse.Namespace) -> WaveExecutionBudget:
+    return WaveExecutionBudget(
+        max_parallel=args.max_parallel,
+        max_per_identity=args.max_per_identity,
+        max_per_family=args.max_per_family,
+        max_per_lane=args.max_per_lane,
+    )
+
+
+def _session_result_payload(
+    *,
+    mode: str,
+    result,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "mode": mode,
+        "session_id": result.session_id,
+        "control_state": result.control_state,
+        "summary": result.summary,
+        "protected_effects_authorized": False,
+    }
+    if hasattr(result, "generation"):
+        payload["generation"] = result.generation
+        payload["wave_run_id"] = result.wave_run_id
+        payload["admitted"] = len(result.packets)
+    if hasattr(result, "cycles"):
+        payload["generations"] = len(result.cycles)
+        payload["stop_reason"] = result.stop_reason
+        payload["idle_cycles"] = result.idle_cycles
+    return payload
+
+
+def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
+    projects_path = _wave_projects_path(args)
+    controller = PortalCommandSession(Path(args.state_db))
+    try:
+        common = dict(
+            session_id=args.session_id,
+            holder=args.holder,
+            wave_path=Path(args.wave),
+            corpus_path=Path(args.corpus),
+            projects_path=projects_path,
+            nodes=load_execution_nodes(Path(args.nodes)),
+            budget=_session_budget(args),
+            lease_ttl=args.lease_ttl,
+            token=_github_token(),
+            occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
+        )
+        if args.once:
+            result = controller.run(**common)
+        else:
+            result = controller.run_until_idle(
+                **common,
+                verifier=args.verifier,
+                max_cycles=args.max_cycles,
+                max_idle_cycles=args.max_idle_cycles,
+                poll_seconds=args.poll_seconds,
+            )
+    finally:
+        controller.close()
+    return _session_result_payload(
+        mode="PORTAL_COMMAND_SESSION_RUN_V1",
+        result=result,
+    )
+
+
+def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
+    controller = PortalCommandSession(Path(args.state_db))
+    try:
+        result = controller.continue_run(
+            session_id=args.session_id,
+            holder=args.holder,
+            wave_path=Path(args.wave),
+            corpus_path=Path(args.corpus),
+            projects_path=Path(args.projects),
+            nodes=load_execution_nodes(Path(args.nodes)),
+            budget=_session_budget(args),
+            lease_ttl=args.lease_ttl,
+            token=_github_token(),
+            occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
+        )
+    finally:
+        controller.close()
+    return _session_result_payload(
+        mode="PORTAL_COMMAND_SESSION_CONTINUE_V1",
+        result=result,
+    )
+
+
+def _hold_payload(args: argparse.Namespace) -> dict[str, object]:
+    controller = PortalCommandSession(Path(args.state_db))
+    try:
+        status = controller.hold(
+            session_id=args.session_id,
+            holder=args.holder,
+            subject_kind=args.subject_kind,
+            subject_id=args.subject_id,
+        )
+    finally:
+        controller.close()
+    return {
+        "mode": "PORTAL_COMMAND_SESSION_HOLD_V1",
+        **status,
+        "protected_effects_authorized": False,
+    }
+
+
+def _complete_payload(args: argparse.Namespace) -> dict[str, object]:
+    controller = PortalCommandSession(Path(args.state_db))
+    try:
+        status = controller.complete(
+            session_id=args.session_id,
+            holder=args.holder,
+            subject_kind=args.subject_kind,
+            subject_id=args.subject_id,
+            verifier=args.verifier,
+            token=_github_token(),
+        )
+    finally:
+        controller.close()
+    return {
+        "mode": "PORTAL_COMMAND_SESSION_COMPLETE_V1",
+        **status,
+        "protected_effects_authorized": False,
+    }
+
+
+def _stop_payload(args: argparse.Namespace) -> dict[str, object]:
+    controller = PortalCommandSession(Path(args.state_db))
+    try:
+        status = controller.stop(
+            session_id=args.session_id,
+            holder=args.holder,
+        )
+    finally:
+        controller.close()
+    return {
+        "mode": "PORTAL_COMMAND_SESSION_STOP_V1",
+        **status,
+        "protected_effects_authorized": False,
+    }
+
+
 def _run_payload(args: argparse.Namespace) -> dict[str, object]:
+    if args.session_id:
+        return _session_run_payload(args)
+
     project_snapshot, portfolio_source = _run_project_snapshot(args)
     dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
     worker_snapshot = load_worker_snapshot(Path(args.workers))
@@ -580,6 +850,17 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _status_payload(args: argparse.Namespace) -> dict[str, object]:
+    if args.session_id:
+        controller = PortalCommandSession(Path(args.state_db))
+        try:
+            status = controller.status(args.session_id)
+        finally:
+            controller.close()
+        return {
+            "mode": "PORTAL_COMMAND_SESSION_STATUS_V1",
+            **status,
+        }
+
     store = PortalRunStore(Path(args.state_db))
     try:
         summary = store.summary(args.run_id)
@@ -911,6 +1192,14 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
             payload = _run_payload(args)
         elif args.command == "status":
             payload = _status_payload(args)
+        elif args.command == "continue":
+            payload = _continue_payload(args)
+        elif args.command == "hold":
+            payload = _hold_payload(args)
+        elif args.command == "complete":
+            payload = _complete_payload(args)
+        elif args.command == "stop":
+            payload = _stop_payload(args)
         elif args.command == "wave":
             if args.wave_command == "prepare":
                 payload = _wave_prepare_payload(args)
