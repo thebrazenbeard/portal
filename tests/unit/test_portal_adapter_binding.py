@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 import portal.session as portal_session
-from portal.adapters import PortalDispatchRecord, PortalRouteBinding
+from portal.adapters import (
+    PortalDispatchRecord,
+    PortalReconciliationRecord,
+    PortalRouteBinding,
+)
 from portal.models import ExecutionNode
 from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
