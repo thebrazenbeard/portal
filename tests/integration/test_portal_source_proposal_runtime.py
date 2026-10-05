@@ -23,7 +23,7 @@ from runner.portfolio_corpus import load_portfolio_corpus
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
 from runner.execution_promotion import sign_evidence
 from runner.promoted_github_tree import source_tree_write_request_sha256
-from portal.wave_runtime import execute_portal_source_proposal
+from portal.wave_runtime import execute_portal_source_proposal, promote_portal_source_proposal
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -437,7 +437,7 @@ def test_source_proposal_promotes_executes_and_completes_exact_project_runner_wo
         {(packet.repository, packet.ref): packet.exact_head}
     )
 
-    result = execute_portal_source_proposal(
+    promote_portal_source_proposal(
         state_db=db,
         run_id="proposal-run",
         subject_id=packet.subject_id,
@@ -447,7 +447,14 @@ def test_source_proposal_promotes_executes_and_completes_exact_project_runner_wo
         review_key=REVIEW_KEY,
         execution_authority_key=EXECUTION_KEY,
         effect_authority_key=EFFECT_KEY,
-        verifier="vera-review",
+        token=None,
+        transport=transport,
+        clock=time.time,
+    )
+    result = execute_portal_source_proposal(
+        state_db=db,
+        run_id="proposal-run",
+        subject_id=packet.subject_id,
         token=None,
         transport=transport,
         clock=time.time,
@@ -491,7 +498,7 @@ def test_source_proposal_refuses_stale_source_before_any_mutation(
     )
 
     with pytest.raises(ValueError, match="source head is stale"):
-        execute_portal_source_proposal(
+        promote_portal_source_proposal(
             state_db=db,
             run_id="proposal-run",
             subject_id=packet.subject_id,
@@ -501,7 +508,6 @@ def test_source_proposal_refuses_stale_source_before_any_mutation(
             review_key=REVIEW_KEY,
             execution_authority_key=EXECUTION_KEY,
             effect_authority_key=EFFECT_KEY,
-            verifier="vera-review",
             token=None,
             transport=transport,
             clock=time.time,
