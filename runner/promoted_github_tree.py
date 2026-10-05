@@ -227,11 +227,16 @@ class PromotedGitHubSourceTreeWriteBackend:
                 "exact GitHub source-tree compare-and-swap failed",
             )
         except GitHubOutcomeUnknown as exc:
-            outputs = (
-                (exc.candidate_commit_sha,)
-                if exc.candidate_commit_sha is not None
-                else ()
-            )
+            outputs: tuple[str, ...] = ()
+            if exc.candidate_commit_sha is not None:
+                values = [exc.candidate_commit_sha]
+                if exc.candidate_blob_shas is not None:
+                    values.extend(
+                        exc.candidate_blob_shas[file.path]
+                        for file in request.files
+                        if file.path in exc.candidate_blob_shas
+                    )
+                outputs = tuple(values)
             return self._failure(
                 fingerprint,
                 "OUTCOME_UNKNOWN",
