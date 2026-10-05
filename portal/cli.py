@@ -27,6 +27,10 @@ from .runtime import (
     PortalRunStore,
     run_portal_until_idle,
 )
+from .wave_runtime import (
+    PortalWaveStore,
+    prepare_portal_wave,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +151,70 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(".portal/portal.sqlite3"),
     )
     status.add_argument("--run-id", default="portal-default")
+
+    wave = subcommands.add_parser(
+        "wave",
+        help="prepare and inspect durable advancement-wave work packets",
+    )
+    wave_subcommands = wave.add_subparsers(
+        dest="wave_command",
+        required=True,
+    )
+
+    wave_prepare = wave_subcommands.add_parser(
+        "prepare",
+        help=(
+            "bind the advancement wave to live projects, assign nodes, "
+            "and acquire exact-head Project Runner claims"
+        ),
+    )
+    wave_prepare.add_argument(
+        "--wave",
+        type=Path,
+        default=ROOT / "portfolio" / "advancement_wave.public.json",
+    )
+    wave_prepare.add_argument(
+        "--corpus",
+        type=Path,
+        default=ROOT / "portfolio" / "corpus.public.json",
+    )
+    wave_prepare.add_argument(
+        "--projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    wave_prepare.add_argument("--discover-owner")
+    wave_prepare.add_argument("--write-live-registry", type=Path)
+    wave_prepare.add_argument("--nodes", type=Path, required=True)
+    wave_prepare.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_prepare.add_argument("--run-id", default="portal-wave-default")
+    wave_prepare.add_argument("--holder", default="vera")
+    wave_prepare.add_argument("--lease-ttl", type=float, default=300.0)
+    wave_prepare.add_argument("--max-parallel", type=int, default=6)
+    wave_prepare.add_argument("--max-per-identity", type=int, default=2)
+    wave_prepare.add_argument("--max-per-family", type=int, default=2)
+    wave_prepare.add_argument("--max-per-lane", type=int, default=2)
+    wave_prepare.add_argument(
+        "--occupied-collision-key",
+        action="append",
+        default=[],
+        dest="occupied_collision_keys",
+    )
+
+    wave_status = wave_subcommands.add_parser(
+        "status",
+        help="show durable advancement-wave outbox state",
+    )
+    wave_status.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_status.add_argument("--run-id", default="portal-wave-default")
     return parser
 
 
@@ -310,6 +378,73 @@ def _status_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _wave_projects_path(args: argparse.Namespace) -> Path:
+    projects_path = Path(args.projects)
+    if not args.discover_owner:
+        return projects_path
+
+    curated = load_project_snapshot(projects_path)
+    snapshot = discover_live_project_registry(
+        owner=args.discover_owner,
+        curated_projects=curated.projects,
+        token=_github_token(),
+    )
+    output = (
+        Path(args.write_live_registry)
+        if args.write_live_registry is not None
+        else Path(args.state_db).parent / "projects.live.yaml"
+    )
+    write_project_registry(output, snapshot)
+    return output
+
+
+def _wave_prepare_payload(args: argparse.Namespace) -> dict[str, object]:
+    projects_path = _wave_projects_path(args)
+    nodes = load_execution_nodes(Path(args.nodes))
+    budget = WaveExecutionBudget(
+        max_parallel=args.max_parallel,
+        max_per_identity=args.max_per_identity,
+        max_per_family=args.max_per_family,
+        max_per_lane=args.max_per_lane,
+    )
+    result = prepare_portal_wave(
+        wave_path=Path(args.wave),
+        corpus_path=Path(args.corpus),
+        projects_path=projects_path,
+        state_db=Path(args.state_db),
+        nodes=nodes,
+        budget=budget,
+        run_id=args.run_id,
+        holder=args.holder,
+        lease_ttl=args.lease_ttl,
+        token=_github_token(),
+        occupied_collision_keys=args.occupied_collision_keys,
+    )
+    return {
+        "mode": "PORTAL_WAVE_PREPARE_V1",
+        "run_id": result.run_id,
+        "plan_sha256": result.plan_sha256,
+        "plan_path": str(result.plan_path),
+        "assigned": result.assigned,
+        "claimed": result.claimed,
+        "held": result.held,
+        "protected_effects_authorized": False,
+        "packet_details_emitted": False,
+    }
+
+
+def _wave_status_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalWaveStore(Path(args.state_db))
+    try:
+        summary = store.summary(args.run_id)
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_WAVE_STATUS_V1",
+        "wave": summary,
+    }
+
+
 def entrypoint(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -322,6 +457,14 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
             payload = _run_payload(args)
         elif args.command == "status":
             payload = _status_payload(args)
+        elif args.command == "wave":
+            if args.wave_command == "prepare":
+                payload = _wave_prepare_payload(args)
+            elif args.wave_command == "status":
+                payload = _wave_status_payload(args)
+            else:
+                parser.error("unsupported wave command")
+                return 2
         else:
             parser.error("unsupported command")
             return 2
