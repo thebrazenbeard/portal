@@ -36,6 +36,14 @@ def _packet() -> dict[str, object]:
             "work_fingerprint": "c" * 64,
         },
         "delivery_fencing_token": 1,
+        "execution_authorized": True,
+        "execution_effect_class": "NO_PROTECTED_EFFECT",
+        "execution_promotion": {
+            "promotion_sha256": "d" * 64,
+            "review_sha256": "e" * 64,
+            "execution_grant_sha256": "f" * 64,
+            "valid_until": 9999999999.0,
+        },
         "protected_effects_authorized": False,
         "source_mutation_authorized": False,
         "target_ref_mutation_authorized": False,
@@ -247,4 +255,23 @@ def test_process_worker_requires_absolute_executable(tmp_path: Path) -> None:
             command=("python", "worker.py"),
             timeout_seconds=1.0,
             pass_env=(),
+        )
+
+
+
+def test_process_worker_rejects_unpromoted_packet(tmp_path: Path) -> None:
+    worker = tmp_path / "worker.py"
+    _write_worker(worker, "raise SystemExit(0)\n")
+    packet = _packet()
+    packet["execution_authorized"] = False
+
+    with pytest.raises(ValueError, match="requires promoted execution"):
+        run_process_worker(
+            packet=packet,
+            spec=ProcessWorkerSpec(
+                command=(sys.executable, str(worker)),
+                timeout_seconds=1.0,
+                pass_env=(),
+            ),
+            workspace_root=tmp_path / "workspace",
         )
