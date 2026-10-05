@@ -1,0 +1,9 @@
+{
+  "schema": "PORTAL_BOOTSTRAP_PROVENANCE_V1",
+  "name": "P.O.R.T.A.L.",
+  "expansion": "Portfolio Orchestration & Repository Tracking Access Layer",
+  "source_repository": "thebrazenbeard/project-runner",
+  "source_commit": "04702abbf51aa2920b7d054275619253ea6fa748",
+  "source_tree": "f3f228258bc2de73724c598721bd5aa5beedab95",
+  "intent": "Seed P.O.R.T.A.L. from the governed Project Runner execution kernel before Portal-specific portfolio-coordination changes."
+}
