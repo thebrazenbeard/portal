@@ -140,6 +140,16 @@ class GitHubTransport(Protocol):
         expected_blob_sha: str | None = None,
     ) -> tuple[str, str]: ...
 
+    def put_files_exact_head(
+        self,
+        repository: str,
+        files: tuple[Mapping[str, object], ...],
+        branch: str,
+        message: str,
+        *,
+        expected_head: str,
+    ) -> tuple[str, dict[str, str]]: ...
+
 
 class GitHubRestTransport:
     """Small GitHub REST transport using only the Python standard library."""
@@ -566,6 +576,181 @@ class GitHubRestTransport:
                 candidate_blob_sha=blob_sha,
             )
         return new_commit_sha, blob_sha
+
+
+    def put_files_exact_head(
+        self,
+        repository: str,
+        files: tuple[Mapping[str, object], ...],
+        branch: str,
+        message: str,
+        *,
+        expected_head: str,
+    ) -> tuple[str, dict[str, str]]:
+        """Publish multiple regular UTF-8 files as one exact-head Git commit."""
+
+        if not files:
+            raise ValueError("github exact source-tree write requires files")
+        if not message.strip():
+            raise ValueError("github exact source-tree write requires message")
+
+        owner, repo = repository.split("/", 1)
+        observed_head = self.read_ref(repository, branch)
+        if observed_head != expected_head:
+            raise GitHubPreconditionFailed("github exact head precondition failed")
+
+        commit_payload = self._request(
+            "GET",
+            f"{self.api_base}/repos/{parse.quote(owner)}/{parse.quote(repo)}/git/commits/{parse.quote(expected_head, safe='')}",
+        )
+        if commit_payload is None:
+            raise KeyError(expected_head)
+        tree = commit_payload.get("tree")
+        if not isinstance(tree, Mapping) or not tree.get("sha"):
+            raise RuntimeError("github commit response missing tree")
+        base_tree_sha = str(tree["sha"])
+
+        normalized: list[tuple[str, str, str | None, str]] = []
+        seen_paths: set[str] = set()
+        for raw in files:
+            if not isinstance(raw, Mapping):
+                raise ValueError("github exact source-tree file must be an object")
+            path_value = raw.get("path")
+            content_value = raw.get("content")
+            expected_value = raw.get("expected_blob_sha")
+            if not isinstance(path_value, str) or not path_value:
+                raise ValueError("github exact source-tree file requires path")
+            path = path_value.lstrip("/")
+            if path != path_value or path.endswith("/"):
+                raise ValueError("github exact source-tree path must be canonical")
+            parts = path.split("/")
+            if any(part in {"", ".", ".."} for part in parts):
+                raise ValueError("github exact source-tree path must be canonical")
+            if path in seen_paths:
+                raise ValueError("github exact source-tree paths must be unique")
+            seen_paths.add(path)
+            if not isinstance(content_value, str):
+                raise ValueError("github exact source-tree file requires content")
+            expected_blob_sha = (
+                str(expected_value) if expected_value is not None else None
+            )
+
+            existing = self._tree_entry(repository, base_tree_sha, path)
+            if existing is None:
+                if expected_blob_sha is not None:
+                    raise GitHubPreconditionFailed(
+                        "github expected blob is missing at exact head"
+                    )
+                mode = "100644"
+            else:
+                if str(existing.get("type", "")) != "blob":
+                    raise GitHubPreconditionFailed(
+                        "github exact source-tree target is not a blob"
+                    )
+                mode = str(existing.get("mode", ""))
+                if mode != "100644":
+                    raise GitHubPreconditionFailed(
+                        "github exact source-tree supports regular files only"
+                    )
+                observed_blob_sha = str(existing.get("sha", ""))
+                if expected_blob_sha is None:
+                    raise GitHubPreconditionFailed(
+                        "github existing file requires expected blob sha"
+                    )
+                if observed_blob_sha != expected_blob_sha:
+                    raise GitHubPreconditionFailed(
+                        "github exact blob precondition failed"
+                    )
+            normalized.append((path, content_value, expected_blob_sha, mode))
+
+        blob_shas: dict[str, str] = {}
+        tree_entries: list[dict[str, object]] = []
+        for path, content, _expected_blob_sha, mode in normalized:
+            blob_payload = self._request(
+                "POST",
+                f"{self.api_base}/repos/{parse.quote(owner)}/{parse.quote(repo)}/git/blobs",
+                {"content": content, "encoding": "utf-8"},
+            )
+            if blob_payload is None or not blob_payload.get("sha"):
+                raise RuntimeError("github blob creation missing sha")
+            blob_sha = str(blob_payload["sha"])
+            blob_shas[path] = blob_sha
+            tree_entries.append(
+                {
+                    "path": path,
+                    "mode": mode,
+                    "type": "blob",
+                    "sha": blob_sha,
+                }
+            )
+
+        tree_payload = self._request(
+            "POST",
+            f"{self.api_base}/repos/{parse.quote(owner)}/{parse.quote(repo)}/git/trees",
+            {"base_tree": base_tree_sha, "tree": tree_entries},
+        )
+        if tree_payload is None or not tree_payload.get("sha"):
+            raise RuntimeError("github tree creation missing sha")
+        new_tree_sha = str(tree_payload["sha"])
+
+        new_commit_payload = self._request(
+            "POST",
+            f"{self.api_base}/repos/{parse.quote(owner)}/{parse.quote(repo)}/git/commits",
+            {
+                "message": message,
+                "tree": new_tree_sha,
+                "parents": [expected_head],
+            },
+        )
+        if new_commit_payload is None or not new_commit_payload.get("sha"):
+            raise RuntimeError("github commit creation missing sha")
+        new_commit_sha = str(new_commit_payload["sha"])
+
+        try:
+            self._update_ref_exact(
+                repository=repository,
+                branch=branch,
+                expected_head=expected_head,
+                new_head=new_commit_sha,
+            )
+        except GitHubOutcomeUnknown as exc:
+            raise GitHubOutcomeUnknown(
+                str(exc),
+                candidate_commit_sha=new_commit_sha,
+            ) from exc
+
+        try:
+            readback_head = self.read_ref(repository, branch)
+            if readback_head != new_commit_sha:
+                raise GitHubOutcomeUnknown(
+                    "github exact source-tree readback head mismatch",
+                    candidate_commit_sha=new_commit_sha,
+                )
+            for path, content, _expected_blob_sha, _mode in normalized:
+                observed = self.read_file(repository, path, new_commit_sha)
+                if (
+                    observed is None
+                    or observed.sha != blob_shas[path]
+                    or observed.content != content
+                ):
+                    raise GitHubOutcomeUnknown(
+                        "github exact source-tree readback file mismatch",
+                        candidate_commit_sha=new_commit_sha,
+                    )
+            final_head = self.read_ref(repository, branch)
+        except GitHubOutcomeUnknown:
+            raise
+        except (KeyError, RuntimeError, ValueError) as exc:
+            raise GitHubOutcomeUnknown(
+                "github exact source-tree readback outcome is unknown",
+                candidate_commit_sha=new_commit_sha,
+            ) from exc
+        if final_head != new_commit_sha:
+            raise GitHubOutcomeUnknown(
+                "github exact source-tree ref moved during readback",
+                candidate_commit_sha=new_commit_sha,
+            )
+        return new_commit_sha, blob_shas
 
 
 class GitHubBackend:
