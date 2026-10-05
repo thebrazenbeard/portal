@@ -345,3 +345,133 @@ def test_outcome_unknown_reconciliation_stays_active_and_route_pinned(
         )
     controller.close()
 
+def test_refill_uses_adapter_reconciliation_to_free_capacity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prepare_calls: list[dict[str, object]] = []
+
+    def fake_prepare(**kwargs):
+        prepare_calls.append(kwargs)
+        if len(prepare_calls) == 1:
+            packet = _packet(kwargs["run_id"])
+        elif len(prepare_calls) == 2:
+            packet = PortalWavePacket(
+                **{
+                    **_packet(kwargs["run_id"]).__dict__,
+                    "subject_id": "lou-pole",
+                    "repository": "thebrazenbeard/lou-pole",
+                    "lineage_id": "lineage-lou-pole",
+                }
+            )
+        else:
+            return PortalWavePreparationResult(
+                run_id=kwargs["run_id"],
+                plan_sha256="d" * 64,
+                plan_path=tmp_path / f"{kwargs['run_id']}.json",
+                assigned=0,
+                claimed=0,
+                held=0,
+                packets=(),
+            )
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=1,
+            claimed=1,
+            held=0,
+            packets=(packet,),
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+
+    class FakeWaveStore:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def load_delivery(self, *, run_id, subject_id):
+            return {"state": "PENDING"}
+
+    monkeypatch.setattr(portal_session, "PortalWaveStore", FakeWaveStore)
+
+    class ReconcilingAdapter:
+        def __init__(self):
+            self.dispatched: list[str] = []
+            self.reconciled = False
+
+        def select_routes(self, result):
+            return tuple(
+                PortalRouteBinding(
+                    subject_kind="repository",
+                    subject_id=packet.subject_id,
+                    adapter_id="executor",
+                    route_id=f"WorkLaptop:g9:{packet.subject_id}",
+                )
+                for packet in result.packets
+            )
+
+        def dispatch(self, result, routes):
+            self.dispatched.extend(binding.subject_id for binding in routes)
+            return tuple(
+                PortalDispatchRecord(
+                    subject_kind=binding.subject_kind,
+                    subject_id=binding.subject_id,
+                    adapter_id=binding.adapter_id,
+                    route_id=binding.route_id,
+                    state="DISPATCHED",
+                    evidence_id=f"executor:{binding.subject_id}:task",
+                )
+                for binding in routes
+            )
+
+        def reconcile(self, status):
+            if self.reconciled:
+                return ()
+            subject = next(
+                item
+                for item in status["subjects"]
+                if item["subject_id"] == "project-runner"
+            )
+            self.reconciled = True
+            return (
+                PortalReconciliationRecord(
+                    subject_kind=subject["subject_kind"],
+                    subject_id=subject["subject_id"],
+                    adapter_id=subject["adapter_id"],
+                    route_id=subject["route_id"],
+                    state="VERIFIED_COMPLETE",
+                    evidence_id="executor:project-runner:verified",
+                ),
+            )
+
+    adapter = ReconcilingAdapter()
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    result = controller.run_until_idle(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        verifier="vera-review",
+        max_cycles=2,
+        max_idle_cycles=1,
+        poll_seconds=0.0,
+        execution_adapter=adapter,
+    )
+
+    assert adapter.dispatched == ["project-runner", "lou-pole"]
+    assert prepare_calls[1]["active_subjects"] == ()
+    assert prepare_calls[1]["excluded_subjects"] == (
+        ("repository", "project-runner"),
+    )
+    assert result.summary == {"active": 1, "held": 0, "terminal": 1}
+    controller.close()
+
