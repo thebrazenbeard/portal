@@ -210,6 +210,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--worker-backends", type=Path)
     run.add_argument(
+        "--host-drivers",
+        type=Path,
+        help=(
+            "run the configured external host drivers between durable "
+            "refill generations; requires --host-bridge"
+        ),
+    )
+    run.add_argument(
+        "--host-max-dispatches",
+        type=int,
+        help="optional per-pump bound for resident host dispatch attempts",
+    )
+    run.add_argument(
         "--workspace-root",
         type=Path,
         default=Path(".portal/workers"),
@@ -344,6 +357,19 @@ def _parser() -> argparse.ArgumentParser:
         help="queue admitted work for an external ChatGPT/plugin host",
     )
     continue_cmd.add_argument("--worker-backends", type=Path)
+    continue_cmd.add_argument(
+        "--host-drivers",
+        type=Path,
+        help=(
+            "pump currently queued host work once before reconcile/refill; "
+            "requires --host-bridge"
+        ),
+    )
+    continue_cmd.add_argument(
+        "--host-max-dispatches",
+        type=int,
+        help="optional bound for the one host-pump pass",
+    )
     continue_cmd.add_argument(
         "--workspace-root",
         type=Path,
@@ -1247,6 +1273,26 @@ def _session_execution_adapter(
     return build_process_proposal_execution_adapter(driver)
 
 
+def _session_host_pump(
+    args: argparse.Namespace,
+    execution_adapter: object | None,
+) -> PortalHostPump | None:
+    host_drivers = getattr(args, "host_drivers", None)
+    if host_drivers is None:
+        return None
+    if not isinstance(execution_adapter, PortalHostExecutionAdapter):
+        raise ValueError("--host-drivers requires --host-bridge")
+    max_dispatches = getattr(args, "host_max_dispatches", None)
+    if max_dispatches is not None and (
+        type(max_dispatches) is not int or max_dispatches < 1
+    ):
+        raise ValueError("--host-max-dispatches must be a positive integer")
+    return PortalHostPump(
+        store=execution_adapter.store,
+        drivers=load_host_command_drivers(Path(host_drivers)),
+    )
+
+
 def _session_result_payload(
     *,
     mode: str,
@@ -1294,6 +1340,12 @@ def _session_resume_spec(
         "max_per_lane": int(args.max_per_lane),
         "verifier": args.verifier,
         "host_bridge": bool(args.host_bridge),
+        "host_drivers": (
+            str(Path(args.host_drivers))
+            if getattr(args, "host_drivers", None) is not None
+            else None
+        ),
+        "host_max_dispatches": getattr(args, "host_max_dispatches", None),
         "worker_backends": (
             str(Path(args.worker_backends))
             if args.worker_backends is not None
@@ -1421,6 +1473,26 @@ def _apply_session_resume_spec(
     args.max_per_lane = integer("max_per_lane")
     args.verifier = required_text("verifier")
     args.host_bridge = boolean("host_bridge")
+    host_drivers = spec.get("host_drivers")
+    if host_drivers is not None and (
+        not isinstance(host_drivers, str) or not host_drivers.strip()
+    ):
+        raise ValueError(
+            "resume spec host_drivers must be null or a non-empty string"
+        )
+    args.host_drivers = (
+        Path(host_drivers.strip())
+        if isinstance(host_drivers, str)
+        else None
+    )
+    host_max_dispatches = spec.get("host_max_dispatches")
+    if host_max_dispatches is not None and (
+        type(host_max_dispatches) is not int or host_max_dispatches < 1
+    ):
+        raise ValueError(
+            "resume spec host_max_dispatches must be null or a positive integer"
+        )
+    args.host_max_dispatches = host_max_dispatches
     worker_backends = optional_text("worker_backends")
     args.worker_backends = (
         Path(worker_backends)
@@ -1441,6 +1513,7 @@ def _apply_session_resume_spec(
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     controller = PortalCommandSession(Path(args.state_db))
     execution_adapter = None
+    host_pump = None
     try:
         if args.resume:
             spec = controller.load_resume_spec(
@@ -1457,6 +1530,9 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
         wave_path, corpus_path, projects_path = _session_portfolio_paths(args)
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
+        host_pump = _session_host_pump(args, execution_adapter)
+        if args.once and host_pump is not None:
+            raise ValueError("--host-drivers cannot be used with --once")
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
             args,
             nodes,
@@ -1501,6 +1577,16 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
                 resume_spec=_session_resume_spec(args),
+                between_cycles=(
+                    (
+                        lambda: host_pump.run_once(
+                            session_id=args.session_id,
+                            max_dispatches=args.host_max_dispatches,
+                        )
+                    )
+                    if host_pump is not None
+                    else None
+                ),
             )
         controller.save_resume_spec(
             session_id=args.session_id,
@@ -1520,6 +1606,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
     controller = PortalCommandSession(Path(args.state_db))
     execution_adapter = None
+    host_pump = None
     try:
         if args.resume:
             spec = controller.load_resume_spec(
@@ -1536,6 +1623,12 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         wave_path, corpus_path, projects_path = _session_portfolio_paths(args)
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
+        host_pump = _session_host_pump(args, execution_adapter)
+        if host_pump is not None:
+            host_pump.run_once(
+                session_id=args.session_id,
+                max_dispatches=args.host_max_dispatches,
+            )
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
             args,
             nodes,
