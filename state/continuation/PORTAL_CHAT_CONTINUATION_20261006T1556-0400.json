@@ -1,0 +1,61 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V3",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1556-0400",
+  "created_local": "2026-10-06T15:56:32-04:00",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "implementation_head": {
+    "sha": "c5fd766e8836d70e8ee3b755e1de7fb7f5b8bde5",
+    "message": "portal: import structured host capability snapshots",
+    "ci": {
+      "test": "SUCCESS",
+      "dependency_review": "SUCCESS",
+      "local_pytest": "678 passed"
+    }
+  },
+  "host_snapshot": {
+    "schema": "PORTAL_HOST_CAPABILITY_SNAPSHOT_V1",
+    "atomic_routes_and_occupancy": true,
+    "explicit_authorized_effects_required": true,
+    "live_qualification": {
+      "route_count": 3,
+      "occupancy": {
+        "lappy": 3,
+        "repo-native": 0
+      },
+      "github_authorized_effects": [
+        "SOURCE_ONLY"
+      ],
+      "workbridge_authorized_effects": [],
+      "lappy_v2_authorized_effects": []
+    }
+  },
+  "live_portfolio": {
+    "total": 84,
+    "public": 65,
+    "private": 19,
+    "private_no_effect": 19,
+    "private_held_archived": 3,
+    "private_queued_currentness": 16
+  },
+  "chat_host_bindings": {
+    "pre_active": {
+      "sha": "a6900dc2d2fb65f4ea66db95fca1b9c5b022450b",
+      "version": "0.1.0",
+      "daemon_started": false
+    },
+    "volition": {
+      "sha": "dbc628d376515a0a523b1eecdf62129cca5d6b08",
+      "version": "0.10.0"
+    },
+    "native_chatgpt_runtime_install": false,
+    "receipt": "C:\\Users\\patri\\AppData\\Local\\PortalChatRuntime\\20261006\\CHAT_BINDING.json"
+  },
+  "predecessor": "PORTAL_CHAT_CONTINUATION_20261006T1543-0400",
+  "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1556-0400"
+}
