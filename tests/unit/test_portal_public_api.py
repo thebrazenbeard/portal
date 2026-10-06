@@ -20,6 +20,7 @@ def test_public_api_exposes_execution_routing_contract() -> None:
         "PortalRouteAdvertisement",
         "PortalRouteBinding",
         "PortalRouteRequest",
+        "build_host_diagnostics",
         "build_process_proposal_execution_adapter",
         "resolve_portal_route",
     }
