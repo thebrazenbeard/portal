@@ -33,7 +33,11 @@ from .discovery import (
     discover_live_project_registry,
     write_project_registry,
 )
-from .host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
+from .host_bridge import (
+    PortalHostBridgeStore,
+    PortalHostExecutionAdapter,
+    PortalHostNodeCurrentness,
+)
 from .node_registry import load_execution_nodes
 from .process_adapter import (
     PortalProposalProcessAdapter,
@@ -203,6 +207,14 @@ def _parser() -> argparse.ArgumentParser:
             "dead/PID-reused registrations reconcile to UNKNOWN_EXIT"
         ),
     )
+    run.add_argument(
+        "--host-node-occupancy",
+        action="store_true",
+        help=(
+            "require fresh host-published occupancy for enabled nodes "
+            "without another occupancy source"
+        ),
+    )
     run.add_argument("--max-cycles", type=int, default=100)
     run.add_argument("--max-idle-cycles", type=int, default=1)
     run.add_argument("--poll-seconds", type=float, default=0.0)
@@ -284,6 +296,14 @@ def _parser() -> argparse.ArgumentParser:
         dest="project_runner_tasks",
         metavar="NODE=PATH",
         help="take a fresh Project Runner task-currentness occupancy snapshot",
+    )
+    continue_cmd.add_argument(
+        "--host-node-occupancy",
+        action="store_true",
+        help=(
+            "require fresh host-published occupancy for enabled nodes "
+            "without another occupancy source"
+        ),
     )
 
     hold = subcommands.add_parser(
@@ -384,6 +404,29 @@ def _parser() -> argparse.ArgumentParser:
         help="show non-expired host route advertisements",
     )
     host_routes.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+
+    host_occupancy = host_subcommands.add_parser(
+        "occupancy",
+        help="publish one expiring host-observed node occupancy snapshot",
+    )
+    host_occupancy.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_occupancy.add_argument("--node-id", required=True)
+    host_occupancy.add_argument("--occupied-slots", type=int, required=True)
+    host_occupancy.add_argument("--ttl-seconds", type=float, default=300.0)
+
+    host_occupancy_status = host_subcommands.add_parser(
+        "occupancy-status",
+        help="show non-expired host node occupancy snapshots",
+    )
+    host_occupancy_status.add_argument(
         "--state-db",
         type=Path,
         default=Path(".portal/portal.sqlite3"),
@@ -812,6 +855,7 @@ def _project_runner_task_roots(values: Sequence[str]) -> dict[str, Path]:
 
 def _session_occupancy(
     args: argparse.Namespace,
+    nodes,
 ) -> tuple[dict[str, int] | None, object | None]:
     static = _occupied_node_slots(args.occupied_nodes)
     task_roots = _project_runner_task_roots(args.project_runner_tasks)
@@ -820,8 +864,6 @@ def _session_occupancy(
         raise ValueError(
             "multiple occupancy sources for node: " + ", ".join(overlap)
         )
-    if not task_roots:
-        return static, None
 
     probes = tuple(
         LocalProjectRunnerTaskCurrentness(
@@ -830,12 +872,41 @@ def _session_occupancy(
         )
         for node_id, task_root in sorted(task_roots.items())
     )
+    explicit_nodes = set(static).union(task_roots)
+    required_host_nodes: tuple[str, ...] = ()
+    if args.host_node_occupancy:
+        required_host_nodes = tuple(
+            sorted(
+                node.node_id
+                for node in nodes
+                if node.enabled and node.node_id not in explicit_nodes
+            )
+        )
+
+    if not probes and not required_host_nodes:
+        return static, None
 
     def provider() -> dict[str, int]:
         occupied = dict(static)
         for probe in probes:
             snapshot = probe()
             for node_id, count in snapshot.items():
+                if node_id in occupied:
+                    raise ValueError(
+                        f"multiple occupancy sources for node: {node_id}"
+                    )
+                occupied[node_id] = count
+
+        if required_host_nodes:
+            store = PortalHostBridgeStore(Path(args.state_db))
+            try:
+                host_snapshot = PortalHostNodeCurrentness(
+                    store=store,
+                    required_node_ids=required_host_nodes,
+                )()
+            finally:
+                store.close()
+            for node_id, count in host_snapshot.items():
                 if node_id in occupied:
                     raise ValueError(
                         f"multiple occupancy sources for node: {node_id}"
@@ -907,7 +978,10 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     projects_path = _wave_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
-    occupied_node_slots, node_occupancy_provider = _session_occupancy(args)
+    occupied_node_slots, node_occupancy_provider = _session_occupancy(
+        args,
+        nodes,
+    )
     controller = PortalCommandSession(Path(args.state_db))
     try:
         common = dict(
@@ -953,7 +1027,10 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
-    occupied_node_slots, node_occupancy_provider = _session_occupancy(args)
+    occupied_node_slots, node_occupancy_provider = _session_occupancy(
+        args,
+        nodes,
+    )
     if node_occupancy_provider is not None:
         occupied_node_slots = node_occupancy_provider()
     controller = PortalCommandSession(Path(args.state_db))
@@ -1480,6 +1557,36 @@ def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_occupancy_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        occupancy = store.advertise_node_occupancy(
+            node_id=args.node_id,
+            occupied_slots=args.occupied_slots,
+            ttl_seconds=args.ttl_seconds,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_OCCUPANCY_ADVERTISE_V1",
+        "occupancy": occupancy,
+    }
+
+
+def _host_occupancy_status_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        occupied_node_slots = store.active_node_occupancy()
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_OCCUPANCY_STATUS_V1",
+        "occupied_node_slots": occupied_node_slots,
+    }
+
+
 def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -1560,6 +1667,10 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_advertise_payload(args)
             elif args.host_command == "routes":
                 payload = _host_routes_payload(args)
+            elif args.host_command == "occupancy":
+                payload = _host_occupancy_payload(args)
+            elif args.host_command == "occupancy-status":
+                payload = _host_occupancy_status_payload(args)
             elif args.host_command == "pending":
                 payload = _host_pending_payload(args)
             elif args.host_command == "attempt":
