@@ -503,6 +503,57 @@ def _parser() -> argparse.ArgumentParser:
     host_advertise.add_argument("--detached", action="store_true")
     host_advertise.add_argument("--stale", action="store_true")
 
+    host_advertise_projects = host_subcommands.add_parser(
+        "advertise-projects",
+        help=(
+            "advertise one exact target-bound host route for every unique "
+            "repository in a project registry"
+        ),
+    )
+    host_advertise_projects.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_advertise_projects.add_argument(
+        "--projects",
+        type=Path,
+        default=ROOT / "registry" / "projects.yaml",
+    )
+    host_advertise_projects.add_argument("--adapter-id", required=True)
+    host_advertise_projects.add_argument("--route-prefix", required=True)
+    host_advertise_projects.add_argument("--node-id", required=True)
+    host_advertise_projects.add_argument(
+        "--capability",
+        action="append",
+        required=True,
+        dest="capabilities",
+    )
+    host_advertise_projects.add_argument(
+        "--effect-capability",
+        action="append",
+        required=True,
+        dest="effect_capabilities",
+    )
+    host_advertise_projects.add_argument(
+        "--authorized-effect",
+        action="append",
+        required=True,
+        dest="authorized_effects",
+    )
+    host_advertise_projects.add_argument("--preference", type=int, default=0)
+    host_advertise_projects.add_argument(
+        "--ttl-seconds",
+        type=float,
+        default=300.0,
+    )
+    host_advertise_projects.add_argument(
+        "--unavailable",
+        action="store_true",
+    )
+    host_advertise_projects.add_argument("--detached", action="store_true")
+    host_advertise_projects.add_argument("--stale", action="store_true")
+
     host_routes = host_subcommands.add_parser(
         "routes",
         help="show non-expired host route advertisements",
@@ -2199,6 +2250,61 @@ def _host_advertise_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_advertise_projects_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    snapshot = load_project_snapshot(Path(args.projects))
+    repositories = tuple(
+        sorted(
+            {
+                repository
+                for project in snapshot.projects
+                for repository in project.repositories
+            }
+        )
+    )
+    if not repositories:
+        raise ValueError("project registry contains no repositories")
+
+    route_prefix = str(args.route_prefix).strip().rstrip(":")
+    if not route_prefix:
+        raise ValueError("route_prefix is required")
+
+    routes = tuple(
+        PortalRouteAdvertisement(
+            adapter_id=args.adapter_id,
+            route_id=f"{route_prefix}:{repository}",
+            node_id=args.node_id,
+            target_kind="repository",
+            target_id=repository,
+            capabilities=tuple(args.capabilities),
+            effect_capabilities=tuple(args.effect_capabilities),
+            authorized_effects=tuple(args.authorized_effects),
+            available=not args.unavailable,
+            attached=not args.detached,
+            current=not args.stale,
+            preference=args.preference,
+        )
+        for repository in repositories
+    )
+
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        advertised = store.advertise_routes(
+            routes,
+            ttl_seconds=args.ttl_seconds,
+        )
+    finally:
+        store.close()
+
+    return {
+        "mode": "PORTAL_HOST_PROJECT_ROUTES_ADVERTISE_V1",
+        "project_registry_sha256": snapshot.sha256,
+        "repository_count": len(advertised),
+        "routes": [asdict(route) for route in advertised],
+    }
+
+
 def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -2532,6 +2638,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
         elif args.command == "host":
             if args.host_command == "advertise":
                 payload = _host_advertise_payload(args)
+            elif args.host_command == "advertise-projects":
+                payload = _host_advertise_projects_payload(args)
             elif args.host_command == "routes":
                 payload = _host_routes_payload(args)
             elif args.host_command == "occupancy":
