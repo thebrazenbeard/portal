@@ -520,3 +520,68 @@ def test_refill_refreshes_live_node_occupancy_each_generation(
         "worklaptop": 1,
     }
     controller.close()
+
+def test_unbounded_refill_waits_through_quiet_cycle_until_explicit_stop(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prepare_calls: list[dict[str, object]] = []
+
+    def fake_prepare(**kwargs):
+        prepare_calls.append(kwargs)
+        packets = (_packet(kwargs["run_id"]),) if len(prepare_calls) == 1 else ()
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=len(packets),
+            claimed=len(packets),
+            held=0,
+            packets=packets,
+        )
+
+    class FakeWaveStore:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def load_delivery(self, *, run_id, subject_id):
+            return {"state": "PENDING"}
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+    monkeypatch.setattr(portal_session, "PortalWaveStore", FakeWaveStore)
+
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    stopper = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    sleeps: list[float] = []
+
+    def stop_during_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        stopper.stop(session_id="portal", holder="vera")
+
+    result = controller.run_until_idle(
+        session_id="portal",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        verifier="vera-review",
+        max_cycles=0,
+        max_idle_cycles=0,
+        poll_seconds=0.25,
+        sleep=stop_during_sleep,
+    )
+
+    assert result.stop_reason == "STOPPED"
+    assert sleeps == [0.25]
+    assert len(prepare_calls) == 2
+    assert result.summary["active"] == 1
+    stopper.close()
+    controller.close()
+
