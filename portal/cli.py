@@ -1463,6 +1463,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 ),
                 node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
+                resume_spec=_session_resume_spec(args),
             )
         controller.save_resume_spec(
             session_id=args.session_id,
