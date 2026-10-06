@@ -78,6 +78,22 @@ Inspect current routes:
 
     portal host routes       --state-db .portal/portal.sqlite3
 
+For a host capability that applies identically across every repository in a governed project registry, advertise the exact routes atomically instead of issuing one command per repository:
+
+    portal host advertise-projects \
+      --state-db .portal/portal.sqlite3 \
+      --projects registry/projects.yaml \
+      --adapter-id github \
+      --route-prefix repo-native \
+      --node-id repo-native \
+      --capability semantic_work \
+      --effect-capability SOURCE_ONLY \
+      --authorized-effect NO_PROTECTED_EFFECT \
+      --preference 50 \
+      --ttl-seconds 300
+
+This does not create a wildcard route. It expands the registry into one exact `repository -> adapter_id + route_id` advertisement per unique repository and commits the batch atomically. A stale/conflicting member aborts the whole batch. Effect authority is copied only from the explicit `--authorized-effect` values supplied by the operator.
+
 A usable route must be available, attached, current, match the assigned node and exact target, satisfy required capabilities, be technically capable of the required effect, and carry authority for that effect.
 
 Technical capability does not create authority. Discovery does not create attachment. Availability does not create currentness.
