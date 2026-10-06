@@ -1172,6 +1172,7 @@ class PortalCommandSession:
         ) = None,
         execution_adapter: object | None = None,
         resume_spec: Mapping[str, object] | None = None,
+        between_cycles: Callable[[], object] | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
@@ -1250,6 +1251,13 @@ class PortalCommandSession:
             if current["control_state"] == "STOPPED":
                 stop_reason = "STOPPED"
                 break
+
+            if between_cycles is not None:
+                between_cycles()
+                current = self.status(session_id)
+                if current["control_state"] == "STOPPED":
+                    stop_reason = "STOPPED"
+                    break
 
             adapter_changed = 0
             if execution_adapter is not None:
