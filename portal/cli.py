@@ -30,6 +30,7 @@ from .ecosystem_runtime import (
     PortalEcosystemStore,
     run_ecosystem_proposal_generations,
 )
+from .diagnostics import build_host_diagnostics
 from .discovery import (
     discover_live_project_registry,
     write_project_registry,
@@ -1448,62 +1449,12 @@ def _status_payload(args: argparse.Namespace) -> dict[str, object]:
         if args.host_details:
             host_store = PortalHostBridgeStore(Path(args.state_db))
             try:
-                pending = tuple(
-                    host_store.pending_dispatch_diagnostics(
-                        session_id=args.session_id,
-                    )
+                payload["host"] = build_host_diagnostics(
+                    host_store,
+                    session_id=args.session_id,
                 )
-                unresolved = tuple(
-                    host_store.unresolved_dispatches(
-                        session_id=args.session_id,
-                    )
-                )
-                routes = tuple(host_store.active_routes())
-                occupancy = host_store.active_node_occupancy()
             finally:
                 host_store.close()
-
-            qualified = sum(
-                bool(item.get("route_qualified"))
-                for item in pending
-            )
-            payload["host"] = {
-                "pending": {
-                    "count": len(pending),
-                    "qualified": qualified,
-                    "unqualified": len(pending) - qualified,
-                    "items": list(pending),
-                },
-                "unresolved": {
-                    "count": len(unresolved),
-                    "items": list(unresolved),
-                },
-                "routes": {
-                    "count": len(routes),
-                    "items": [
-                        {
-                            "adapter_id": route.adapter_id,
-                            "route_id": route.route_id,
-                            "node_id": route.node_id,
-                            "target_kind": route.target_kind,
-                            "target_id": route.target_id,
-                            "capabilities": list(route.capabilities),
-                            "effect_capabilities": list(
-                                route.effect_capabilities
-                            ),
-                            "authorized_effects": list(
-                                route.authorized_effects
-                            ),
-                            "available": route.available,
-                            "attached": route.attached,
-                            "current": route.current,
-                            "preference": route.preference,
-                        }
-                        for route in routes
-                    ],
-                },
-                "node_occupancy": occupancy,
-            }
         return payload
 
     if args.host_details:
