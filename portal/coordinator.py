@@ -25,6 +25,7 @@ def plan_portal_wave(
     occupied_collision_keys: Iterable[str] = (),
     excluded_subjects: Iterable[tuple[str, str]] = (),
     active_subjects: Iterable[tuple[str, str]] = (),
+    blocked_subjects: Iterable[tuple[str, str]] = (),
     occupied_node_slots: Mapping[str, int] | None = None,
 ) -> PortalPlan:
     """Assign Project Runner-admitted work to bounded execution nodes.
@@ -57,6 +58,7 @@ def plan_portal_wave(
         occupied_collision_keys=occupied_collision_keys,
         excluded_subjects=excluded_subjects,
         active_subjects=active_subjects,
+        blocked_subjects=blocked_subjects,
     )
 
     load: Counter[str] = Counter(occupied)
