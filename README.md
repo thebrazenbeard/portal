@@ -80,6 +80,15 @@ Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The
 
 See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host take`, `host pending`, `host unresolved`, reconciliation, and refill.
 
+For a one-read operational diagnosis of a durable session, include host details:
+
+    portal status \
+      --state-db .portal/portal.sqlite3 \
+      --session-id portfolio \
+      --host-details
+
+The host diagnostics are also available through the public `build_host_diagnostics(...)` library API for ChatGPT/web or embedded hosts. The read model separates queued work whose bound route is currently qualified, queued work that needs route refresh, and attempted effects that require reconciliation; it does not attempt, cancel, replay, or free work.
+
 `portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same execution-adapter and occupancy-currentness configuration needed by the selected route.
 
 Plan a bounded portfolio wave:
