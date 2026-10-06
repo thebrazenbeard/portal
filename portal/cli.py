@@ -492,6 +492,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(".portal/portal.sqlite3"),
     )
+    host_frontier_status.add_argument(
+        "--wave",
+        type=Path,
+        help="also classify the supplied wave against live frontier evidence",
+    )
 
     host_pending = host_subcommands.add_parser(
         "pending",
@@ -1731,12 +1736,40 @@ def _host_frontier_status_payload(
             asdict(observation)
             for _key, observation in sorted(store.active().items())
         ]
+        payload: dict[str, object] = {
+            "mode": "PORTAL_HOST_FRONTIER_STATUS_V1",
+            "observations": observations,
+        }
+        if args.wave is not None:
+            transport = GitHubRestTransport(token=_github_token())
+            snapshot = PortalHostFrontierCurrentness(
+                store=store,
+                head_reader=transport.read_ref,
+            ).classify(load_advancement_wave(Path(args.wave)))
+            payload["classification"] = {
+                "current_subjects": [
+                    {
+                        "subject_kind": subject_kind,
+                        "subject_id": subject_id,
+                    }
+                    for subject_kind, subject_id
+                    in snapshot.current_subjects
+                ],
+                "excluded_subjects": [
+                    {
+                        "subject_kind": subject_kind,
+                        "subject_id": subject_id,
+                        "reason": snapshot.reasons[
+                            (subject_kind, subject_id)
+                        ],
+                    }
+                    for subject_kind, subject_id
+                    in snapshot.excluded_subjects
+                ],
+            }
+        return payload
     finally:
         store.close()
-    return {
-        "mode": "PORTAL_HOST_FRONTIER_STATUS_V1",
-        "observations": observations,
-    }
 
 
 def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
