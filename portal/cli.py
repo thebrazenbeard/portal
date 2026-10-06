@@ -46,6 +46,7 @@ from .runtime import (
 )
 from .route_resolver import PortalRouteAdvertisement
 from .session import PortalCommandSession
+from .task_currentness import LocalProjectRunnerTaskCurrentness
 from .wave_runtime import (
     PortalWaveStore,
     execute_portal_source_proposal,
@@ -191,6 +192,17 @@ def _parser() -> argparse.ArgumentParser:
         dest="occupied_nodes",
         metavar="NODE=COUNT",
     )
+    run.add_argument(
+        "--project-runner-tasks",
+        action="append",
+        default=[],
+        dest="project_runner_tasks",
+        metavar="NODE=PATH",
+        help=(
+            "derive live occupied slots from a Project Runner task root; "
+            "dead/PID-reused registrations reconcile to UNKNOWN_EXIT"
+        ),
+    )
     run.add_argument("--max-cycles", type=int, default=100)
     run.add_argument("--max-idle-cycles", type=int, default=1)
     run.add_argument("--poll-seconds", type=float, default=0.0)
@@ -264,6 +276,14 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         dest="occupied_nodes",
         metavar="NODE=COUNT",
+    )
+    continue_cmd.add_argument(
+        "--project-runner-tasks",
+        action="append",
+        default=[],
+        dest="project_runner_tasks",
+        metavar="NODE=PATH",
+        help="take a fresh Project Runner task-currentness occupancy snapshot",
     )
 
     hold = subcommands.add_parser(
@@ -771,6 +791,56 @@ def _occupied_node_slots(values: Sequence[str]) -> dict[str, int]:
     return occupied
 
 
+def _project_runner_task_roots(values: Sequence[str]) -> dict[str, Path]:
+    roots: dict[str, Path] = {}
+    for raw in values:
+        node_id, separator, path_text = raw.partition("=")
+        node_id = node_id.strip()
+        path_text = path_text.strip()
+        if not separator or not node_id or not path_text:
+            raise ValueError("project runner tasks must use NODE=PATH")
+        if node_id in roots:
+            raise ValueError(f"duplicate Project Runner task source: {node_id}")
+        roots[node_id] = Path(path_text)
+    return roots
+
+
+def _session_occupancy(
+    args: argparse.Namespace,
+) -> tuple[dict[str, int] | None, object | None]:
+    static = _occupied_node_slots(args.occupied_nodes)
+    task_roots = _project_runner_task_roots(args.project_runner_tasks)
+    overlap = sorted(set(static).intersection(task_roots))
+    if overlap:
+        raise ValueError(
+            "multiple occupancy sources for node: " + ", ".join(overlap)
+        )
+    if not task_roots:
+        return static, None
+
+    probes = tuple(
+        LocalProjectRunnerTaskCurrentness(
+            node_id=node_id,
+            tasks_root=task_root,
+        )
+        for node_id, task_root in sorted(task_roots.items())
+    )
+
+    def provider() -> dict[str, int]:
+        occupied = dict(static)
+        for probe in probes:
+            snapshot = probe()
+            for node_id, count in snapshot.items():
+                if node_id in occupied:
+                    raise ValueError(
+                        f"multiple occupancy sources for node: {node_id}"
+                    )
+                occupied[node_id] = count
+        return occupied
+
+    return None, provider
+
+
 def _session_budget(args: argparse.Namespace) -> WaveExecutionBudget:
     return WaveExecutionBudget(
         max_parallel=args.max_parallel,
@@ -832,6 +902,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     projects_path = _wave_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
+    occupied_node_slots, node_occupancy_provider = _session_occupancy(args)
     controller = PortalCommandSession(Path(args.state_db))
     try:
         common = dict(
@@ -844,11 +915,14 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             budget=_session_budget(args),
             lease_ttl=args.lease_ttl,
             token=_github_token(),
-            occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
+            occupied_node_slots=occupied_node_slots,
         )
         if args.once:
+            once_common = dict(common)
+            if node_occupancy_provider is not None:
+                once_common["occupied_node_slots"] = node_occupancy_provider()
             result = controller.run(
-                **common,
+                **once_common,
                 execution_adapter=execution_adapter,
             )
         else:
@@ -858,6 +932,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 max_cycles=args.max_cycles,
                 max_idle_cycles=args.max_idle_cycles,
                 poll_seconds=args.poll_seconds,
+                node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
             )
     finally:
@@ -873,6 +948,9 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
+    occupied_node_slots, node_occupancy_provider = _session_occupancy(args)
+    if node_occupancy_provider is not None:
+        occupied_node_slots = node_occupancy_provider()
     controller = PortalCommandSession(Path(args.state_db))
     try:
         result = controller.continue_run(
@@ -886,7 +964,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             lease_ttl=args.lease_ttl,
             token=_github_token(),
             verifier=args.verifier,
-            occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
+            occupied_node_slots=occupied_node_slots,
             execution_adapter=execution_adapter,
         )
     finally:
