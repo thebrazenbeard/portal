@@ -5,6 +5,7 @@ from pathlib import Path
 
 import portal.cli as portal_cli
 from portal.route_resolver import PortalRouteAdvertisement
+from portal.task_currentness import PortalTaskCurrentnessSnapshot
 
 
 class FakeSession:
@@ -130,14 +131,14 @@ def test_session_status_exposes_project_runner_task_currentness(
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
 
     snapshots = {
-        "lappy": portal_cli.PortalTaskCurrentnessSnapshot(
+        "lappy": PortalTaskCurrentnessSnapshot(
             node_id="lappy",
             tasks_root=tmp_path / "lappy-tasks",
             occupied_slots=2,
             reconciled_unknown_exit=10,
             state_counts={"RUNNING": 1, "IDENTITY_UNVERIFIED": 1},
         ),
-        "worklaptop": portal_cli.PortalTaskCurrentnessSnapshot(
+        "worklaptop": PortalTaskCurrentnessSnapshot(
             node_id="worklaptop",
             tasks_root=tmp_path / "work-tasks",
             occupied_slots=0,
