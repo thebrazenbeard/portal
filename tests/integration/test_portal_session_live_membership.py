@@ -19,6 +19,9 @@ class FakeSession:
     def close(self) -> None:
         pass
 
+    def save_resume_spec(self, **kwargs):
+        pass
+
     def run_until_idle(self, **kwargs):
         self.calls.append(("run", kwargs))
         return SimpleNamespace(
