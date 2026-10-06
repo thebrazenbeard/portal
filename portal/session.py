@@ -496,7 +496,7 @@ class PortalCommandSession:
         self,
         *,
         session_id: str,
-        holder: str,
+        holder: str | None = None,
     ) -> dict[str, object]:
         self._require_session(session_id=session_id, holder=holder)
         row = self.connection.execute(
