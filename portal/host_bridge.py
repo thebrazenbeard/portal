@@ -502,6 +502,91 @@ class PortalHostBridgeStore:
         )
         return payload
 
+    def _dispatch_route_is_currently_qualified(
+        self,
+        row: sqlite3.Row,
+        *,
+        now: float,
+    ) -> bool:
+        route_row = self.connection.execute(
+            """
+            SELECT
+                adapter_id, route_id, node_id, target_kind, target_id,
+                capabilities_json, effect_capabilities_json,
+                authorized_effects_json, available, attached, current,
+                preference, observed_at, expires_at
+            FROM portal_host_routes
+            WHERE adapter_id = ?
+              AND route_id = ?
+              AND node_id = ?
+              AND target_kind = 'repository'
+              AND target_id = ?
+              AND observed_at <= ?
+              AND expires_at > ?
+            """,
+            (
+                str(row["adapter_id"]),
+                str(row["route_id"]),
+                str(row["node_id"]),
+                str(row["repository"]),
+                now,
+                now,
+            ),
+        ).fetchone()
+        if route_row is None:
+            return False
+
+        payload = json.loads(str(row["payload_json"]))
+        effect_ceiling = payload.get("effect_ceiling")
+        subject_kind = payload.get("subject_kind")
+        subject_id = payload.get("subject_id")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                effect_ceiling,
+                subject_kind,
+                subject_id,
+            )
+        ):
+            return False
+
+        route = PortalRouteAdvertisement(
+            adapter_id=str(route_row["adapter_id"]),
+            route_id=str(route_row["route_id"]),
+            node_id=str(route_row["node_id"]),
+            target_kind=str(route_row["target_kind"]),
+            target_id=str(route_row["target_id"]),
+            capabilities=tuple(
+                json.loads(str(route_row["capabilities_json"]))
+            ),
+            effect_capabilities=tuple(
+                json.loads(str(route_row["effect_capabilities_json"]))
+            ),
+            authorized_effects=tuple(
+                json.loads(str(route_row["authorized_effects_json"]))
+            ),
+            available=bool(route_row["available"]),
+            attached=bool(route_row["attached"]),
+            current=bool(route_row["current"]),
+            preference=int(route_row["preference"]),
+        )
+        request = PortalRouteRequest(
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            node_id=str(row["node_id"]),
+            target_kind="repository",
+            target_id=str(row["repository"]),
+            required_capabilities=("semantic_work",),
+            required_effect=effect_ceiling,
+            preferred_adapter_id=str(row["adapter_id"]),
+            preferred_route_id=str(row["route_id"]),
+        )
+        try:
+            resolve_portal_route(request, (route,))
+        except ValueError:
+            return False
+        return True
+
     def load_dispatch(self, dispatch_id: str) -> dict[str, object]:
         dispatch_id = _required(dispatch_id, "dispatch_id")
         row = self.connection.execute(
@@ -579,16 +664,26 @@ class PortalHostBridgeStore:
 
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            row = self.connection.execute(
+            rows = self.connection.execute(
                 """
-                SELECT dispatch_id
+                SELECT *
                 FROM portal_host_dispatches
                 WHERE """ + " AND ".join(clauses) + """
                 ORDER BY created_at, dispatch_id
-                LIMIT 1
                 """,
                 tuple(parameters),
-            ).fetchone()
+            ).fetchall()
+            row = next(
+                (
+                    candidate
+                    for candidate in rows
+                    if self._dispatch_route_is_currently_qualified(
+                        candidate,
+                        now=now,
+                    )
+                ),
+                None,
+            )
             if row is None:
                 self.connection.commit()
                 return None
@@ -691,7 +786,7 @@ class PortalHostBridgeStore:
         try:
             row = self.connection.execute(
                 """
-                SELECT state, attempt_id, dispatch_evidence_id
+                SELECT *
                 FROM portal_host_dispatches
                 WHERE dispatch_id = ?
                 """,
@@ -713,6 +808,13 @@ class PortalHostBridgeStore:
                 return self.load_dispatch(dispatch_id)
             if state != "QUEUED":
                 raise ValueError("host dispatch cannot be attempted")
+            if not self._dispatch_route_is_currently_qualified(
+                row,
+                now=now,
+            ):
+                raise ValueError(
+                    "host route is not currently qualified for attempt"
+                )
 
             self.connection.execute(
                 """
