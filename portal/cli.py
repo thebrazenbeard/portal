@@ -238,9 +238,9 @@ def _parser() -> argparse.ArgumentParser:
             "newly admitted repository frontiers"
         ),
     )
-    run.add_argument("--max-cycles", type=int, default=100)
-    run.add_argument("--max-idle-cycles", type=int, default=1)
-    run.add_argument("--poll-seconds", type=float, default=0.0)
+    run.add_argument("--max-cycles", type=int)
+    run.add_argument("--max-idle-cycles", type=int)
+    run.add_argument("--poll-seconds", type=float)
     run.add_argument(
         "--once",
         action="store_true",
@@ -1188,9 +1188,17 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             result = controller.run_until_idle(
                 **common,
                 verifier=args.verifier,
-                max_cycles=args.max_cycles,
-                max_idle_cycles=args.max_idle_cycles,
-                poll_seconds=args.poll_seconds,
+                max_cycles=(
+                    0 if args.max_cycles is None else args.max_cycles
+                ),
+                max_idle_cycles=(
+                    0
+                    if args.max_idle_cycles is None
+                    else args.max_idle_cycles
+                ),
+                poll_seconds=(
+                    5.0 if args.poll_seconds is None else args.poll_seconds
+                ),
                 node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
             )
@@ -1317,8 +1325,20 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
     worker_snapshot = load_worker_snapshot(Path(args.workers))
     nodes = load_execution_nodes(Path(args.nodes))
 
-    max_cycles = 1 if args.once else args.max_cycles
-    max_idle_cycles = 1 if args.once else args.max_idle_cycles
+    max_cycles = (
+        1
+        if args.once
+        else (100 if args.max_cycles is None else args.max_cycles)
+    )
+    max_idle_cycles = (
+        1
+        if args.once
+        else (
+            1
+            if args.max_idle_cycles is None
+            else args.max_idle_cycles
+        )
+    )
     result = run_portal_until_idle(
         projects=project_snapshot.projects,
         dependencies=dependency_snapshot.dependencies,
@@ -1334,7 +1354,11 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
         max_parallel=args.max_parallel,
         max_cycles=max_cycles,
         max_idle_cycles=max_idle_cycles,
-        poll_seconds=0.0 if args.once else args.poll_seconds,
+        poll_seconds=(
+            0.0
+            if args.once or args.poll_seconds is None
+            else args.poll_seconds
+        ),
         token=_github_token(),
     )
 
