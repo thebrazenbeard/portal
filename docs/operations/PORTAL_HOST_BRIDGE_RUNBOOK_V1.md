@@ -94,6 +94,39 @@ For a host capability that applies identically across every repository in a gove
 
 This does not create a wildcard route. It expands the registry into one exact `repository -> adapter_id + route_id` advertisement per unique repository and commits the batch atomically. A stale/conflicting member aborts the whole batch. Effect authority is copied only from the explicit `--authorized-effect` values supplied by the operator.
 
+A host that can already inspect its available adapters may instead emit one transport-neutral capability snapshot and import route plus occupancy evidence together:
+
+    {
+      "schema": "PORTAL_HOST_CAPABILITY_SNAPSHOT_V1",
+      "observed_at": 1791315000.0,
+      "ttl_seconds": 300.0,
+      "routes": [
+        {
+          "adapter_id": "github",
+          "route_id": "repo-native:thebrazenbeard/portal",
+          "node_id": "repo-native",
+          "target_kind": "repository",
+          "target_id": "thebrazenbeard/portal",
+          "capabilities": ["semantic_work"],
+          "effect_capabilities": ["SOURCE_ONLY"],
+          "authorized_effects": ["SOURCE_ONLY"],
+          "available": true,
+          "attached": true,
+          "current": true,
+          "preference": 50
+        }
+      ],
+      "occupancy": [
+        {"node_id": "lappy", "occupied_slots": 3}
+      ]
+    }
+
+    portal host import-snapshot \
+      --state-db .portal/portal.sqlite3 \
+      --snapshot path/to/host-capability-snapshot.json
+
+The snapshot is host-supplied evidence, not self-authorizing discovery. Every route must explicitly contain `authorized_effects`; an empty list is valid and means the host observed technical capability without granting effect authority. The entire document is validated before mutation, and route/occupancy members are written in one transaction so a stale or conflicting member rolls back the whole snapshot.
+
 A usable route must be available, attached, current, match the assigned node and exact target, satisfy required capabilities, be technically capable of the required effect, and carry authority for that effect.
 
 Technical capability does not create authority. Discovery does not create attachment. Availability does not create currentness.

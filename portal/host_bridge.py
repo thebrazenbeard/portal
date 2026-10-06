@@ -376,6 +376,160 @@ class PortalHostBridgeStore:
             "expires_at": expires,
         }
 
+
+    def advertise_snapshot(
+        self,
+        routes: Iterable[PortalRouteAdvertisement],
+        occupancy: Mapping[str, int],
+        *,
+        ttl_seconds: float,
+        observed_at: float | None = None,
+    ) -> dict[str, object]:
+        """Atomically publish one host capability/currentness snapshot."""
+
+        if ttl_seconds <= 0:
+            raise ValueError("host snapshot ttl_seconds must be positive")
+        route_tuple = tuple(routes)
+        occupancy_items = tuple(sorted(dict(occupancy).items()))
+        if not route_tuple and not occupancy_items:
+            raise ValueError("host snapshot must contain an observation")
+
+        keys = tuple(self._route_storage_key(route) for route in route_tuple)
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate route in host snapshot")
+
+        normalized_occupancy: list[tuple[str, int]] = []
+        for node_id, occupied_slots in occupancy_items:
+            node = _required(node_id, "node_id")
+            if type(occupied_slots) is not int or occupied_slots < 0:
+                raise ValueError(
+                    "occupied_slots must be a non-negative integer"
+                )
+            normalized_occupancy.append((node, occupied_slots))
+        if len({node_id for node_id, _ in normalized_occupancy}) != len(
+            normalized_occupancy
+        ):
+            raise ValueError("duplicate node in host snapshot occupancy")
+
+        observed = float(time.time() if observed_at is None else observed_at)
+        expires = observed + float(ttl_seconds)
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            for route, key in zip(route_tuple, keys, strict=True):
+                row = self.connection.execute(
+                    """
+                    SELECT
+                        capabilities_json, effect_capabilities_json,
+                        authorized_effects_json, available, attached, current,
+                        preference, observed_at, expires_at
+                    FROM portal_host_routes
+                    WHERE adapter_id = ? AND route_id = ? AND node_id = ?
+                      AND target_kind = ? AND target_id = ?
+                    """,
+                    key,
+                ).fetchone()
+                if row is not None:
+                    existing_observed = float(row["observed_at"])
+                    if observed < existing_observed:
+                        raise ValueError("stale host route observation")
+                    if observed == existing_observed:
+                        existing = self._stored_route(route, row)
+                        if (
+                            existing != route
+                            or float(row["expires_at"]) != expires
+                        ):
+                            raise ValueError(
+                                "conflicting host route observation"
+                            )
+                        continue
+
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_host_routes(
+                        adapter_id, route_id, node_id, target_kind, target_id,
+                        capabilities_json, effect_capabilities_json,
+                        authorized_effects_json, available, attached, current,
+                        preference, observed_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(
+                        adapter_id, route_id, node_id, target_kind, target_id
+                    ) DO UPDATE SET
+                        capabilities_json = excluded.capabilities_json,
+                        effect_capabilities_json = excluded.effect_capabilities_json,
+                        authorized_effects_json = excluded.authorized_effects_json,
+                        available = excluded.available,
+                        attached = excluded.attached,
+                        current = excluded.current,
+                        preference = excluded.preference,
+                        observed_at = excluded.observed_at,
+                        expires_at = excluded.expires_at
+                    """,
+                    (
+                        route.adapter_id,
+                        route.route_id,
+                        route.node_id,
+                        route.target_kind,
+                        route.target_id,
+                        _canonical_json(route.capabilities),
+                        _canonical_json(route.effect_capabilities),
+                        _canonical_json(route.authorized_effects),
+                        int(route.available),
+                        int(route.attached),
+                        int(route.current),
+                        route.preference,
+                        observed,
+                        expires,
+                    ),
+                )
+
+            for node_id, occupied_slots in normalized_occupancy:
+                row = self.connection.execute(
+                    """
+                    SELECT occupied_slots, observed_at, expires_at
+                    FROM portal_host_node_occupancy
+                    WHERE node_id = ?
+                    """,
+                    (node_id,),
+                ).fetchone()
+                if row is not None:
+                    existing_observed = float(row["observed_at"])
+                    if observed < existing_observed:
+                        raise ValueError("stale host occupancy observation")
+                    if observed == existing_observed:
+                        if (
+                            occupied_slots != int(row["occupied_slots"])
+                            or float(row["expires_at"]) != expires
+                        ):
+                            raise ValueError(
+                                "conflicting host occupancy observation"
+                            )
+                        continue
+
+                self.connection.execute(
+                    """
+                    INSERT INTO portal_host_node_occupancy(
+                        node_id, occupied_slots, observed_at, expires_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(node_id) DO UPDATE SET
+                        occupied_slots = excluded.occupied_slots,
+                        observed_at = excluded.observed_at,
+                        expires_at = excluded.expires_at
+                    """,
+                    (node_id, occupied_slots, observed, expires),
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+        return {
+            "routes": route_tuple,
+            "occupancy": dict(normalized_occupancy),
+            "observed_at": observed,
+            "expires_at": expires,
+        }
+
     def active_node_occupancy(
         self,
         *,

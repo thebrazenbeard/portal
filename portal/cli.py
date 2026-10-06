@@ -56,6 +56,7 @@ from .host_bridge import (
 )
 from .host_driver_registry import load_host_command_drivers
 from .host_pump import PortalHostPump
+from .host_snapshot import load_host_capability_snapshot
 from .node_registry import load_execution_nodes
 from .process_adapter import (
     PortalProposalProcessAdapter,
@@ -556,6 +557,24 @@ def _parser() -> argparse.ArgumentParser:
     )
     host_advertise_projects.add_argument("--detached", action="store_true")
     host_advertise_projects.add_argument("--stale", action="store_true")
+
+    host_import_snapshot = host_subcommands.add_parser(
+        "import-snapshot",
+        help=(
+            "atomically import host-supplied route and occupancy evidence "
+            "without inferring authority"
+        ),
+    )
+    host_import_snapshot.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_import_snapshot.add_argument(
+        "--snapshot",
+        type=Path,
+        required=True,
+    )
 
     host_routes = host_subcommands.add_parser(
         "routes",
@@ -2323,6 +2342,30 @@ def _host_advertise_projects_payload(
     }
 
 
+
+def _host_import_snapshot_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    snapshot = load_host_capability_snapshot(Path(args.snapshot))
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        result = store.advertise_snapshot(
+            snapshot.routes,
+            dict(snapshot.occupancy),
+            ttl_seconds=snapshot.ttl_seconds,
+            observed_at=snapshot.observed_at,
+        )
+    finally:
+        store.close()
+
+    return {
+        "mode": "PORTAL_HOST_CAPABILITY_SNAPSHOT_IMPORT_V1",
+        "route_count": len(result["routes"]),
+        "occupancy_count": len(result["occupancy"]),
+        "observed_at": result["observed_at"],
+        "expires_at": result["expires_at"],
+    }
+
 def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -2658,6 +2701,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_advertise_payload(args)
             elif args.host_command == "advertise-projects":
                 payload = _host_advertise_projects_payload(args)
+            elif args.host_command == "import-snapshot":
+                payload = _host_import_snapshot_payload(args)
             elif args.host_command == "routes":
                 payload = _host_routes_payload(args)
             elif args.host_command == "occupancy":

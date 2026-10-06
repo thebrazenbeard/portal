@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import portal.cli as portal_cli
@@ -505,3 +506,142 @@ def test_host_advertise_projects_bulk_routes_are_exact_and_deduped(
     routes = json.loads(capsys.readouterr().out)["routes"]
     assert len(routes) == 3
 
+
+
+def test_host_import_snapshot_publishes_routes_and_occupancy(
+    tmp_path,
+    capsys,
+) -> None:
+    observed_at = time.time()
+    snapshot = tmp_path / "host-snapshot.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "PORTAL_HOST_CAPABILITY_SNAPSHOT_V1",
+                "observed_at": observed_at,
+                "ttl_seconds": 300.0,
+                "routes": [
+                    {
+                        "adapter_id": "github",
+                        "route_id": "repo-native:thebrazenbeard/portal",
+                        "node_id": "repo-native",
+                        "target_kind": "repository",
+                        "target_id": "thebrazenbeard/portal",
+                        "capabilities": ["semantic_work"],
+                        "effect_capabilities": ["SOURCE_ONLY"],
+                        "authorized_effects": ["SOURCE_ONLY"],
+                        "available": True,
+                        "attached": True,
+                        "current": True,
+                        "preference": 50,
+                    },
+                    {
+                        "adapter_id": "workbridge",
+                        "route_id": "lappy:portal",
+                        "node_id": "lappy",
+                        "target_kind": "repository",
+                        "target_id": "thebrazenbeard/portal",
+                        "capabilities": ["semantic_work"],
+                        "effect_capabilities": ["SOURCE_ONLY"],
+                        "authorized_effects": [],
+                        "available": True,
+                        "attached": True,
+                        "current": True,
+                        "preference": 20,
+                    },
+                ],
+                "occupancy": [
+                    {"node_id": "repo-native", "occupied_slots": 0},
+                    {"node_id": "lappy", "occupied_slots": 3},
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "import-snapshot",
+        "--state-db", str(state_db),
+        "--snapshot", str(snapshot),
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_HOST_CAPABILITY_SNAPSHOT_IMPORT_V1"
+    assert payload["route_count"] == 2
+    assert payload["occupancy_count"] == 2
+    assert payload["observed_at"] == observed_at
+    assert payload["expires_at"] == observed_at + 300.0
+
+    assert portal_cli.entrypoint([
+        "host", "routes", "--state-db", str(state_db),
+    ]) == 0
+    routes = json.loads(capsys.readouterr().out)["routes"]
+    by_adapter = {item["adapter_id"]: item for item in routes}
+    assert by_adapter["github"]["authorized_effects"] == ["SOURCE_ONLY"]
+    assert by_adapter["workbridge"]["authorized_effects"] == []
+
+    assert portal_cli.entrypoint([
+        "host", "occupancy-status", "--state-db", str(state_db),
+    ]) == 0
+    occupancy = json.loads(capsys.readouterr().out)["occupied_node_slots"]
+    assert occupancy == {"lappy": 3, "repo-native": 0}
+
+
+def test_host_import_snapshot_missing_authority_field_fails_before_any_write(
+    tmp_path,
+    capsys,
+) -> None:
+    snapshot = tmp_path / "bad-host-snapshot.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "PORTAL_HOST_CAPABILITY_SNAPSHOT_V1",
+                "observed_at": 100.0,
+                "ttl_seconds": 300.0,
+                "routes": [
+                    {
+                        "adapter_id": "github",
+                        "route_id": "repo-native:thebrazenbeard/portal",
+                        "node_id": "repo-native",
+                        "target_kind": "repository",
+                        "target_id": "thebrazenbeard/portal",
+                        "capabilities": ["semantic_work"],
+                        "effect_capabilities": ["SOURCE_ONLY"],
+                        "available": True,
+                        "attached": True,
+                        "current": True,
+                        "preference": 50,
+                    }
+                ],
+                "occupancy": [
+                    {"node_id": "repo-native", "occupied_slots": 1}
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "import-snapshot",
+        "--state-db", str(state_db),
+        "--snapshot", str(snapshot),
+    ])
+
+    assert code == 2
+    assert "authorized_effects" in capsys.readouterr().err
+
+    assert portal_cli.entrypoint([
+        "host", "routes", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["routes"] == []
+
+    assert portal_cli.entrypoint([
+        "host", "occupancy-status", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["occupied_node_slots"] == {}

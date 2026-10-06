@@ -404,3 +404,37 @@ def test_bulk_route_advertisement_rolls_back_on_stale_member(
     ]
     store.close()
 
+
+
+def test_host_snapshot_rolls_back_all_members_on_stale_route(
+    tmp_path: Path,
+) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store.advertise_route(
+        _route(),
+        ttl_seconds=300.0,
+        observed_at=200.0,
+    )
+
+    with pytest.raises(ValueError, match="stale host route observation"):
+        store.advertise_snapshot(
+            (
+                _route(
+                    adapter_id="workbridge",
+                    route_id="lappy:portal",
+                    node_id="lappy",
+                    authorized_effects=(),
+                ),
+                _route(),
+            ),
+            {"lappy": 3},
+            ttl_seconds=300.0,
+            observed_at=150.0,
+        )
+
+    routes = store.active_routes(now=220.0)
+    assert [(item.adapter_id, item.route_id) for item in routes] == [
+        ("github", "repo-native")
+    ]
+    assert store.active_node_occupancy(now=220.0) == {}
+    store.close()
