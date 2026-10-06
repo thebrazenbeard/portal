@@ -8,6 +8,7 @@ from portal.host_pump import (
     PortalHostDriverResult,
     PortalHostPump,
 )
+from portal.route_resolver import PortalRouteAdvertisement
 from portal.session import PortalSessionResult
 from portal.wave_runtime import PortalWavePacket
 
@@ -71,6 +72,24 @@ def _queue(
         subject_id=subject_id,
         adapter_id=adapter_id,
         route_id=route_id,
+    )
+    store.advertise_route(
+        PortalRouteAdvertisement(
+            adapter_id=adapter_id,
+            route_id=route_id,
+            node_id=packet.node_id,
+            target_kind="repository",
+            target_id=packet.repository,
+            capabilities=("semantic_work",),
+            effect_capabilities=(packet.effect_ceiling,),
+            authorized_effects=(packet.effect_ceiling,),
+            available=True,
+            attached=True,
+            current=True,
+            preference=50,
+        ),
+        observed_at=0.0,
+        ttl_seconds=1_000_000_000_000.0,
     )
     queued = store.queue_dispatch(
         result=result,
