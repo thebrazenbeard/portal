@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import portal.cli as portal_cli
-from portal.discovery import RepositoryInventoryItem, build_live_project_registry
+from portal.discovery import RepositoryInventoryItem
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,10 +45,15 @@ class FakeSession:
         )
 
 
-def _snapshot():
-    return build_live_project_registry(
-        owner="thebrazenbeard",
-        repositories=(
+class FakeCatalog:
+    calls: list[str] = []
+
+    def __init__(self, *, token=None) -> None:
+        self.token = token
+
+    def list_owned_repositories(self, owner: str):
+        self.calls.append(owner)
+        return (
             RepositoryInventoryItem(
                 name="project-runner",
                 full_name="thebrazenbeard/project-runner",
@@ -63,9 +68,7 @@ def _snapshot():
                 archived=False,
                 default_branch="main",
             ),
-        ),
-        curated_projects=(),
-    )
+        )
 
 
 def test_safe_host_session_auto_refreshes_live_membership(
@@ -74,15 +77,9 @@ def test_safe_host_session_auto_refreshes_live_membership(
     capsys,
 ) -> None:
     FakeSession.calls.clear()
-    discovered: list[str] = []
+    FakeCatalog.calls.clear()
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
-    monkeypatch.setattr(
-        portal_cli,
-        "discover_live_project_registry",
-        lambda *, owner, **_kwargs: (
-            discovered.append(owner) or _snapshot()
-        ),
-    )
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", FakeCatalog)
 
     code = portal_cli.entrypoint([
         "run",
@@ -96,7 +93,7 @@ def test_safe_host_session_auto_refreshes_live_membership(
 
     assert code == 0
     capsys.readouterr()
-    assert discovered == ["thebrazenbeard"]
+    assert FakeCatalog.calls == ["thebrazenbeard"]
     name, kwargs = FakeSession.calls[0]
     assert name == "run"
     assert kwargs["projects_path"] == tmp_path / "projects.live.yaml"
@@ -109,15 +106,9 @@ def test_safe_host_continue_auto_refreshes_live_membership(
     capsys,
 ) -> None:
     FakeSession.calls.clear()
-    discovered: list[str] = []
+    FakeCatalog.calls.clear()
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
-    monkeypatch.setattr(
-        portal_cli,
-        "discover_live_project_registry",
-        lambda *, owner, **_kwargs: (
-            discovered.append(owner) or _snapshot()
-        ),
-    )
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", FakeCatalog)
 
     code = portal_cli.entrypoint([
         "continue",
@@ -130,7 +121,7 @@ def test_safe_host_continue_auto_refreshes_live_membership(
 
     assert code == 0
     capsys.readouterr()
-    assert discovered == ["thebrazenbeard"]
+    assert FakeCatalog.calls == ["thebrazenbeard"]
     name, kwargs = FakeSession.calls[0]
     assert name == "continue"
     assert kwargs["projects_path"] == tmp_path / "projects.live.yaml"
@@ -145,10 +136,11 @@ def test_static_projects_explicitly_disables_safe_host_auto_discovery(
     FakeSession.calls.clear()
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
 
-    def forbidden(**_kwargs):
-        raise AssertionError("live discovery must be disabled")
+    class ForbiddenCatalog:
+        def __init__(self, **_kwargs):
+            raise AssertionError("live discovery must be disabled")
 
-    monkeypatch.setattr(portal_cli, "discover_live_project_registry", forbidden)
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", ForbiddenCatalog)
 
     code = portal_cli.entrypoint([
         "run",
