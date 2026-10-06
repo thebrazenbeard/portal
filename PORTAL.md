@@ -32,10 +32,13 @@ Implemented coordinator core:
 - live occupied-node accounting so saturated/backlogged nodes are not treated as free merely because their declared maximum capacity is larger;
 - a capability/currentness/authority route resolver plus composite execution router that binds exact targets to qualified adapters without hardcoding workstation or repository transports;
 - durable bind-before-dispatch route evidence and adapter-owned reconciliation, including fail-closed handling of ambiguous outcomes and no silent route substitution;
+- a durable external-host bridge with expiring route, node-occupancy and semantic-frontier currentness, atomic host dispatch taking, and attempt-time revalidation of exact target, attachment, capability and authority;
+- a reusable `PortalHostPump` that consumes already-bound host work, persists the attempt boundary before driver execution, preserves ambiguous outcomes for reconciliation, and allows unrelated safe work to continue;
+- closed-loop source-level acceptance coverage proving admit -> host queue -> durable attempt -> owning-driver verification -> capacity release -> automatic refill -> verified idle;
 - a built-in advisory process-proposal adapter that can be explicitly enabled from command-session `run` / `continue` with a worker-backend manifest, while retaining only `NO_PROTECTED_EFFECT` authority;
 - CLI surfaces for discovery, command sessions, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
 
-This is no longer a planning-only implementation. The built-in command-session path can now dispatch configured advisory process-proposal work through capability-based routing. The remaining gap is broader live host qualification and additional concrete drivers for arbitrary semantic work (for example repo-native connectors, Executor, WorkBridge, or Lappy V2 routes supplied by the host); source presence alone is not an installed or continuously running P.O.R.T.A.L. runtime.
+This is no longer a planning-only implementation. The command-session path can dispatch configured advisory process-proposal work and can queue arbitrary semantic work through a capability-qualified external-host boundary. The repository now contains the host-side pump/attempt/reconciliation contract as well. What remains host-specific is supplying concrete live drivers for the routes actually available in that environment (for example repo-native connectors, Executor, WorkBridge, or Lappy V2) and running the resident loop. Source presence and passing tests do not prove an installed, selected, or continuously running P.O.R.T.A.L. runtime.
 
 ## Existing execution-loop substrate
 
@@ -106,9 +109,9 @@ Before any resumed dispatch, Portal must refresh:
 - node/backend availability;
 - relevant authority.
 
-A prior plan or chat-local statement is not sufficient currentness evidence.
+A prior plan or chat-local statement is not sufficient currentness evidence. Expiring host observations are usable only inside their own observation window: `observed_at <= now < expires_at`. A future-dated observation is not current yet.
 
-For external ChatGPT/plugin/workstation execution, the operational recovery procedure is [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md). A fresh host reads command-session state and `host unresolved` before new semantic attempts, refreshes occupancy and route advertisements, marks the attempt boundary before an external effect, verifies through the owning substrate, reconciles the exact dispatch, and only then refills.
+For external ChatGPT/plugin/workstation execution, the operational recovery procedure is [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md). A fresh host reads command-session state and `host unresolved` before new semantic attempts, refreshes occupancy and route advertisements, atomically takes only work whose bound route is still qualified at the effect boundary, verifies through the owning substrate, reconciles the exact dispatch, and only then refills.
 
 ## Donor-mining rule
 
