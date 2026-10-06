@@ -443,6 +443,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     host_pending.add_argument("--session-id")
 
+    host_unresolved = host_subcommands.add_parser(
+        "unresolved",
+        help="show attempted host effects that still require reconciliation",
+    )
+    host_unresolved.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_unresolved.add_argument("--session-id")
+
     host_attempt = host_subcommands.add_parser(
         "attempt",
         help="durably cross the effect boundary before invoking a host route",
@@ -1599,6 +1610,18 @@ def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_unresolved_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        dispatches = store.unresolved_dispatches(session_id=args.session_id)
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_UNRESOLVED_V1",
+        "dispatches": list(dispatches),
+    }
+
+
 def _host_attempt_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -1673,6 +1696,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_occupancy_status_payload(args)
             elif args.host_command == "pending":
                 payload = _host_pending_payload(args)
+            elif args.host_command == "unresolved":
+                payload = _host_unresolved_payload(args)
             elif args.host_command == "attempt":
                 payload = _host_attempt_payload(args)
             elif args.host_command == "reconcile":
