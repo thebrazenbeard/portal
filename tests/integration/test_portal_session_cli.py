@@ -384,3 +384,26 @@ def test_duplicate_occupancy_source_for_node_fails_closed(
     assert "multiple occupancy sources for node: lappy" in capsys.readouterr().err
     assert FakeSession.calls == []
 
+def test_session_run_defaults_to_resident_refill_polling(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+    ])
+
+    assert code == 0
+    capsys.readouterr()
+    name, kwargs = FakeSession.calls[0]
+    assert name == "run_until_idle"
+    assert kwargs["max_cycles"] == 0
+    assert kwargs["max_idle_cycles"] == 0
+    assert kwargs["poll_seconds"] == 5.0
+
