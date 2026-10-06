@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import sqlite3
 import time
@@ -52,6 +53,12 @@ CREATE TABLE IF NOT EXISTS portal_command_subjects (
     FOREIGN KEY (session_id)
         REFERENCES portal_command_sessions(session_id)
         ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS portal_command_session_resume_specs (
+    session_id TEXT PRIMARY KEY,
+    spec_json TEXT NOT NULL,
+    updated_at REAL NOT NULL
 );
 """
 
@@ -451,6 +458,64 @@ class PortalCommandSession:
         if holder is not None and observed_holder != holder.strip():
             raise ValueError("session holder changed for existing session")
         return str(row[0]), int(row[1]), observed_holder
+
+    def save_resume_spec(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+        spec: Mapping[str, object],
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._require_session(session_id=session_id, holder=holder)
+        if not isinstance(spec, Mapping):
+            raise ValueError("resume spec must be a mapping")
+        try:
+            encoded = json.dumps(
+                dict(spec),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("resume spec must be JSON serializable") from exc
+        self.connection.execute(
+            """
+            INSERT INTO portal_command_session_resume_specs(
+                session_id, spec_json, updated_at
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(session_id)
+            DO UPDATE SET
+                spec_json = excluded.spec_json,
+                updated_at = excluded.updated_at
+            """,
+            (session_id, encoded, float(clock())),
+        )
+
+    def load_resume_spec(
+        self,
+        *,
+        session_id: str,
+        holder: str,
+    ) -> dict[str, object]:
+        self._require_session(session_id=session_id, holder=holder)
+        row = self.connection.execute(
+            """
+            SELECT spec_json
+            FROM portal_command_session_resume_specs
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Portal session resume spec does not exist")
+        try:
+            decoded = json.loads(str(row[0]))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Portal session resume spec is invalid JSON") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError("Portal session resume spec must decode to an object")
+        return decoded
 
     def status(self, session_id: str) -> dict[str, object]:
         control_state, generation, holder = self._require_session(
