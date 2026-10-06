@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class FakeSession:
     calls: list[tuple[str, dict[str, object]]] = []
+    resume_spec: dict[str, object] | None = None
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -21,6 +22,12 @@ class FakeSession:
 
     def save_resume_spec(self, **kwargs):
         self.calls.append(("save_resume_spec", kwargs))
+
+    def load_resume_spec(self, **kwargs):
+        self.calls.append(("load_resume_spec", kwargs))
+        if self.resume_spec is None:
+            raise ValueError("Portal session resume spec does not exist")
+        return dict(self.resume_spec)
 
     def run(self, **kwargs):
         self.calls.append(("run", kwargs))
@@ -464,4 +471,67 @@ def test_session_run_persists_non_secret_resume_envelope(
     assert spec["occupied_nodes"] == ["worklaptop=0"]
     assert "token" not in spec
     assert "github_token" not in spec
+
+def test_session_continue_resume_reconstructs_operational_inputs(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    nodes_path = ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"
+    FakeSession.resume_spec = {
+        "schema": "PORTAL_COMMAND_SESSION_RESUME_V1",
+        "holder": "vera",
+        "wave": str(ROOT / "portfolio" / "advancement_wave.public.json"),
+        "corpus": str(ROOT / "portfolio" / "corpus.public.json"),
+        "projects": str(ROOT / "registry" / "projects.yaml"),
+        "discover_owner": None,
+        "write_live_registry": None,
+        "static_projects": True,
+        "nodes": str(nodes_path),
+        "lease_ttl": 321.0,
+        "max_parallel": 4,
+        "max_per_identity": 3,
+        "max_per_family": 2,
+        "max_per_lane": 1,
+        "verifier": "vera-review",
+        "host_bridge": False,
+        "worker_backends": None,
+        "workspace_root": str(tmp_path / "workers"),
+        "worker_holder_prefix": "portal-host",
+        "delivery_lease_ttl": 123.0,
+        "occupied_nodes": ["worklaptop=0"],
+        "project_runner_tasks": [],
+        "host_node_occupancy": False,
+        "host_frontier_currentness": False,
+    }
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    try:
+        code = portal_cli.entrypoint([
+            "continue",
+            "--state-db", str(tmp_path / "portal.sqlite3"),
+            "--session-id", "portfolio",
+            "--resume",
+        ])
+    finally:
+        FakeSession.resume_spec = None
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == (
+        "PORTAL_COMMAND_SESSION_CONTINUE_V1"
+    )
+    assert FakeSession.calls[0][0] == "load_resume_spec"
+    name, kwargs = next(
+        item for item in FakeSession.calls if item[0] == "continue"
+    )
+    assert name == "continue"
+    assert kwargs["holder"] == "vera"
+    assert kwargs["lease_ttl"] == 321.0
+    assert kwargs["budget"].max_parallel == 4
+    assert kwargs["budget"].max_per_identity == 3
+    assert kwargs["budget"].max_per_family == 2
+    assert kwargs["budget"].max_per_lane == 1
+    assert kwargs["verifier"] == "vera-review"
+    assert kwargs["occupied_node_slots"] == {"worklaptop": 0}
 
