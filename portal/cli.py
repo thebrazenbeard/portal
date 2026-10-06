@@ -1603,8 +1603,12 @@ def _stop_payload(args: argparse.Namespace) -> dict[str, object]:
 def _run_payload(args: argparse.Namespace) -> dict[str, object]:
     if args.session_id:
         return _session_run_payload(args)
+    if args.resume:
+        raise ValueError("--resume requires --session-id")
     if args.worker_backends is not None:
         raise ValueError("--worker-backends requires --session-id")
+    if args.nodes is None:
+        raise ValueError("--nodes is required")
 
     project_snapshot, portfolio_source = _run_project_snapshot(args)
     dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
