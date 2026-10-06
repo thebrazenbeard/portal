@@ -1,0 +1,15 @@
+include registry/projects.yaml
+include registry/workers.yaml
+include policy/scheduling.yaml
+include topology/dependencies.yaml
+include portfolio/corpus.public.json
+include portfolio/advancement_wave.public.json
+include schemas/project.schema.json
+include schemas/worker.schema.json
+include schemas/observation.schema.json
+include schemas/dependency.schema.json
+include schemas/frontier.schema.json
+include schemas/work-unit.schema.json
+include schemas/portfolio-corpus.schema.json
+include schemas/portfolio-advancement.schema.json
+include schemas/p0-project-manifest.schema.json

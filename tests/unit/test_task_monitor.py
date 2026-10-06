@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -377,3 +378,103 @@ def test_unverifiable_process_identity_is_not_reconciled_as_dead(
     reconciliation = json.loads(capsys.readouterr().out)
     assert reconciliation["reconciled"] == 0
     assert len(list((tasks_root / "active").glob("*.json"))) == 1
+
+
+def _mock_windows_process_query(
+    monkeypatch,
+    *,
+    open_handle=123,
+    open_error=0,
+    query_succeeded=True,
+    exit_code=259,
+):
+    import ctypes
+
+    kernel32 = Mock()
+    kernel32.OpenProcess.return_value = open_handle
+    kernel32.CloseHandle.return_value = True
+
+    def get_exit_code(handle, output):
+        if query_succeeded:
+            output._obj.value = exit_code
+        return query_succeeded
+
+    kernel32.GetExitCodeProcess.side_effect = get_exit_code
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **kw: kernel32, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: open_error, raising=False)
+    monkeypatch.setattr(
+        task_monitor_module,
+        "_process_is_running",
+        task_monitor_module._windows_process_is_running,
+    )
+    return kernel32
+
+
+@pytest.mark.parametrize("open_error", [5, 6, 0])
+def test_windows_liveness_open_failure_does_not_archive_a_task(
+    tmp_path, monkeypatch, open_error,
+):
+    kernel32 = _mock_windows_process_query(
+        monkeypatch, open_handle=0, open_error=open_error,
+    )
+    record = task_monitor_module.register_task(
+        tmp_path, name="unqueryable-task", pid=4242, owner="test",
+    )
+
+    assert task_monitor_module._windows_process_is_running(4242) is None
+    task = task_monitor_module.summarize_tasks(tmp_path)["tasks"][0]
+    assert task["state"] == "IDENTITY_UNVERIFIED"
+    assert task_monitor_module.reconcile_orphaned_tasks(tmp_path) == []
+    assert (tmp_path / "active" / f"{record['task_id']}.json").exists()
+    assert not (tmp_path / "history").exists()
+    kernel32.GetExitCodeProcess.assert_not_called()
+    kernel32.CloseHandle.assert_not_called()
+
+
+def test_windows_liveness_exit_query_failure_does_not_archive_a_task(
+    tmp_path, monkeypatch,
+):
+    kernel32 = _mock_windows_process_query(monkeypatch, query_succeeded=False)
+    record = task_monitor_module.register_task(
+        tmp_path, name="unqueryable-exit", pid=4242, owner="test",
+    )
+
+    assert task_monitor_module._windows_process_is_running(4242) is None
+    task = task_monitor_module.summarize_tasks(tmp_path)["tasks"][0]
+    assert task["state"] == "IDENTITY_UNVERIFIED"
+    assert task_monitor_module.reconcile_orphaned_tasks(tmp_path) == []
+    assert (tmp_path / "active" / f"{record['task_id']}.json").exists()
+    assert not (tmp_path / "history").exists()
+    assert kernel32.CloseHandle.call_count == kernel32.OpenProcess.call_count
+    kernel32.CloseHandle.assert_called_with(123)
+
+
+def test_windows_liveness_missing_pid_is_still_reconciled(
+    tmp_path, monkeypatch,
+):
+    kernel32 = _mock_windows_process_query(
+        monkeypatch, open_handle=0, open_error=87,
+    )
+    record = task_monitor_module.register_task(
+        tmp_path, name="missing-task", pid=4242, owner="test",
+    )
+
+    assert task_monitor_module._windows_process_is_running(4242) is False
+    assert task_monitor_module.summarize_tasks(tmp_path)["tasks"][0]["state"] == "ORPHANED"
+    reconciled = task_monitor_module.reconcile_orphaned_tasks(tmp_path)
+    assert len(reconciled) == 1
+    assert reconciled[0]["state"] == "UNKNOWN_EXIT"
+    assert reconciled[0]["exit_code"] is None
+    assert reconciled[0]["terminal_reason"] == "PROCESS_GONE_WITHOUT_FINAL_RECEIPT"
+    assert not (tmp_path / "active" / f"{record['task_id']}.json").exists()
+    assert (tmp_path / "history" / f"{record['task_id']}.json").exists()
+    kernel32.CloseHandle.assert_not_called()
+
+
+@pytest.mark.parametrize("exit_code, expected", [(259, True), (7, False)])
+def test_windows_liveness_successful_query_preserves_liveness(
+    monkeypatch, exit_code, expected,
+):
+    kernel32 = _mock_windows_process_query(monkeypatch, exit_code=exit_code)
+    assert task_monitor_module._windows_process_is_running(4242) is expected
+    kernel32.CloseHandle.assert_called_once_with(123)

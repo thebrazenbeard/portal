@@ -16,7 +16,7 @@ dependencies = [
 project-runner = "runner.cli:entrypoint"
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "setuptools>=75"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

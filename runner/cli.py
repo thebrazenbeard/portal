@@ -71,6 +71,7 @@ from .task_monitor import (
     summarize_tasks,
 )
 from .task_supervisor import launch_background_task
+from .resources import public_data_root
 from .prioritize import rank_frontiers
 from .propagate import derive_invalidations
 from .registry import (
@@ -87,12 +88,13 @@ from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = public_data_root()
 
 
 def _project_registry_path() -> Path:
     override = os.environ.get("PROJECT_RUNNER_PROJECT_REGISTRY")
     if override is None:
-        return ROOT / "registry" / "projects.yaml"
+        return DATA_ROOT / "registry" / "projects.yaml"
 
     path = Path(override).expanduser()
     if not path.is_absolute():
@@ -170,7 +172,7 @@ def _require_public_safe_reporting() -> None:
 
 
 def _load_worker_registry_snapshot():
-    return load_worker_snapshot(ROOT / "registry" / "workers.yaml")
+    return load_worker_snapshot(DATA_ROOT / "registry" / "workers.yaml")
 
 
 def _load_all():
@@ -1345,7 +1347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     wave_plan.add_argument(
         "--wave",
         type=Path,
-        default=ROOT / "portfolio" / "advancement_wave.public.json",
+        default=DATA_ROOT / "portfolio" / "advancement_wave.public.json",
     )
     wave_plan.add_argument("--max-parallel", type=int, required=True)
     wave_plan.add_argument("--max-per-identity", type=int, required=True)
@@ -1365,17 +1367,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     operator_bindings.add_argument(
         "--wave",
         type=Path,
-        default=ROOT / "portfolio" / "advancement_wave.public.json",
+        default=DATA_ROOT / "portfolio" / "advancement_wave.public.json",
     )
     operator_bindings.add_argument(
         "--corpus",
         type=Path,
-        default=ROOT / "portfolio" / "corpus.public.json",
+        default=DATA_ROOT / "portfolio" / "corpus.public.json",
     )
     operator_bindings.add_argument(
         "--projects",
         type=Path,
-        default=ROOT / "registry" / "projects.yaml",
+        default=DATA_ROOT / "registry" / "projects.yaml",
     )
 
     wave_claim = subparsers.add_parser("portfolio-wave-claim")
@@ -1383,17 +1385,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     wave_claim.add_argument(
         "--wave",
         type=Path,
-        default=ROOT / "portfolio" / "advancement_wave.public.json",
+        default=DATA_ROOT / "portfolio" / "advancement_wave.public.json",
     )
     wave_claim.add_argument(
         "--corpus",
         type=Path,
-        default=ROOT / "portfolio" / "corpus.public.json",
+        default=DATA_ROOT / "portfolio" / "corpus.public.json",
     )
     wave_claim.add_argument(
         "--projects",
         type=Path,
-        default=ROOT / "registry" / "projects.yaml",
+        default=DATA_ROOT / "registry" / "projects.yaml",
     )
     wave_claim.add_argument("--subject-id", required=True)
     wave_claim.add_argument("--state-db", type=Path, required=True)
@@ -1562,7 +1564,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     portfolio_cycle.add_argument(
         "--dependencies",
         type=Path,
-        default=ROOT / "topology" / "dependencies.yaml",
+        default=DATA_ROOT / "topology" / "dependencies.yaml",
     )
     portfolio_cycle.add_argument(
         "--state-db",
@@ -1581,7 +1583,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     consume_queue.add_argument(
         "--dependencies",
         type=Path,
-        default=ROOT / "topology" / "dependencies.yaml",
+        default=DATA_ROOT / "topology" / "dependencies.yaml",
     )
     consume_queue.add_argument(
         "--state-db",

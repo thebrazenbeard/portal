@@ -45,12 +45,45 @@ The live CI route still has only `contents: read`; it proves exact-head GitHub c
 
 ## Quick start
 
+Use **Python 3.12 or newer** and an isolated environment. The installed application
+includes its public registries, schemas, scheduling policy, topology, and portfolio
+defaults, so commands work from any working directory.
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\project-runner.exe validate
+.\.venv\Scripts\project-runner.exe inventory
+```
+
+macOS/Linux:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+.venv/bin/project-runner validate
+.venv/bin/project-runner inventory
+```
+
+For development and the fixture-based example, activate the environment and use:
+
     python -m pip install -e '.[dev]'
     project-runner validate
     project-runner inventory
     project-runner dispatch-report --before tests/fixtures/observations-before.yaml --after tests/fixtures/observations-after.yaml --dependencies tests/fixtures/m3-dependencies.yaml
-    project-runner github-read-smoke --repository thebrazenbeard/project-runner --ref main
     python -m pytest -q
+
+The optional online read-only smoke requires a GitHub token with repository read
+access in `PROJECT_RUNNER_GITHUB_TOKEN`:
+
+    project-runner github-read-smoke --repository thebrazenbeard/portal --ref main
+
+The Windows compatibility task launcher prefers the active virtual environment;
+activate it before invoking `scripts\Start-ProjectRunnerTask.ps1`. Task paths may
+contain spaces. If Windows cannot inspect a task process, its status remains
+`IDENTITY_UNVERIFIED` until evidence establishes whether it is still running.
 
 ## Governed read/write execution
 

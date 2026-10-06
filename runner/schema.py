@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from .resources import public_data_root
 
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = public_data_root()
 _SCHEMA_FILES = {
     "project": _ROOT / "schemas" / "project.schema.json",
     "worker": _ROOT / "schemas" / "worker.schema.json",

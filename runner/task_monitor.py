@@ -271,7 +271,10 @@ def _process_runtime_state(record: dict[str, Any]) -> str:
         pid = int(record["pid"])
     except (KeyError, TypeError, ValueError):
         return "IDENTITY_UNVERIFIED"
-    if not _process_is_running(pid):
+    running = _process_is_running(pid)
+    if running is None:
+        return "IDENTITY_UNVERIFIED"
+    if not running:
         return "ORPHANED"
 
     expected = record.get("process_started_at_utc")
@@ -313,7 +316,7 @@ def _process_started_at_utc(pid: int) -> str | None:
     return _windows_process_started_at_utc(pid)
 
 
-def _process_is_running(pid: int) -> bool:
+def _process_is_running(pid: int) -> bool | None:
     if pid <= 0:
         return False
     if os.name == "nt":
@@ -329,12 +332,13 @@ def _process_is_running(pid: int) -> bool:
     return True
 
 
-def _windows_process_is_running(pid: int) -> bool:
+def _windows_process_is_running(pid: int) -> bool | None:
     import ctypes
     from ctypes import wintypes
 
     process_query_limited_information = 0x1000
     still_active = 259
+    error_invalid_parameter = 87
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     open_process = kernel32.OpenProcess
     open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
@@ -348,11 +352,15 @@ def _windows_process_is_running(pid: int) -> bool:
 
     handle = open_process(process_query_limited_information, False, pid)
     if not handle:
-        return False
+        # An absent PID reports ERROR_INVALID_PARAMETER. Access denial or
+        # another query failure cannot prove that the process has terminated.
+        if ctypes.get_last_error() == error_invalid_parameter:
+            return False
+        return None
     try:
         exit_code = wintypes.DWORD()
         if not get_exit_code(handle, ctypes.byref(exit_code)):
-            return False
+            return None
         return exit_code.value == still_active
     finally:
         close_handle(handle)

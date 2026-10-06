@@ -35,16 +35,23 @@ function Resolve-ProjectRunnerTasksRoot {
 }
 
 function Resolve-ProjectRunnerPython {
-    if ($null -ne (Get-Command py -ErrorAction SilentlyContinue)) {
-        $resolved = @(& py -c "import sys; print(sys.executable)")
-        if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
-            return [System.IO.Path]::GetFullPath([string]$resolved[0])
+    if (-not [string]::IsNullOrWhiteSpace($env:VIRTUAL_ENV)) {
+        $venvPython = Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
+        if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($venvPython)
         }
     }
 
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if ($null -ne $pythonCommand) {
         return [System.IO.Path]::GetFullPath($pythonCommand.Source)
+    }
+
+    if ($null -ne (Get-Command py -ErrorAction SilentlyContinue)) {
+        $resolved = @(& py -c "import sys; print(sys.executable)")
+        if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
+            return [System.IO.Path]::GetFullPath([string]$resolved[0])
+        }
     }
 
     throw "Project Runner task launch requires a usable Python interpreter"
@@ -90,11 +97,12 @@ $pythonExe = Resolve-ProjectRunnerPython
 $supervisor = Start-Process -FilePath $pythonExe `
     -ArgumentList @(
         "-m", "runner.task_supervisor",
-        "--request-path", $requestPath
+        "--request-path", ('"{0}"' -f $requestPath)
     ) `
     -WorkingDirectory $WorkingDirectory `
     -RedirectStandardOutput $supervisorStdout `
     -RedirectStandardError $supervisorStderr `
+    -WindowStyle Hidden `
     -PassThru
 
 $deadline = [DateTime]::UtcNow.AddSeconds(5)
