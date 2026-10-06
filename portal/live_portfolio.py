@@ -26,6 +26,12 @@ _DISCOVERY_STATUS = (
     "Live GitHub membership is current for this cut; descriptive purpose/frontier "
     "metadata still requires a bounded currentness audit."
 )
+_DISCOVERY_SOURCE_PROPOSAL_FRONTIER = (
+    "Orient to the repository at the exact current head, preserve repository-local "
+    "instructions and intent, then implement the smallest coherent source-only improvement "
+    "that advances the project. Produce a reviewable proposal only; do not perform remote "
+    "mutation or protected effects."
+)
 
 
 @dataclass(frozen=True)
@@ -151,6 +157,32 @@ def _refresh_wave_item(
     return item
 
 
+def _apply_discovery_effect_ceiling(
+    *,
+    record: dict[str, object],
+    item: dict[str, object],
+    effect_ceiling: str,
+) -> None:
+    if effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
+    if bool(record["archived"]):
+        return
+    item["effect_ceiling"] = effect_ceiling
+    if effect_ceiling != "SOURCE_ONLY":
+        return
+    record["current_frontier"] = _DISCOVERY_SOURCE_PROPOSAL_FRONTIER
+    record["status"] = (
+        "Repository explicitly admitted for bounded source-only proposal "
+        "generation; remote mutation remains separately gated."
+    )
+    item["action"] = "EXECUTE_FRONTIER"
+    item["review_gate"] = "EXACT_HEAD_REVIEW"
+    item["frontier"] = record["current_frontier"]
+    item["source_status"] = record["status"]
+
+
 def refresh_live_public_portfolio(
     *,
     baseline_corpus_path: Path,
@@ -158,15 +190,22 @@ def refresh_live_public_portfolio(
     repositories: Iterable[RepositoryInventoryItem],
     observed_at: str,
     output_dir: Path,
+    discovered_effect_ceiling: str = "NO_EFFECT",
 ) -> PortalLivePortfolioRefresh:
     """Render a privacy-safe live public corpus/wave overlay.
 
     Exact live membership replaces stale membership. Existing descriptive
     metadata is reused only for repositories that still have the same exact
-    repository identity. Newly discovered public repositories receive a
-    NO_EFFECT currentness-audit frontier instead of invented project authority.
-    Private membership is represented only by counts.
+    repository identity. Newly discovered public repositories default to a
+    NO_EFFECT currentness audit; an explicit SOURCE_ONLY ceiling converts only
+    those discoveries into proposal-generation frontiers. Private membership is
+    represented only by counts.
     """
+
+    if discovered_effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
 
     observed_at = observed_at.strip()
     if not observed_at:
@@ -227,12 +266,17 @@ def refresh_live_public_portfolio(
             )
         seen_ids.add(record_id)
         records.append(record)
-        repository_items.append(
-            _refresh_wave_item(
-                record=record,
-                baseline_item=baseline_items.get(key),
-            )
+        item = _refresh_wave_item(
+            record=record,
+            baseline_item=baseline_items.get(key),
         )
+        if raw_record is None:
+            _apply_discovery_effect_ceiling(
+                record=record,
+                item=item,
+                effect_ceiling=discovered_effect_ceiling,
+            )
+        repository_items.append(item)
 
     public_archived = sum(repo.archived for repo in public_live)
     private_archived = sum(repo.archived for repo in private_live)
@@ -306,13 +350,20 @@ def refresh_live_local_portfolio(
     repositories: Iterable[RepositoryInventoryItem],
     observed_at: str,
     output_dir: Path,
+    discovered_effect_ceiling: str = "NO_EFFECT",
 ) -> PortalLivePortfolioRefresh:
     """Render a local runtime overlay that can include exact private membership.
 
     The public overlay remains the privacy-safe publication surface. Private
-    repositories are added only to this local corpus/wave and enter as
-    NO_EFFECT currentness audits so membership never invents execution authority.
+    repositories are added only to this local corpus/wave. All newly discovered
+    repositories default to NO_EFFECT; SOURCE_ONLY must be explicitly selected
+    and still grants proposal generation rather than remote mutation authority.
     """
+
+    if discovered_effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
 
     repository_tuple = tuple(repositories)
     output_dir = Path(output_dir)
@@ -322,6 +373,7 @@ def refresh_live_local_portfolio(
         repositories=repository_tuple,
         observed_at=observed_at,
         output_dir=output_dir / "public",
+        discovered_effect_ceiling=discovered_effect_ceiling,
     )
 
     private_live = tuple(
@@ -369,7 +421,13 @@ def refresh_live_local_portfolio(
         seen_ids.add(record_id)
         seen_repositories.add(repository_key)
         records.append(record)
-        items.append(_refresh_wave_item(record=record, baseline_item=None))
+        item = _refresh_wave_item(record=record, baseline_item=None)
+        _apply_discovery_effect_ceiling(
+            record=record,
+            item=item,
+            effect_ceiling=discovered_effect_ceiling,
+        )
+        items.append(item)
 
     corpus_payload["status_basis"] = (
         "Live GitHub owner membership overlaid onto the previous public-safe "

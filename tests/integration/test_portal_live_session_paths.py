@@ -85,6 +85,7 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
         discover_owner="thebrazenbeard",
         host_bridge=False,
         host_frontier_currentness=False,
+        discovered_effect_ceiling="SOURCE_ONLY",
         wave=ROOT / "portfolio" / "advancement_wave.public.json",
         corpus=ROOT / "portfolio" / "corpus.public.json",
         state_db=tmp_path / "portal.sqlite3",
@@ -127,11 +128,14 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
         for item in wave["items"]
         if item["subject_kind"] == "repository"
     }
-    assert by_repo["thebrazenbeard/new-live"]["action"] == "CURRENTNESS_AUDIT"
-    assert by_repo["thebrazenbeard/new-live"]["effect_ceiling"] == "NO_EFFECT"
+    assert by_repo["thebrazenbeard/new-live"]["action"] == "EXECUTE_FRONTIER"
+    assert by_repo["thebrazenbeard/new-live"]["effect_ceiling"] == "SOURCE_ONLY"
+    assert by_repo["thebrazenbeard/new-live"]["review_gate"] == "EXACT_HEAD_REVIEW"
     assert by_repo["thebrazenbeard/old-live"]["execution_state"] == "HELD"
-    assert by_repo["thebrazenbeard/private-live"]["action"] == "CURRENTNESS_AUDIT"
-    assert by_repo["thebrazenbeard/private-live"]["effect_ceiling"] == "NO_EFFECT"
+    assert by_repo["thebrazenbeard/old-live"]["effect_ceiling"] == "NO_EFFECT"
+    assert by_repo["thebrazenbeard/private-live"]["action"] == "EXECUTE_FRONTIER"
+    assert by_repo["thebrazenbeard/private-live"]["effect_ceiling"] == "SOURCE_ONLY"
+    assert by_repo["thebrazenbeard/private-live"]["review_gate"] == "EXACT_HEAD_REVIEW"
     assert by_repo["thebrazenbeard/private-live"]["execution_state"] == "QUEUED"
 
     registry = yaml.safe_load(projects_path.read_text(encoding="utf-8"))

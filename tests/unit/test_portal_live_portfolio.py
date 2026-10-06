@@ -328,3 +328,78 @@ def test_live_local_overlay_keeps_private_repositories_runnable_only_locally(
     )
     assert "secret" not in public_result.corpus_path.read_text(encoding="utf-8")
     assert "private-archived" not in public_result.wave_path.read_text(encoding="utf-8")
+
+def test_live_local_overlay_can_explicitly_enable_private_source_proposals(
+    tmp_path: Path,
+) -> None:
+    corpus_path, wave_path = _baseline(tmp_path)
+    result = live_portfolio.refresh_live_local_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=(
+            _repo("alpha"),
+            _repo("secret", private=True),
+            _repo("private-archived", private=True, archived=True),
+        ),
+        observed_at="2026-10-06T20:15:00Z",
+        output_dir=tmp_path / "live-local",
+        discovered_effect_ceiling="SOURCE_ONLY",
+    )
+
+    wave = load_advancement_wave(result.wave_path)
+    items = {
+        item.repositories[0]: item
+        for item in wave.items
+        if item.subject_kind == "repository"
+    }
+    assert items["thebrazenbeard/secret"].execution_state == "QUEUED"
+    assert items["thebrazenbeard/secret"].effect_ceiling == "SOURCE_ONLY"
+    assert items["thebrazenbeard/private-archived"].execution_state == "HELD"
+    assert items["thebrazenbeard/private-archived"].effect_ceiling == "NO_EFFECT"
+
+def test_private_source_only_opt_in_promotes_discovery_to_bounded_frontier(
+    tmp_path: Path,
+) -> None:
+    corpus_path, wave_path = _baseline(tmp_path)
+    result = live_portfolio.refresh_live_local_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=(_repo("alpha"), _repo("secret", private=True)),
+        observed_at="2026-10-06T20:30:00Z",
+        output_dir=tmp_path / "live-local",
+        discovered_effect_ceiling="SOURCE_ONLY",
+    )
+
+    wave = load_advancement_wave(result.wave_path)
+    item = next(
+        item
+        for item in wave.items
+        if item.repositories == ("thebrazenbeard/secret",)
+    )
+    assert item.action == "EXECUTE_FRONTIER"
+    assert item.review_gate == "EXACT_HEAD_REVIEW"
+    assert "smallest coherent source-only improvement" in item.frontier
+
+def test_live_public_overlay_can_explicitly_promote_new_discovery_to_source_only(
+    tmp_path: Path,
+) -> None:
+    corpus_path, wave_path = _baseline(tmp_path)
+    result = live_portfolio.refresh_live_public_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=(_repo("alpha"), _repo("new-live")),
+        observed_at="2026-10-06T20:45:00Z",
+        output_dir=tmp_path / "live-public",
+        discovered_effect_ceiling="SOURCE_ONLY",
+    )
+
+    wave = load_advancement_wave(result.wave_path)
+    item = next(
+        item
+        for item in wave.items
+        if item.repositories == ("thebrazenbeard/new-live",)
+    )
+    assert item.effect_ceiling == "SOURCE_ONLY"
+    assert item.action == "EXECUTE_FRONTIER"
+    assert item.review_gate == "EXACT_HEAD_REVIEW"
+    assert "smallest coherent source-only improvement" in item.frontier

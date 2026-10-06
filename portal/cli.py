@@ -171,6 +171,15 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument(
+        "--discovered-effect-ceiling",
+        choices=("NO_EFFECT", "SOURCE_ONLY"),
+        default="NO_EFFECT",
+        help=(
+            "explicit local ceiling for newly discovered non-archived "
+            "repositories; does not grant source-write promotion authority"
+        ),
+    )
+    run.add_argument(
         "--workers",
         type=Path,
         default=ROOT / "registry" / "workers.yaml",
@@ -359,6 +368,15 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "use --projects exactly as supplied instead of refreshing live "
             "membership for the safe host-session path"
+        ),
+    )
+    continue_cmd.add_argument(
+        "--discovered-effect-ceiling",
+        choices=("NO_EFFECT", "SOURCE_ONLY"),
+        default="NO_EFFECT",
+        help=(
+            "explicit local ceiling for newly discovered non-archived "
+            "repositories; does not grant source-write promotion authority"
         ),
     )
     continue_cmd.add_argument(
@@ -1334,6 +1352,7 @@ def _session_portfolio_paths(
         repositories=repositories,
         observed_at=datetime.now(timezone.utc).isoformat(),
         output_dir=Path(args.state_db).parent / "live-portfolio",
+        discovered_effect_ceiling=getattr(args, "discovered_effect_ceiling", "NO_EFFECT"),
     )
     return live.wave_path, live.corpus_path, live_registry_path
 
@@ -1467,6 +1486,7 @@ def _session_resume_spec(
             else None
         ),
         "static_projects": bool(args.static_projects),
+        "discovered_effect_ceiling": getattr(args, "discovered_effect_ceiling", "NO_EFFECT"),
         "nodes": str(Path(args.nodes)),
         "lease_ttl": float(args.lease_ttl),
         "max_parallel": int(args.max_parallel),
@@ -1613,6 +1633,12 @@ def _apply_session_resume_spec(
         else None
     )
     args.static_projects = boolean("static_projects")
+    discovered_effect_ceiling = spec.get("discovered_effect_ceiling", "NO_EFFECT")
+    if discovered_effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "resume spec discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
+    args.discovered_effect_ceiling = discovered_effect_ceiling
     args.nodes = Path(required_text("nodes"))
     args.lease_ttl = number("lease_ttl")
     args.max_parallel = integer("max_parallel")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import sys
 from typing import Mapping
 
 import yaml
@@ -16,7 +18,26 @@ _ALLOWED_WORKER_KEYS = {
     "command",
     "timeout_seconds",
     "pass_env",
+    "codex",
+    "gh",
+    "git",
 }
+
+
+def _executable(raw: object, name: str) -> str:
+    if raw is None:
+        candidate = shutil.which(name)
+        if candidate is None:
+            raise ValueError(f"{name} executable is unavailable")
+        return str(Path(candidate).resolve())
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{name} executable must be a non-empty string")
+    candidate = Path(raw.strip())
+    if not candidate.is_absolute():
+        raise ValueError(f"{name} executable must be an absolute path")
+    if not candidate.is_file():
+        raise ValueError(f"{name} executable is unavailable")
+    return str(candidate.resolve())
 
 
 def load_worker_backends(path: Path) -> dict[str, ProcessWorkerSpec]:
@@ -50,17 +71,41 @@ def load_worker_backends(path: Path) -> dict[str, ProcessWorkerSpec]:
         if node_id in result:
             raise ValueError("duplicate worker backend node_id")
         kind = raw.get("kind")
-        if kind != "PROCESS_JSON_V1":
-            raise ValueError("unsupported worker backend kind")
-        command = raw.get("command")
-        if not isinstance(command, list) or not command:
-            raise ValueError("process worker backend command must be a list")
-        if any(not isinstance(item, str) for item in command):
-            raise ValueError("process worker backend command entries must be strings")
         pass_env = raw.get("pass_env", [])
         if not isinstance(pass_env, list):
             raise ValueError("process worker backend pass_env must be a list")
         timeout_seconds = raw.get("timeout_seconds", 900.0)
+
+        if kind == "PROCESS_JSON_V1":
+            if any(raw.get(name) is not None for name in ("codex", "gh", "git")):
+                raise ValueError(
+                    "PROCESS_JSON_V1 does not accept codex, gh, or git"
+                )
+            command = raw.get("command")
+            if not isinstance(command, list) or not command:
+                raise ValueError("process worker backend command must be a list")
+            if any(not isinstance(item, str) for item in command):
+                raise ValueError(
+                    "process worker backend command entries must be strings"
+                )
+        elif kind == "CODEX_GH_PROPOSAL_V1":
+            if raw.get("command") is not None:
+                raise ValueError(
+                    "Codex GitHub proposal backend does not accept command"
+                )
+            command = (
+                sys.executable,
+                str(Path(__file__).with_name("codex_gh_worker.py").resolve()),
+                "--codex",
+                _executable(raw.get("codex"), "codex"),
+                "--gh",
+                _executable(raw.get("gh"), "gh"),
+                "--git",
+                _executable(raw.get("git"), "git"),
+            )
+        else:
+            raise ValueError("unsupported worker backend kind")
+
         result[node_id] = ProcessWorkerSpec(
             command=tuple(command),
             timeout_seconds=timeout_seconds,

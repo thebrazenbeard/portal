@@ -436,6 +436,7 @@ def test_session_run_persists_non_secret_resume_envelope(
         "--max-per-family", "2",
         "--max-per-lane", "1",
         "--verifier", "vera-review",
+        "--discovered-effect-ceiling", "SOURCE_ONLY",
         "--host-bridge",
         "--host-node-occupancy",
         "--host-frontier-currentness",
@@ -462,6 +463,7 @@ def test_session_run_persists_non_secret_resume_envelope(
     assert spec["max_per_family"] == 2
     assert spec["max_per_lane"] == 1
     assert spec["verifier"] == "vera-review"
+    assert spec["discovered_effect_ceiling"] == "SOURCE_ONLY"
     assert spec["host_bridge"] is True
     assert spec["host_node_occupancy"] is True
     assert spec["host_frontier_currentness"] is True
@@ -652,3 +654,14 @@ def test_session_run_resume_discovers_nondefault_holder(
     )
     assert run_call[1]["holder"] == "custom-holder"
 
+
+def test_command_session_parser_accepts_discovery_source_only_opt_in() -> None:
+    run_args = portal_cli._parser().parse_args(
+        ["run", "--discovered-effect-ceiling", "SOURCE_ONLY"]
+    )
+    continue_args = portal_cli._parser().parse_args(
+        ["continue", "--discovered-effect-ceiling", "SOURCE_ONLY"]
+    )
+
+    assert run_args.discovered_effect_ceiling == "SOURCE_ONLY"
+    assert continue_args.discovered_effect_ceiling == "SOURCE_ONLY"
