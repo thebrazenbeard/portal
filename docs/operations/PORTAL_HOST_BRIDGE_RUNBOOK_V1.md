@@ -18,11 +18,13 @@ Never replay an attempted unresolved semantic effect through a different route.
 
 ## 1. Recover before doing new work
 
-A fresh chat or restarted host begins by reading durable state.
+A fresh chat or restarted host begins by reading durable state. Prefer the aggregate host view when the host bridge is in use:
 
-    portal status       --state-db .portal/portal.sqlite3       --session-id portfolio
+    portal status       --state-db .portal/portal.sqlite3       --session-id portfolio       --host-details
 
-Then inspect host effects that crossed the attempt boundary but are not terminal:
+The host detail block reports queued work whose bound route is currently qualified, queued work that needs route refresh, unresolved attempted effects, active route advertisements, node occupancy, and a compact attention summary. The same client-independent read model is available through `build_host_diagnostics(...)`.
+
+Then inspect host effects that crossed the attempt boundary but are not terminal when exact dispatch evidence is needed:
 
     portal host unresolved       --state-db .portal/portal.sqlite3       --session-id portfolio
 
@@ -178,16 +180,15 @@ A route-bound subject cannot fall back to the legacy wave verifier merely becaus
 
 Before a new P.O.R.T.A.L. chat advances work:
 
-1. read `portal status`;
-2. read `portal host unresolved`;
-3. reconcile unresolved attempted effects before any semantic retry;
+1. read `portal status --host-details`;
+2. if `reconciliation_required > 0`, inspect `portal host unresolved` and reconcile those exact attempted effects before any semantic retry;
+3. if `route_refresh_required > 0`, refresh the affected exact target-bound route advertisements from live host capabilities and authority;
 4. refresh current node occupancy;
-5. refresh exact target-bound route advertisements from live host capabilities and authority;
-6. inspect `portal host pending` and select only adapter IDs the current host can actually drive;
-7. prefer `portal host take` so route qualification is revalidated and the attempt is durably recorded atomically;
-8. execute only the exact returned/bound dispatch through that route;
-9. verify through the owning substrate;
-10. reconcile and refill.
+5. inspect `portal host pending` when exact dispatch details are needed and select only adapter IDs the current host can actually drive;
+6. prefer `portal host take` so route qualification is revalidated and the attempt is durably recorded atomically;
+7. execute only the exact returned/bound dispatch through that route;
+8. verify through the owning substrate;
+9. reconcile and refill.
 
 If any required currentness, route attachment, capability, authority, or effect outcome is unknown, fail closed for that subject and continue unrelated safe work where possible.
 
