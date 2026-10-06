@@ -26,6 +26,7 @@ from runner.registry import (
     load_worker_snapshot,
 )
 
+from .adapters import PortalReconciliationRecord
 from .coordinator import plan_portal_wave
 from .ecosystem_runtime import (
     PortalEcosystemStore,
@@ -2382,7 +2383,8 @@ def _host_attempt_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _host_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
-    store = PortalHostBridgeStore(Path(args.state_db))
+    state_db = Path(args.state_db)
+    store = PortalHostBridgeStore(state_db)
     try:
         dispatch = store.record_reconciliation(
             dispatch_id=args.dispatch_id,
@@ -2391,9 +2393,70 @@ def _host_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
         )
     finally:
         store.close()
+
+    session_synced = False
+    controller = PortalCommandSession(state_db)
+    try:
+        try:
+            status = controller.status(str(dispatch["session_id"]))
+        except ValueError:
+            status = None
+
+        if status is not None:
+            subject_kind = str(dispatch["subject_kind"])
+            subject_id = str(dispatch["subject_id"])
+            subject = next(
+                (
+                    item
+                    for item in status["subjects"]
+                    if item["subject_kind"] == subject_kind
+                    and item["subject_id"] == subject_id
+                ),
+                None,
+            )
+            if subject is None:
+                raise ValueError(
+                    "host dispatch session subject is missing from command session"
+                )
+
+            expected_state = {
+                "VERIFIED_COMPLETE": "TERMINAL",
+                "VERIFIED_HELD": "HELD",
+                "IN_PROGRESS": "ACTIVE",
+                "OUTCOME_UNKNOWN": "ACTIVE",
+            }[args.state]
+
+            if subject["state"] == "ACTIVE":
+                controller.record_reconciliations(
+                    session_id=str(dispatch["session_id"]),
+                    holder=str(status["holder"]),
+                    records=(
+                        PortalReconciliationRecord(
+                            subject_kind=subject_kind,
+                            subject_id=subject_id,
+                            adapter_id=str(dispatch["adapter_id"]),
+                            route_id=str(dispatch["route_id"]),
+                            state=args.state,
+                            evidence_id=args.evidence_id,
+                        ),
+                    ),
+                )
+                session_synced = True
+            elif (
+                subject["state"] != expected_state
+                or subject["verification_state"] != args.state
+                or subject["dispatch_evidence_id"] != args.evidence_id
+            ):
+                raise ValueError(
+                    "host reconciliation conflicts with command-session state"
+                )
+    finally:
+        controller.close()
+
     return {
         "mode": "PORTAL_HOST_RECONCILE_V1",
         "dispatch": dispatch,
+        "session_synced": session_synced,
     }
 
 
