@@ -232,10 +232,10 @@ class PortalHostFrontierStore:
             """
             SELECT *
             FROM portal_host_frontier_observations
-            WHERE expires_at > ?
+            WHERE observed_at <= ? AND expires_at > ?
             ORDER BY subject_kind, subject_id
             """,
-            (observed_now,),
+            (observed_now, observed_now),
         ).fetchall()
         return {
             (str(row["subject_kind"]), str(row["subject_id"])):
