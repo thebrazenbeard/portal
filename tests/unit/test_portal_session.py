@@ -647,3 +647,66 @@ def test_resume_spec_survives_reopen_and_remains_holder_bound(
         )
     reopened.close()
 
+def test_resident_run_persists_resume_spec_before_later_cycle_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    prepare_calls: list[dict[str, object]] = []
+
+    def fake_prepare(**kwargs):
+        prepare_calls.append(kwargs)
+        packets = (_packet(kwargs["run_id"]),) if len(prepare_calls) == 1 else ()
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=len(packets),
+            claimed=len(packets),
+            held=0,
+            packets=packets,
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+
+    occupancy_calls = 0
+
+    def occupancy():
+        nonlocal occupancy_calls
+        occupancy_calls += 1
+        if occupancy_calls > 1:
+            raise RuntimeError("simulated resident interruption")
+        return {}
+
+    spec = {
+        "schema": "PORTAL_COMMAND_SESSION_RESUME_V1",
+        "holder": "vera",
+        "nodes": "nodes.yaml",
+    }
+    controller = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    with pytest.raises(RuntimeError, match="simulated resident interruption"):
+        controller.run_until_idle(
+            session_id="portal",
+            holder="vera",
+            wave_path=tmp_path / "wave.json",
+            corpus_path=tmp_path / "corpus.json",
+            projects_path=tmp_path / "projects.yaml",
+            nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+            budget=WaveExecutionBudget(1, 1, 1, 1),
+            lease_ttl=300.0,
+            token=None,
+            verifier="vera-review",
+            max_cycles=0,
+            max_idle_cycles=0,
+            poll_seconds=0.0,
+            node_occupancy_provider=occupancy,
+            resume_spec=spec,
+        )
+    controller.close()
+
+    reopened = portal_session.PortalCommandSession(tmp_path / "portal.sqlite3")
+    assert reopened.load_resume_spec(
+        session_id="portal",
+        holder="vera",
+    ) == spec
+    reopened.close()
+
