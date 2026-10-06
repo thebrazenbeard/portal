@@ -6,6 +6,11 @@ from .adapters import (
     PortalRouteBinding,
 )
 from .coordinator import plan_portal_wave
+from .host_bridge import (
+    PortalHostBridgeStore,
+    PortalHostExecutionAdapter,
+    PortalHostNodeCurrentness,
+)
 from .execution_router import CapabilityExecutionAdapter
 from .discovery import (
     GitHubRepositoryCatalog,
@@ -29,6 +34,7 @@ from .route_resolver import (
     PortalRouteRequest,
     resolve_portal_route,
 )
+from .task_currentness import LocalProjectRunnerTaskCurrentness
 from .runtime import (
     PortalCycleResult,
     PortalLaneResult,
@@ -58,8 +64,12 @@ __all__ = [
     "PortalReconciliationRecord",
     "PortalProposalProcessAdapter",
     "PortalDispatchRecord",
+    "PortalHostBridgeStore",
+    "PortalHostExecutionAdapter",
+    "PortalHostNodeCurrentness",
     "CapabilityExecutionAdapter",
     "ExecutionNode",
+    "LocalProjectRunnerTaskCurrentness",
     "GitHubRepositoryCatalog",
     "PortalAssignment",
     "PortalCommandSession",
