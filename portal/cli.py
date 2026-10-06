@@ -267,6 +267,17 @@ def _parser() -> argparse.ArgumentParser:
             "current host routes and node occupancy"
         ),
     )
+    status.add_argument(
+        "--project-runner-tasks",
+        action="append",
+        default=[],
+        dest="project_runner_tasks",
+        metavar="NODE=PATH",
+        help=(
+            "reconcile and report Project Runner task currentness for a node; "
+            "dead/PID-reused registrations become UNKNOWN_EXIT"
+        ),
+    )
 
     continue_cmd = subcommands.add_parser(
         "continue",
@@ -979,6 +990,35 @@ def _project_runner_task_roots(values: Sequence[str]) -> dict[str, Path]:
     return roots
 
 
+def _project_runner_status_payload(
+    values: Sequence[str],
+) -> dict[str, object]:
+    roots = _project_runner_task_roots(values)
+    nodes: dict[str, object] = {}
+    total_occupied_slots = 0
+    total_reconciled_unknown_exit = 0
+
+    for node_id, tasks_root in sorted(roots.items()):
+        snapshot = LocalProjectRunnerTaskCurrentness(
+            node_id=node_id,
+            tasks_root=tasks_root,
+        ).snapshot()
+        nodes[node_id] = {
+            "tasks_root": str(snapshot.tasks_root),
+            "occupied_slots": snapshot.occupied_slots,
+            "reconciled_unknown_exit": snapshot.reconciled_unknown_exit,
+            "state_counts": dict(sorted(snapshot.state_counts.items())),
+        }
+        total_occupied_slots += snapshot.occupied_slots
+        total_reconciled_unknown_exit += snapshot.reconciled_unknown_exit
+
+    return {
+        "total_occupied_slots": total_occupied_slots,
+        "total_reconciled_unknown_exit": total_reconciled_unknown_exit,
+        "nodes": nodes,
+    }
+
+
 def _session_occupancy(
     args: argparse.Namespace,
     nodes,
@@ -1455,6 +1495,10 @@ def _status_payload(args: argparse.Namespace) -> dict[str, object]:
                 )
             finally:
                 host_store.close()
+        if args.project_runner_tasks:
+            payload["project_runner"] = _project_runner_status_payload(
+                args.project_runner_tasks,
+            )
         return payload
 
     if args.host_details:
@@ -1465,10 +1509,15 @@ def _status_payload(args: argparse.Namespace) -> dict[str, object]:
         summary = store.summary(args.run_id)
     finally:
         store.close()
-    return {
+    payload = {
         "mode": "PORTAL_RUN_STATUS_V1",
         "run": summary,
     }
+    if args.project_runner_tasks:
+        payload["project_runner"] = _project_runner_status_payload(
+            args.project_runner_tasks,
+        )
+    return payload
 
 
 def _wave_projects_path(args: argparse.Namespace) -> Path:
