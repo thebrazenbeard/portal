@@ -1179,6 +1179,7 @@ class PortalCommandSession:
         execution_adapter: object | None = None,
         public_safe: bool = True,
         resume_spec: Mapping[str, object] | None = None,
+        before_cycle: Callable[[], object] | None = None,
         between_cycles: Callable[[], object] | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
@@ -1222,6 +1223,8 @@ class PortalCommandSession:
                 "occupied_node_slots": snapshot,
             }
 
+        if before_cycle is not None:
+            before_cycle()
         first = self.run(**generation_common())
         if resume_spec is not None:
             self.save_resume_spec(
@@ -1259,6 +1262,9 @@ class PortalCommandSession:
             if current["control_state"] == "STOPPED":
                 stop_reason = "STOPPED"
                 break
+
+            if before_cycle is not None:
+                before_cycle()
 
             if between_cycles is not None:
                 between_cycles()

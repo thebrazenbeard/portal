@@ -35,6 +35,7 @@ Implemented coordinator core:
 - a durable external-host bridge with expiring route, node-occupancy and semantic-frontier currentness, atomic host dispatch taking, and attempt-time revalidation of exact target, attachment, capability and authority;
 - a transport-neutral host capability snapshot import that atomically publishes host-observed routes plus occupancy while requiring effect authority to be explicit rather than inferred from discovery;
 - observation-only command probes plus a separate exact-route authority manifest, allowing host state to refresh automatically without letting discovery self-authorize or exceed observed effect capability;
+- resident command-session host refresh before each cycle, ordered ahead of host pumping/reconciliation and admission so queued effects and free-capacity decisions use the same fresh route/currentness cut;
 - a reusable `PortalHostPump` that consumes already-bound host work, persists the attempt boundary before driver execution, preserves ambiguous outcomes for reconciliation, and allows unrelated safe work to continue;
 - closed-loop source-level acceptance coverage proving admit -> host queue -> durable attempt -> owning-driver verification -> capacity release -> automatic refill -> verified idle;
 - a built-in advisory process-proposal adapter that can be explicitly enabled from command-session `run` / `continue` with a worker-backend manifest, while retaining only `NO_PROTECTED_EFFECT` authority;

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from runner.execution_promotion import (
     effect_authority_key_from_environment,
@@ -230,6 +230,21 @@ def _parser() -> argparse.ArgumentParser:
         help="optional per-pump bound for resident host dispatch attempts",
     )
     run.add_argument(
+        "--host-probes",
+        type=Path,
+        help="observation-only command probes refreshed before each resident cycle",
+    )
+    run.add_argument(
+        "--host-authority",
+        type=Path,
+        help="separate exact-route authority grants for --host-probes",
+    )
+    run.add_argument(
+        "--host-refresh-ttl-seconds",
+        type=float,
+        default=300.0,
+    )
+    run.add_argument(
         "--workspace-root",
         type=Path,
         default=Path(".portal/workers"),
@@ -376,6 +391,21 @@ def _parser() -> argparse.ArgumentParser:
         "--host-max-dispatches",
         type=int,
         help="optional bound for the one host-pump pass",
+    )
+    continue_cmd.add_argument(
+        "--host-probes",
+        type=Path,
+        help="observation-only command probes refreshed before this generation",
+    )
+    continue_cmd.add_argument(
+        "--host-authority",
+        type=Path,
+        help="separate exact-route authority grants for --host-probes",
+    )
+    continue_cmd.add_argument(
+        "--host-refresh-ttl-seconds",
+        type=float,
+        default=300.0,
     )
     continue_cmd.add_argument(
         "--workspace-root",
@@ -1451,6 +1481,19 @@ def _session_resume_spec(
             else None
         ),
         "host_max_dispatches": getattr(args, "host_max_dispatches", None),
+        "host_probes": (
+            str(Path(args.host_probes))
+            if getattr(args, "host_probes", None) is not None
+            else None
+        ),
+        "host_authority": (
+            str(Path(args.host_authority))
+            if getattr(args, "host_authority", None) is not None
+            else None
+        ),
+        "host_refresh_ttl_seconds": float(
+            getattr(args, "host_refresh_ttl_seconds", 300.0)
+        ),
         "worker_backends": (
             str(Path(args.worker_backends))
             if args.worker_backends is not None
@@ -1598,6 +1641,43 @@ def _apply_session_resume_spec(
             "resume spec host_max_dispatches must be null or a positive integer"
         )
     args.host_max_dispatches = host_max_dispatches
+    host_probes = spec.get("host_probes")
+    if host_probes is not None and (
+        not isinstance(host_probes, str) or not host_probes.strip()
+    ):
+        raise ValueError(
+            "resume spec host_probes must be null or a non-empty string"
+        )
+    args.host_probes = (
+        Path(host_probes.strip())
+        if isinstance(host_probes, str)
+        else None
+    )
+    host_authority = spec.get("host_authority")
+    if host_authority is not None and (
+        not isinstance(host_authority, str) or not host_authority.strip()
+    ):
+        raise ValueError(
+            "resume spec host_authority must be null or a non-empty string"
+        )
+    args.host_authority = (
+        Path(host_authority.strip())
+        if isinstance(host_authority, str)
+        else None
+    )
+    host_refresh_ttl_seconds = spec.get(
+        "host_refresh_ttl_seconds",
+        300.0,
+    )
+    if (
+        isinstance(host_refresh_ttl_seconds, bool)
+        or not isinstance(host_refresh_ttl_seconds, (int, float))
+        or float(host_refresh_ttl_seconds) <= 0
+    ):
+        raise ValueError(
+            "resume spec host_refresh_ttl_seconds must be positive"
+        )
+    args.host_refresh_ttl_seconds = float(host_refresh_ttl_seconds)
     worker_backends = optional_text("worker_backends")
     args.worker_backends = (
         Path(worker_backends)
@@ -1636,6 +1716,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
         host_pump = _session_host_pump(args, execution_adapter)
+        host_refresh = _session_host_refresh(args)
         if args.once and host_pump is not None:
             raise ValueError("--host-drivers cannot be used with --once")
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
@@ -1658,6 +1739,8 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             public_safe=_session_portfolio_public_safe(args),
         )
         if args.once:
+            if host_refresh is not None:
+                host_refresh()
             once_common = dict(common)
             if node_occupancy_provider is not None:
                 once_common["occupied_node_slots"] = node_occupancy_provider()
@@ -1683,6 +1766,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
                 resume_spec=_session_resume_spec(args),
+                before_cycle=host_refresh,
                 between_cycles=(
                     (
                         lambda: host_pump.run_once(
@@ -1730,6 +1814,9 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
         host_pump = _session_host_pump(args, execution_adapter)
+        host_refresh = _session_host_refresh(args)
+        if host_refresh is not None:
+            host_refresh()
         if host_pump is not None:
             host_pump.run_once(
                 session_id=args.session_id,
@@ -1845,6 +1932,11 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("--resume requires --session-id")
     if args.worker_backends is not None:
         raise ValueError("--worker-backends requires --session-id")
+    if (
+        getattr(args, "host_probes", None) is not None
+        or getattr(args, "host_authority", None) is not None
+    ):
+        raise ValueError("--host-probes requires --session-id")
     if args.nodes is None:
         raise ValueError("--nodes is required")
     if args.holder is None:
@@ -2385,11 +2477,22 @@ def _host_import_snapshot_payload(
     }
 
 
-def _host_refresh_payload(args: argparse.Namespace) -> dict[str, object]:
-    probes = load_host_command_probes(Path(args.probes))
-    grants = load_host_authority(Path(args.authority))
+def _refresh_host_state(
+    *,
+    state_db: Path,
+    probes: Mapping[str, object],
+    grants,
+    ttl_seconds: float,
+    clock=time.time,
+) -> dict[str, object]:
+    if (
+        isinstance(ttl_seconds, bool)
+        or not isinstance(ttl_seconds, (int, float))
+        or float(ttl_seconds) <= 0
+    ):
+        raise ValueError("host refresh ttl_seconds must be positive")
 
-    observed_at = time.time()
+    observed_at = float(clock())
     observed_routes: list[PortalRouteAdvertisement] = []
     occupancy: dict[str, int] = {}
     evidence_ids: list[str] = []
@@ -2408,19 +2511,18 @@ def _host_refresh_payload(args: argparse.Namespace) -> dict[str, object]:
 
     routes = apply_host_authority(tuple(observed_routes), grants)
 
-    store = PortalHostBridgeStore(Path(args.state_db))
+    store = PortalHostBridgeStore(Path(state_db))
     try:
         published = store.advertise_snapshot(
             routes,
             occupancy,
-            ttl_seconds=args.ttl_seconds,
+            ttl_seconds=float(ttl_seconds),
             observed_at=observed_at,
         )
     finally:
         store.close()
 
     return {
-        "mode": "PORTAL_HOST_REFRESH_V1",
         "probe_count": len(probes),
         "route_count": len(published["routes"]),
         "occupancy_count": len(published["occupancy"]),
@@ -2428,6 +2530,46 @@ def _host_refresh_payload(args: argparse.Namespace) -> dict[str, object]:
         "observed_at": published["observed_at"],
         "expires_at": published["expires_at"],
     }
+
+
+def _host_refresh_payload(args: argparse.Namespace) -> dict[str, object]:
+    refreshed = _refresh_host_state(
+        state_db=Path(args.state_db),
+        probes=load_host_command_probes(Path(args.probes)),
+        grants=load_host_authority(Path(args.authority)),
+        ttl_seconds=args.ttl_seconds,
+    )
+    return {
+        "mode": "PORTAL_HOST_REFRESH_V1",
+        **refreshed,
+    }
+
+
+def _session_host_refresh(args: argparse.Namespace):
+    probes_path = getattr(args, "host_probes", None)
+    authority_path = getattr(args, "host_authority", None)
+    if (probes_path is None) != (authority_path is None):
+        raise ValueError(
+            "--host-probes and --host-authority must be supplied together"
+        )
+    if probes_path is None:
+        return None
+    if not bool(getattr(args, "host_bridge", False)):
+        raise ValueError("--host-probes requires --host-bridge")
+
+    probes = load_host_command_probes(Path(probes_path))
+    grants = load_host_authority(Path(authority_path))
+    ttl_seconds = float(getattr(args, "host_refresh_ttl_seconds", 300.0))
+
+    def refresh():
+        return _refresh_host_state(
+            state_db=Path(args.state_db),
+            probes=probes,
+            grants=grants,
+            ttl_seconds=ttl_seconds,
+        )
+
+    return refresh
 
 def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))

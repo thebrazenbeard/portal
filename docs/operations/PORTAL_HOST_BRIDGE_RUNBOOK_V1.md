@@ -160,6 +160,28 @@ Refresh:
 
 The authority key is the full exact route identity: adapter, route, node, target kind, and target ID. An unmatched grant does not create a route. A grant cannot authorize an effect the live probe did not report as technically supported. All probes complete before P.O.R.T.A.L. writes the new observation, so a failed later probe cannot partially publish an earlier probe's state. Duplicate node-wide occupancy sources fail closed instead of being summed or guessed.
 
+The command-session path can refresh these probes automatically:
+
+    portal run \
+      --session-id portfolio \
+      --host-bridge \
+      --host-probes path/to/probes.yaml \
+      --host-authority path/to/authority.yaml \
+      --host-refresh-ttl-seconds 300 \
+      ...
+
+The probe and authority arguments must be supplied together and require `--host-bridge`. They are persisted in the non-secret durable resume spec, so `portal run --resume` and `portal continue --resume` can reconstruct the same refresh contract after chat/process loss. Older resume specs that predate these fields remain valid and default to no automatic probe refresh.
+
+For resident cycles the ordering is:
+
+    REFRESH HOST OBSERVATIONS
+    -> PUMP ALREADY-BOUND HOST WORK
+    -> RECONCILE
+    -> READ FRESH OCCUPANCY
+    -> ADMIT / BIND / QUEUE
+
+That ordering matters: an expired route is refreshed before a queued effect reaches the attempt boundary, and the subsequent admission uses occupancy from the same refreshed host-state cut. `portal continue` follows the same refresh-before-pump ordering for its single refill generation.
+
 A usable route must be available, attached, current, match the assigned node and exact target, satisfy required capabilities, be technically capable of the required effect, and carry authority for that effect.
 
 Technical capability does not create authority. Discovery does not create attachment. Availability does not create currentness.
