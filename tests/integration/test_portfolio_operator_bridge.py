@@ -552,3 +552,70 @@ def test_no_effect_currentness_subject_can_acquire_claim_without_execution_autho
     assert claim.exact_head == "a" * 40
     assert transport.reads == [(record.repository, record.default_branch)]
     assert transport.mutations == []
+
+def _write_local_sha_bound_plan(tmp_path: Path):
+    corpus_path = tmp_path / "corpus.live.public.json"
+    corpus_path.write_bytes(CORPUS.read_bytes())
+    corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+
+    wave_payload = json.loads(WAVE.read_text(encoding="utf-8"))
+    wave_payload["generated_at"] = "2026-10-06T00:00:00Z"
+    wave_payload["corpus_binding"] = {
+        "binding_kind": "LOCAL_SHA256",
+        "sha256": corpus.sha256,
+        "public_repository_count": corpus.counts.public,
+        "total_repository_count": corpus.counts.total,
+        "private_repository_count": corpus.counts.private,
+        "public_workstream_count": corpus.workstream_counts.public,
+        "total_workstream_count": corpus.workstream_counts.total,
+        "private_workstream_count": corpus.workstream_counts.private,
+    }
+    wave_path = tmp_path / "advancement_wave.live.public.json"
+    wave_path.write_text(
+        json.dumps(wave_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    payload = build_bound_wave_plan_payload(
+        wave_path,
+        budget=WaveExecutionBudget(
+            max_parallel=50,
+            max_per_identity=50,
+            max_per_family=50,
+            max_per_lane=50,
+        ),
+    )
+    plan_path = tmp_path / "plan.local.json"
+    plan_path.write_text(
+        json.dumps(payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    return plan_path, wave_path, corpus_path
+
+
+def test_local_sha256_corpus_binding_verifies_generated_live_corpus(tmp_path):
+    plan_path, wave_path, corpus_path = _write_local_sha_bound_plan(tmp_path)
+
+    verified = verify_bound_plan_subject(
+        plan_path=plan_path,
+        wave_path=wave_path,
+        corpus_path=corpus_path,
+        projects_path=PROJECTS,
+        subject_id="project-runner",
+    )
+
+    assert verified.record.id == "project-runner"
+
+
+def test_local_sha256_corpus_binding_rejects_changed_corpus_bytes(tmp_path):
+    plan_path, wave_path, corpus_path = _write_local_sha_bound_plan(tmp_path)
+    corpus_path.write_bytes(corpus_path.read_bytes() + b"\n")
+
+    with pytest.raises(ValueError, match="local corpus sha256"):
+        verify_bound_plan_subject(
+            plan_path=plan_path,
+            wave_path=wave_path,
+            corpus_path=corpus_path,
+            projects_path=PROJECTS,
+            subject_id="project-runner",
+        )
