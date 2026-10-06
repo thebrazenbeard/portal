@@ -53,8 +53,8 @@ def _queue_host_dispatch(state_db: Path) -> str:
         current=True,
         preference=50,
     )
-    store.advertise_route(route, ttl_seconds=60.0, observed_at=100.0)
-    adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
+    store.advertise_route(route, ttl_seconds=300.0)
+    adapter = PortalHostExecutionAdapter(store=store)
     result = PortalSessionResult(
         session_id="portfolio",
         control_state="RUNNING",
