@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
 import os
@@ -2304,6 +2304,17 @@ def _host_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _plain_result_item(item: object) -> dict[str, object]:
+    if is_dataclass(item):
+        return asdict(item)
+    if isinstance(item, dict):
+        return dict(item)
+    values = getattr(item, "__dict__", None)
+    if isinstance(values, dict):
+        return dict(values)
+    raise TypeError("host pump result item is not serializable")
+
+
 def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
     drivers = load_host_command_drivers(Path(args.drivers))
     store = PortalHostBridgeStore(Path(args.state_db))
@@ -2319,7 +2330,7 @@ def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
         store.close()
     return {
         "mode": "PORTAL_HOST_PUMP_V1",
-        "items": [asdict(item) for item in result.items],
+        "items": [_plain_result_item(item) for item in result.items],
         "attempted": result.attempted,
         "verified_complete": result.verified_complete,
         "verified_held": result.verified_held,
