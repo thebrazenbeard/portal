@@ -179,7 +179,7 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(".portal/portal.sqlite3"),
     )
     run.add_argument("--run-id", default="portal-default")
-    run.add_argument("--holder", default="vera")
+    run.add_argument("--holder")
     run.add_argument("--lease-ttl", type=float, default=300.0)
     run.add_argument("--max-parallel", type=int, default=6)
     run.add_argument("--session-id")
@@ -1411,8 +1411,11 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 holder=args.holder,
             )
             _apply_session_resume_spec(args, spec)
-        elif args.nodes is None:
-            raise ValueError("--nodes is required unless --resume")
+        else:
+            if args.holder is None:
+                args.holder = "vera"
+            if args.nodes is None:
+                raise ValueError("--nodes is required unless --resume")
 
         projects_path = _session_projects_path(args)
         nodes = load_execution_nodes(Path(args.nodes))
