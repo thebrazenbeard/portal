@@ -275,3 +275,112 @@ def test_session_continue_with_worker_backends_passes_execution_adapter(
     assert name == "continue"
     assert kwargs["execution_adapter"] is sentinel_adapter
 
+def test_session_run_refreshes_project_runner_task_currentness_each_generation(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    created: list[tuple[str, Path]] = []
+
+    class FakeCurrentness:
+        def __init__(self, *, node_id, tasks_root):
+            self.node_id = node_id
+            self.tasks_root = Path(tasks_root)
+            created.append((node_id, self.tasks_root))
+
+        def __call__(self):
+            return {self.node_id: 7}
+
+    monkeypatch.setattr(
+        portal_cli,
+        "LocalProjectRunnerTaskCurrentness",
+        FakeCurrentness,
+        raising=False,
+    )
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--occupied-node", "worklaptop=1",
+        "--project-runner-tasks", f"lappy={tmp_path / 'lappy-tasks'}",
+    ])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_RUN_V1"
+    assert created == [("lappy", tmp_path / "lappy-tasks")]
+    name, kwargs = FakeSession.calls[0]
+    assert name == "run_until_idle"
+    assert kwargs["occupied_node_slots"] is None
+    provider = kwargs["node_occupancy_provider"]
+    assert provider() == {"lappy": 7, "worklaptop": 1}
+
+
+def test_session_continue_uses_fresh_task_currentness_snapshot(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    calls = {"snapshots": 0}
+
+    class FakeCurrentness:
+        def __init__(self, *, node_id, tasks_root):
+            self.node_id = node_id
+
+        def __call__(self):
+            calls["snapshots"] += 1
+            return {self.node_id: 5}
+
+    monkeypatch.setattr(
+        portal_cli,
+        "LocalProjectRunnerTaskCurrentness",
+        FakeCurrentness,
+        raising=False,
+    )
+
+    code = portal_cli.entrypoint([
+        "continue",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--project-runner-tasks", f"lappy={tmp_path / 'lappy-tasks'}",
+        "--verifier", "vera-review",
+    ])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_CONTINUE_V1"
+    assert calls["snapshots"] == 1
+    name, kwargs = FakeSession.calls[0]
+    assert name == "continue"
+    assert kwargs["occupied_node_slots"] == {"lappy": 5}
+    assert kwargs["verifier"] == "vera-review"
+
+
+def test_duplicate_occupancy_source_for_node_fails_closed(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--occupied-node", "lappy=1",
+        "--project-runner-tasks", f"lappy={tmp_path / 'lappy-tasks'}",
+    ])
+
+    assert code == 2
+    assert "multiple occupancy sources for node: lappy" in capsys.readouterr().err
+    assert FakeSession.calls == []
+
