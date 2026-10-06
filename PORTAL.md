@@ -108,6 +108,8 @@ Before any resumed dispatch, Portal must refresh:
 
 A prior plan or chat-local statement is not sufficient currentness evidence.
 
+For external ChatGPT/plugin/workstation execution, the operational recovery procedure is [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md). A fresh host reads command-session state and `host unresolved` before new semantic attempts, refreshes occupancy and route advertisements, marks the attempt boundary before an external effect, verifies through the owning substrate, reconciles the exact dispatch, and only then refills.
+
 ## Donor-mining rule
 
 Portal must mine Patrick-owned repositories before adopting external mechanisms. See:
