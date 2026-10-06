@@ -1609,6 +1609,8 @@ def _run_payload(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("--worker-backends requires --session-id")
     if args.nodes is None:
         raise ValueError("--nodes is required")
+    if args.holder is None:
+        args.holder = "vera"
 
     project_snapshot, portfolio_source = _run_project_snapshot(args)
     dependency_snapshot = load_dependency_snapshot(Path(args.dependencies))
