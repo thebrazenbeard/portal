@@ -30,9 +30,12 @@ Implemented coordinator core:
 - verification-gated completion: a worker/process result never frees a subject until owning-substrate evidence verifies terminal or held state;
 - resident bounded refill that reconciles active subjects, admits the next safe generation, and stops on verified idle, STOP, bounded waiting, or cycle limits;
 - live occupied-node accounting so saturated/backlogged nodes are not treated as free merely because their declared maximum capacity is larger;
+- a capability/currentness/authority route resolver plus composite execution router that binds exact targets to qualified adapters without hardcoding workstation or repository transports;
+- durable bind-before-dispatch route evidence and adapter-owned reconciliation, including fail-closed handling of ambiguous outcomes and no silent route substitution;
+- a built-in advisory process-proposal adapter that can be explicitly enabled from command-session `run` / `continue` with a worker-backend manifest, while retaining only `NO_PROTECTED_EFFECT` authority;
 - CLI surfaces for discovery, command sessions, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
 
-This is no longer a planning-only implementation. The remaining gap is qualified execution-adapter breadth and live host qualification for arbitrary semantic work and multi-repository workstreams; source presence alone is not an installed or continuously running P.O.R.T.A.L. runtime.
+This is no longer a planning-only implementation. The built-in command-session path can now dispatch configured advisory process-proposal work through capability-based routing. The remaining gap is broader live host qualification and additional concrete drivers for arbitrary semantic work (for example repo-native connectors, Executor, WorkBridge, or Lappy V2 routes supplied by the host); source presence alone is not an installed or continuously running P.O.R.T.A.L. runtime.
 
 ## Existing execution-loop substrate
 
