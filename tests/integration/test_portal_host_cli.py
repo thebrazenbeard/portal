@@ -292,6 +292,9 @@ def test_session_run_can_require_fresh_host_occupancy_for_unsourced_nodes(
                 summary={"active": 1, "held": 0, "terminal": 0},
             )
 
+        def save_resume_spec(self, **_kwargs):
+            return None
+
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
     state_db = tmp_path / "portal.sqlite3"
     store = PortalHostBridgeStore(state_db)
