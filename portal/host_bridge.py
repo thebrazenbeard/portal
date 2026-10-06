@@ -543,6 +543,85 @@ class PortalHostBridgeStore:
             ).fetchall()
         return tuple(self._row_payload(row) for row in rows)
 
+    def take_pending_dispatch(
+        self,
+        *,
+        adapter_ids: Iterable[str],
+        attempt_id: str,
+        evidence_id: str,
+        session_id: str | None = None,
+        attempted_at: float | None = None,
+    ) -> dict[str, object] | None:
+        normalized = tuple(
+            sorted(
+                {
+                    _required(adapter_id, "adapter_id")
+                    for adapter_id in adapter_ids
+                }
+            )
+        )
+        if not normalized:
+            raise ValueError("adapter_ids must contain at least one adapter")
+
+        attempt_id = _required(attempt_id, "attempt_id")
+        evidence_id = _required(evidence_id, "dispatch evidence_id")
+        now = float(time.time() if attempted_at is None else attempted_at)
+
+        clauses = ["state = 'QUEUED'"]
+        parameters: list[object] = []
+        if session_id is not None:
+            session_id = _required(session_id, "session_id")
+            clauses.append("session_id = ?")
+            parameters.append(session_id)
+        placeholders = ", ".join("?" for _ in normalized)
+        clauses.append(f"adapter_id IN ({placeholders})")
+        parameters.extend(normalized)
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT dispatch_id
+                FROM portal_host_dispatches
+                WHERE """ + " AND ".join(clauses) + """
+                ORDER BY created_at, dispatch_id
+                LIMIT 1
+                """,
+                tuple(parameters),
+            ).fetchone()
+            if row is None:
+                self.connection.commit()
+                return None
+
+            dispatch_id = str(row["dispatch_id"])
+            cursor = self.connection.execute(
+                """
+                UPDATE portal_host_dispatches
+                SET state = 'ATTEMPTED',
+                    attempt_id = ?,
+                    dispatch_evidence_id = ?,
+                    attempted_at = ?,
+                    updated_at = ?
+                WHERE dispatch_id = ? AND state = 'QUEUED'
+                """,
+                (
+                    attempt_id,
+                    evidence_id,
+                    now,
+                    now,
+                    dispatch_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "host dispatch changed before attempt boundary"
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return self.load_dispatch(dispatch_id)
+
     def unresolved_dispatches(
         self,
         *,
