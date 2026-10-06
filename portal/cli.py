@@ -1223,6 +1223,47 @@ def _session_result_payload(
     return payload
 
 
+def _session_resume_spec(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    return {
+        "schema": "PORTAL_COMMAND_SESSION_RESUME_V1",
+        "holder": args.holder,
+        "wave": str(Path(args.wave)),
+        "corpus": str(Path(args.corpus)),
+        "projects": str(Path(args.projects)),
+        "discover_owner": args.discover_owner,
+        "write_live_registry": (
+            str(Path(args.write_live_registry))
+            if args.write_live_registry is not None
+            else None
+        ),
+        "static_projects": bool(args.static_projects),
+        "nodes": str(Path(args.nodes)),
+        "lease_ttl": float(args.lease_ttl),
+        "max_parallel": int(args.max_parallel),
+        "max_per_identity": int(args.max_per_identity),
+        "max_per_family": int(args.max_per_family),
+        "max_per_lane": int(args.max_per_lane),
+        "verifier": args.verifier,
+        "host_bridge": bool(args.host_bridge),
+        "worker_backends": (
+            str(Path(args.worker_backends))
+            if args.worker_backends is not None
+            else None
+        ),
+        "workspace_root": str(Path(args.workspace_root)),
+        "worker_holder_prefix": args.worker_holder_prefix,
+        "delivery_lease_ttl": float(args.delivery_lease_ttl),
+        "occupied_nodes": list(args.occupied_nodes),
+        "project_runner_tasks": list(args.project_runner_tasks),
+        "host_node_occupancy": bool(args.host_node_occupancy),
+        "host_frontier_currentness": bool(
+            args.host_frontier_currentness
+        ),
+    }
+
+
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     projects_path = _session_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
@@ -1273,6 +1314,11 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 node_occupancy_provider=node_occupancy_provider,
                 execution_adapter=execution_adapter,
             )
+        controller.save_resume_spec(
+            session_id=args.session_id,
+            holder=args.holder,
+            spec=_session_resume_spec(args),
+        )
     finally:
         controller.close()
         if isinstance(execution_adapter, PortalHostExecutionAdapter):
