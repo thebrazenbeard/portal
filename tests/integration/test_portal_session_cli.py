@@ -19,6 +19,9 @@ class FakeSession:
     def close(self) -> None:
         pass
 
+    def save_resume_spec(self, **kwargs):
+        self.calls.append(("save_resume_spec", kwargs))
+
     def run(self, **kwargs):
         self.calls.append(("run", kwargs))
         return SimpleNamespace(
@@ -406,4 +409,59 @@ def test_session_run_defaults_to_resident_refill_polling(
     assert kwargs["max_cycles"] == 0
     assert kwargs["max_idle_cycles"] == 0
     assert kwargs["poll_seconds"] == 5.0
+
+def test_session_run_persists_non_secret_resume_envelope(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    nodes_path = ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--nodes", str(nodes_path),
+        "--max-parallel", "4",
+        "--max-per-identity", "3",
+        "--max-per-family", "2",
+        "--max-per-lane", "1",
+        "--verifier", "vera-review",
+        "--host-bridge",
+        "--host-node-occupancy",
+        "--host-frontier-currentness",
+        "--project-runner-tasks", f"lappy={tmp_path / 'lappy-tasks'}",
+        "--occupied-node", "worklaptop=0",
+        "--once",
+    ])
+
+    assert code == 0
+    capsys.readouterr()
+    save_calls = [
+        kwargs
+        for name, kwargs in FakeSession.calls
+        if name == "save_resume_spec"
+    ]
+    assert len(save_calls) == 1
+    assert save_calls[0]["session_id"] == "portfolio"
+    assert save_calls[0]["holder"] == "vera"
+    spec = save_calls[0]["spec"]
+    assert spec["schema"] == "PORTAL_COMMAND_SESSION_RESUME_V1"
+    assert spec["nodes"] == str(nodes_path)
+    assert spec["max_parallel"] == 4
+    assert spec["max_per_identity"] == 3
+    assert spec["max_per_family"] == 2
+    assert spec["max_per_lane"] == 1
+    assert spec["verifier"] == "vera-review"
+    assert spec["host_bridge"] is True
+    assert spec["host_node_occupancy"] is True
+    assert spec["host_frontier_currentness"] is True
+    assert spec["project_runner_tasks"] == [
+        f"lappy={tmp_path / 'lappy-tasks'}"
+    ]
+    assert spec["occupied_nodes"] == ["worklaptop=0"]
+    assert "token" not in spec
+    assert "github_token" not in spec
 
