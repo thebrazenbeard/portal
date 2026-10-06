@@ -10,7 +10,7 @@ Use this procedure when one P.O.R.T.A.L. command session is coordinating work th
 
 The safety rule is:
 
-`REFRESH -> ADVERTISE -> INSPECT -> ADMIT -> BIND -> QUEUE -> ATTEMPT-MARK -> EFFECT -> VERIFY -> RECONCILE -> REFILL`
+`REFRESH -> ADVERTISE -> INSPECT -> ADMIT -> BIND -> QUEUE -> TAKE/ATTEMPT-MARK -> EFFECT -> VERIFY -> RECONCILE -> REFILL`
 
 Never infer execution authority from route discovery, connector presence, node placement, or scheduler admission.
 
@@ -54,7 +54,7 @@ Inspect non-expired snapshots:
 
     portal host occupancy-status       --state-db .portal/portal.sqlite3
 
-Host occupancy is monotonic currentness evidence. Older observations cannot overwrite newer observations, and same-time conflicting observations fail closed.
+Host occupancy is monotonic currentness evidence. Older observations cannot overwrite newer observations, same-time conflicting observations fail closed, and future-dated observations are not active before their own `observed_at` timestamp.
 
 When `--host-node-occupancy` is enabled, every enabled node not covered by a manual or local Project Runner source must have a current host snapshot. Missing or expired required snapshots stop scheduling instead of treating the node as free.
 
@@ -80,7 +80,7 @@ A usable route must be available, attached, current, match the assigned node and
 
 Technical capability does not create authority. Discovery does not create attachment. Availability does not create currentness.
 
-Route observations are monotonic. Older observations cannot overwrite newer route state, and same-time conflicting observations fail closed.
+Route observations are monotonic. Older observations cannot overwrite newer route state, same-time conflicting observations fail closed, and future-dated observations are not active before their own `observed_at` timestamp.
 
 ## 4. Admit and queue work
 
@@ -98,17 +98,23 @@ Inspect newly queued host work:
 
 Do not execute a host effect merely because the dispatch is present. The exact dispatch envelope is the work-bearing record.
 
-## 5. Mark the effect boundary before calling the external route
+## 5. Take and mark the effect boundary before calling the external route
 
-Immediately before the actual plugin/workstation/repository effect, record the exact attempt:
+For an interactive ChatGPT/plugin host, prefer the atomic take operation. Supply only adapter IDs the current host can actually drive:
+
+    portal host take       --state-db .portal/portal.sqlite3       --session-id portfolio       --adapter-id github       --adapter-id workbridge       --attempt-id HOST_UNIQUE_ATTEMPT_ID       --evidence-id HOST_REQUEST_EVIDENCE_ID
+
+`host take` selects the oldest queued dispatch among those adapter IDs whose exact bound route is still qualified and marks it `ATTEMPTED` in the same transaction before returning the work-bearing envelope. Route qualification is revalidated at this effect boundary: exact target/node, availability, attachment, currentness window, required capability, technical effect capability, and effect authority must still hold. A stale or no-longer-authorized queued dispatch is not attempted merely because it was valid when queued.
+
+If the host already selected one exact dispatch through another race-safe mechanism, the lower-level equivalent remains:
 
     portal host attempt       --state-db .portal/portal.sqlite3       --dispatch-id DISPATCH_ID       --attempt-id HOST_UNIQUE_ATTEMPT_ID       --evidence-id HOST_REQUEST_EVIDENCE_ID
 
-Only after that durable attempt marker succeeds should the host invoke the external effect.
+Only after the durable attempt marker succeeds should the host invoke the external effect. Exact replay of the same already-recorded attempt is idempotent; a different second attempt is refused after the boundary.
 
-If the host disconnects, times out, crashes, or loses the response after the attempt marker, the effect is unresolved. Do not retry it through GitHub, WorkBridge, Executor, Lappy V2, or another route until the original effect is reconciled.
+If the host disconnects, times out, crashes, loses the response, or receives an ambiguous result after the attempt marker, the effect is unresolved. Do not retry it through GitHub, WorkBridge, Executor, Lappy V2, or another route until the original effect is reconciled.
 
-A different second attempt is refused after the effect boundary.
+Embedded hosts may use the public `PortalHostPump` API. The pump operates on already-bound work only: it persists the attempt before calling the bound driver, records owning-driver reconciliation evidence, leaves driver exceptions unresolved rather than replaying them, treats a competing host winning the attempt race as a non-effecting `RACE_LOST`, and does not swallow process-control exceptions.
 
 ## 6. Verify through the owning substrate
 
@@ -148,7 +154,7 @@ After reconciliation:
 
 P.O.R.T.A.L. reconciles the owning adapter first, recomputes active/excluded subjects and live node occupancy, then admits the next collision-safe work into freed capacity.
 
-For a bounded resident run, `portal run --session-id ...` performs reconcile/refill generations by default. Use `--once` for one generation.
+For a resident run, `portal run --session-id ...` performs reconcile/refill generations by default. The source loop supports `max_cycles=0` and `max_idle_cycles=0` for polling until STOP or verified idle; use `--once` for one generation. Source-level integration coverage verifies the closed loop through host queue, durable attempt, owning-driver verification, capacity release, next-subject refill and final verified idle.
 
 ## 9. Hold, stop, and complete
 
@@ -177,9 +183,9 @@ Before a new P.O.R.T.A.L. chat advances work:
 3. reconcile unresolved attempted effects before any semantic retry;
 4. refresh current node occupancy;
 5. refresh exact target-bound route advertisements from live host capabilities and authority;
-6. inspect `portal host pending`;
-7. execute only exact queued dispatches through their bound routes;
-8. mark the attempt before the external effect;
+6. inspect `portal host pending` and select only adapter IDs the current host can actually drive;
+7. prefer `portal host take` so route qualification is revalidated and the attempt is durably recorded atomically;
+8. execute only the exact returned/bound dispatch through that route;
 9. verify through the owning substrate;
 10. reconcile and refill.
 
