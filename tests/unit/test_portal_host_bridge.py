@@ -4,11 +4,13 @@ from pathlib import Path
 
 import pytest
 
+import portal.session as portal_session
 from portal.host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
 from portal.models import ExecutionNode
 from portal.route_resolver import PortalRouteAdvertisement
 from portal.session import PortalSessionResult
-from portal.wave_runtime import PortalWavePacket
+from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
+from runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 def _packet(run_id: str = "portfolio::g1") -> PortalWavePacket:
@@ -252,3 +254,122 @@ def test_verified_complete_requires_prior_attempt(tmp_path: Path) -> None:
             reconciled_at=122.0,
         )
     store.close()
+
+def test_complete_uses_owning_host_adapter_reconciliation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_prepare(**kwargs):
+        packet = _packet(kwargs["run_id"])
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=1,
+            claimed=1,
+            held=0,
+            packets=(packet,),
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+
+    state_db = tmp_path / "portal.sqlite3"
+    store = PortalHostBridgeStore(state_db)
+    store.advertise_route(
+        _route(),
+        ttl_seconds=60.0,
+        observed_at=100.0,
+    )
+    adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
+    controller = portal_session.PortalCommandSession(state_db)
+    controller.run(
+        session_id="portfolio",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="repo-native", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        execution_adapter=adapter,
+    )
+
+    pending = store.pending_dispatches(session_id="portfolio")
+    dispatch_id = pending[0]["dispatch_id"]
+    store.mark_attempted(
+        dispatch_id=dispatch_id,
+        attempt_id="github-call-1",
+        evidence_id="github:request:1",
+        attempted_at=121.0,
+    )
+    store.record_reconciliation(
+        dispatch_id=dispatch_id,
+        state="VERIFIED_COMPLETE",
+        evidence_id="github:commit:deadbeef",
+        reconciled_at=122.0,
+    )
+
+    status = controller.complete(
+        session_id="portfolio",
+        holder="vera",
+        subject_kind="repository",
+        subject_id="portal",
+        verifier="vera-review",
+        token=None,
+        execution_adapter=adapter,
+    )
+
+    assert status["summary"] == {"active": 0, "held": 0, "terminal": 1}
+    assert status["subjects"][0]["verification_state"] == "VERIFIED_COMPLETE"
+    controller.close()
+    store.close()
+
+
+def test_complete_refuses_route_bound_subject_without_owning_adapter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_prepare(**kwargs):
+        packet = _packet(kwargs["run_id"])
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=1,
+            claimed=1,
+            held=0,
+            packets=(packet,),
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+    state_db = tmp_path / "portal.sqlite3"
+    store = PortalHostBridgeStore(state_db)
+    store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
+    adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
+    controller = portal_session.PortalCommandSession(state_db)
+    controller.run(
+        session_id="portfolio",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="repo-native", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+        execution_adapter=adapter,
+    )
+
+    with pytest.raises(ValueError, match="owning execution adapter"):
+        controller.complete(
+            session_id="portfolio",
+            holder="vera",
+            subject_kind="repository",
+            subject_id="portal",
+            verifier="vera-review",
+            token=None,
+        )
+    controller.close()
+    store.close()
+
