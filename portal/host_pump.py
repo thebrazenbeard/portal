@@ -59,6 +59,7 @@ class PortalHostPumpResult:
     in_progress: int
     outcome_unknown: int
     no_driver: int
+    race_lost: int
 
 
 class PortalHostPump:
@@ -114,6 +115,7 @@ class PortalHostPump:
         in_progress = 0
         outcome_unknown = 0
         no_driver = 0
+        race_lost = 0
 
         for dispatch in pending:
             dispatch_id = _required(
@@ -149,11 +151,32 @@ class PortalHostPump:
             )
             attempt_evidence = self._attempt_evidence_id(attempt_id)
 
-            self.store.mark_attempted(
-                dispatch_id=dispatch_id,
-                attempt_id=attempt_id,
-                evidence_id=attempt_evidence,
-            )
+            try:
+                self.store.mark_attempted(
+                    dispatch_id=dispatch_id,
+                    attempt_id=attempt_id,
+                    evidence_id=attempt_evidence,
+                )
+            except ValueError:
+                current = self.store.load_dispatch(dispatch_id)
+                if current.get("state") != "ATTEMPTED":
+                    raise
+                race_lost += 1
+                items.append(
+                    PortalHostPumpItemResult(
+                        dispatch_id=dispatch_id,
+                        adapter_id=adapter_id,
+                        route_id=route_id,
+                        state="RACE_LOST",
+                        evidence_id=(
+                            str(current["dispatch_evidence_id"])
+                            if current.get("dispatch_evidence_id") is not None
+                            else None
+                        ),
+                        reason="dispatch was attempted by another host",
+                    )
+                )
+                continue
             attempted += 1
 
             execute = getattr(driver, "execute", None)
@@ -173,7 +196,7 @@ class PortalHostPump:
 
             try:
                 result = execute(dispatch, attempt_id=attempt_id)
-            except BaseException as exc:
+            except Exception as exc:
                 outcome_unknown += 1
                 items.append(
                     PortalHostPumpItemResult(
@@ -234,4 +257,5 @@ class PortalHostPump:
             in_progress=in_progress,
             outcome_unknown=outcome_unknown,
             no_driver=no_driver,
+            race_lost=race_lost,
         )
