@@ -136,44 +136,104 @@ class PortalHostBridgeStore:
             raise ValueError("route advertisement ttl_seconds must be positive")
         observed = float(time.time() if observed_at is None else observed_at)
         expires = observed + float(ttl_seconds)
-        self.connection.execute(
-            """
-            INSERT INTO portal_host_routes(
-                adapter_id, route_id, node_id, target_kind, target_id,
-                capabilities_json, effect_capabilities_json,
-                authorized_effects_json, available, attached, current,
-                preference, observed_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(
-                adapter_id, route_id, node_id, target_kind, target_id
-            ) DO UPDATE SET
-                capabilities_json = excluded.capabilities_json,
-                effect_capabilities_json = excluded.effect_capabilities_json,
-                authorized_effects_json = excluded.authorized_effects_json,
-                available = excluded.available,
-                attached = excluded.attached,
-                current = excluded.current,
-                preference = excluded.preference,
-                observed_at = excluded.observed_at,
-                expires_at = excluded.expires_at
-            """,
-            (
-                route.adapter_id,
-                route.route_id,
-                route.node_id,
-                route.target_kind,
-                route.target_id,
-                _canonical_json(route.capabilities),
-                _canonical_json(route.effect_capabilities),
-                _canonical_json(route.authorized_effects),
-                int(route.available),
-                int(route.attached),
-                int(route.current),
-                route.preference,
-                observed,
-                expires,
-            ),
-        )
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT
+                    capabilities_json, effect_capabilities_json,
+                    authorized_effects_json, available, attached, current,
+                    preference, observed_at, expires_at
+                FROM portal_host_routes
+                WHERE adapter_id = ? AND route_id = ? AND node_id = ?
+                  AND target_kind = ? AND target_id = ?
+                """,
+                (
+                    route.adapter_id,
+                    route.route_id,
+                    route.node_id,
+                    route.target_kind,
+                    route.target_id,
+                ),
+            ).fetchone()
+            if row is not None:
+                existing_observed = float(row["observed_at"])
+                if observed < existing_observed:
+                    raise ValueError("stale host route observation")
+                if observed == existing_observed:
+                    existing = PortalRouteAdvertisement(
+                        adapter_id=route.adapter_id,
+                        route_id=route.route_id,
+                        node_id=route.node_id,
+                        target_kind=route.target_kind,
+                        target_id=route.target_id,
+                        capabilities=tuple(
+                            json.loads(str(row["capabilities_json"]))
+                        ),
+                        effect_capabilities=tuple(
+                            json.loads(str(row["effect_capabilities_json"]))
+                        ),
+                        authorized_effects=tuple(
+                            json.loads(str(row["authorized_effects_json"]))
+                        ),
+                        available=bool(row["available"]),
+                        attached=bool(row["attached"]),
+                        current=bool(row["current"]),
+                        preference=int(row["preference"]),
+                    )
+                    if (
+                        existing != route
+                        or float(row["expires_at"]) != expires
+                    ):
+                        raise ValueError(
+                            "conflicting host route observation"
+                        )
+                    self.connection.commit()
+                    return route
+
+            self.connection.execute(
+                """
+                INSERT INTO portal_host_routes(
+                    adapter_id, route_id, node_id, target_kind, target_id,
+                    capabilities_json, effect_capabilities_json,
+                    authorized_effects_json, available, attached, current,
+                    preference, observed_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(
+                    adapter_id, route_id, node_id, target_kind, target_id
+                ) DO UPDATE SET
+                    capabilities_json = excluded.capabilities_json,
+                    effect_capabilities_json = excluded.effect_capabilities_json,
+                    authorized_effects_json = excluded.authorized_effects_json,
+                    available = excluded.available,
+                    attached = excluded.attached,
+                    current = excluded.current,
+                    preference = excluded.preference,
+                    observed_at = excluded.observed_at,
+                    expires_at = excluded.expires_at
+                """,
+                (
+                    route.adapter_id,
+                    route.route_id,
+                    route.node_id,
+                    route.target_kind,
+                    route.target_id,
+                    _canonical_json(route.capabilities),
+                    _canonical_json(route.effect_capabilities),
+                    _canonical_json(route.authorized_effects),
+                    int(route.available),
+                    int(route.attached),
+                    int(route.current),
+                    route.preference,
+                    observed,
+                    expires,
+                ),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
         return route
 
     def active_routes(
