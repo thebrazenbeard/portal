@@ -236,3 +236,115 @@ def test_complete_host_bridge_passes_owning_adapter(
     assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_COMPLETE_V1"
     assert isinstance(calls[0]["execution_adapter"], PortalHostExecutionAdapter)
 
+def test_host_occupancy_cli_round_trip(tmp_path, capsys) -> None:
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "occupancy",
+        "--state-db", str(state_db),
+        "--node-id", "lappy",
+        "--occupied-slots", "8",
+        "--ttl-seconds", "300",
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_HOST_OCCUPANCY_ADVERTISE_V1"
+    assert payload["occupancy"]["node_id"] == "lappy"
+    assert payload["occupancy"]["occupied_slots"] == 8
+
+    code = portal_cli.entrypoint([
+        "host", "occupancy-status",
+        "--state-db", str(state_db),
+    ])
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "mode": "PORTAL_HOST_OCCUPANCY_STATUS_V1",
+        "occupied_node_slots": {"lappy": 8},
+    }
+
+
+def test_session_run_can_require_fresh_host_occupancy_for_unsourced_nodes(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeSession:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def run_until_idle(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                session_id=kwargs["session_id"],
+                control_state="RUNNING",
+                cycles=(),
+                stop_reason="WAITING_ACTIVE",
+                idle_cycles=1,
+                summary={"active": 1, "held": 0, "terminal": 0},
+            )
+
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+    state_db = tmp_path / "portal.sqlite3"
+    store = PortalHostBridgeStore(state_db)
+    store.advertise_node_occupancy(
+        node_id="lappy",
+        occupied_slots=8,
+        ttl_seconds=300.0,
+    )
+    store.close()
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(state_db),
+        "--occupied-node", "worklaptop=1",
+        "--host-node-occupancy",
+    ])
+
+    assert code == 0
+    capsys.readouterr()
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert kwargs["occupied_node_slots"] is None
+    provider = kwargs["node_occupancy_provider"]
+    assert provider() == {"lappy": 8, "worklaptop": 1}
+
+
+def test_host_occupancy_missing_unsourced_node_fails_closed(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    class FakeSession:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def run_until_idle(self, **kwargs):
+            kwargs["node_occupancy_provider"]()
+            raise AssertionError("provider should fail before scheduling")
+
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(state_db),
+        "--occupied-node", "worklaptop=1",
+        "--host-node-occupancy",
+    ])
+
+    assert code == 2
+    assert "missing current host occupancy for node: lappy" in capsys.readouterr().err
+
