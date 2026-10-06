@@ -196,3 +196,96 @@ def test_cli_host_bridge_reconciles_and_refills_next_repository(
     ]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["summary"] == {"active": 1, "held": 0, "terminal": 1}
+
+def test_host_reconcile_immediately_updates_existing_session_projection(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_prepare(**kwargs):
+        packet = _packet(
+            run_id=kwargs["run_id"],
+            subject_id="project-runner",
+            repository="thebrazenbeard/project-runner",
+        )
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=1,
+            claimed=1,
+            held=0,
+            packets=(packet,),
+        )
+
+    monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
+
+    nodes = tmp_path / "nodes.yaml"
+    nodes.write_text(
+        "schema: PORTAL_EXECUTION_NODES_V1\n"
+        "nodes:\n"
+        "  - id: repo-native\n"
+        "    max_parallel: 1\n"
+        "    allowed_lanes: []\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    _advertise_route(
+        state_db=state_db,
+        target_id="thebrazenbeard/project-runner",
+    )
+    capsys.readouterr()
+
+    assert portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--state-db", str(state_db),
+        "--nodes", str(nodes),
+        "--host-bridge",
+        "--occupied-node", "repo-native=0",
+        "--once",
+    ]) == 0
+    capsys.readouterr()
+
+    assert portal_cli.entrypoint([
+        "host", "pending",
+        "--state-db", str(state_db),
+        "--session-id", "portfolio",
+    ]) == 0
+    pending = json.loads(capsys.readouterr().out)["dispatches"]
+    dispatch_id = pending[0]["dispatch_id"]
+
+    assert portal_cli.entrypoint([
+        "host", "attempt",
+        "--state-db", str(state_db),
+        "--dispatch-id", dispatch_id,
+        "--attempt-id", "project-runner-hold-1",
+        "--evidence-id", "host:attempt:project-runner-hold-1",
+    ]) == 0
+    capsys.readouterr()
+
+    assert portal_cli.entrypoint([
+        "host", "reconcile",
+        "--state-db", str(state_db),
+        "--dispatch-id", dispatch_id,
+        "--state", "VERIFIED_HELD",
+        "--evidence-id", "host:held:project-runner",
+    ]) == 0
+    capsys.readouterr()
+
+    assert portal_cli.entrypoint([
+        "status",
+        "--state-db", str(state_db),
+        "--session-id", "portfolio",
+    ]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["summary"] == {"active": 0, "held": 1, "terminal": 0}
+    assert status["subjects"][0]["state"] == "HELD"
+    assert status["subjects"][0]["verification_state"] == "VERIFIED_HELD"
+    assert (
+        status["subjects"][0]["dispatch_evidence_id"]
+        == "host:held:project-runner"
+    )
+
