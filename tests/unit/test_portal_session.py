@@ -585,3 +585,65 @@ def test_unbounded_refill_waits_through_quiet_cycle_until_explicit_stop(
     stopper.close()
     controller.close()
 
+def test_resume_spec_survives_reopen_and_remains_holder_bound(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_prepare(**kwargs):
+        return PortalWavePreparationResult(
+            run_id=kwargs["run_id"],
+            plan_sha256="d" * 64,
+            plan_path=tmp_path / f"{kwargs['run_id']}.json",
+            assigned=0,
+            claimed=0,
+            held=0,
+            packets=(),
+        )
+
+    monkeypatch.setattr(
+        portal_session,
+        "prepare_portal_wave",
+        fake_prepare,
+    )
+    controller = portal_session.PortalCommandSession(
+        tmp_path / "portal.sqlite3"
+    )
+    controller.run(
+        session_id="portfolio",
+        holder="vera",
+        wave_path=tmp_path / "wave.json",
+        corpus_path=tmp_path / "corpus.json",
+        projects_path=tmp_path / "projects.yaml",
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        budget=WaveExecutionBudget(1, 1, 1, 1),
+        lease_ttl=300.0,
+        token=None,
+    )
+
+    spec = {
+        "schema": "PORTAL_COMMAND_SESSION_RESUME_V1",
+        "nodes": "nodes.yaml",
+        "host_bridge": True,
+        "occupied_nodes": ["worklaptop=0"],
+    }
+    controller.save_resume_spec(
+        session_id="portfolio",
+        holder="vera",
+        spec=spec,
+    )
+    controller.close()
+
+    reopened = portal_session.PortalCommandSession(
+        tmp_path / "portal.sqlite3"
+    )
+    assert reopened.load_resume_spec(
+        session_id="portfolio",
+        holder="vera",
+    ) == spec
+    with pytest.raises(ValueError, match="session holder changed"):
+        reopened.load_resume_spec(
+            session_id="portfolio",
+            holder="other",
+        )
+    reopened.close()
+
