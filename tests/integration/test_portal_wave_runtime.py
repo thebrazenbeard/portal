@@ -231,3 +231,90 @@ def test_prepare_wave_excludes_prior_subject_and_refills_next_candidate(
 
     assert len(second.packets) == 1
     assert second.packets[0].subject_id != first_subject
+
+def test_unsupported_queued_workstream_does_not_consume_packet_capacity(
+    tmp_path: Path,
+):
+    projects_path, heads = _operator_registry(tmp_path)
+    state_db = tmp_path / "portal-unsupported-workstream.sqlite3"
+    transport = FakeReadOnlyTransport(heads)
+    wave = __import__(
+        "runner.portfolio_advancement",
+        fromlist=["load_advancement_wave"],
+    ).load_advancement_wave(WAVE)
+    excluded = tuple(
+        (item.subject_kind, item.subject_id)
+        for item in wave.items
+        if item.subject_kind == "repository"
+        and item.subject_id != "repairtracker"
+    )
+
+    result = prepare_portal_wave(
+        wave_path=WAVE,
+        corpus_path=CORPUS,
+        projects_path=projects_path,
+        state_db=state_db,
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=1),),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+            max_per_lane=1,
+        ),
+        run_id="wave-workstream-filter",
+        holder="vera",
+        lease_ttl=60.0,
+        token=None,
+        excluded_subjects=excluded,
+        transport=transport,
+        clock=lambda: 100.0,
+    )
+
+    assert [packet.subject_id for packet in result.packets] == ["repairtracker"]
+    assert result.claimed == 1
+    assert result.held == 0
+
+
+def test_active_workstream_still_consumes_budget_while_queued_workstreams_are_skipped(
+    tmp_path: Path,
+):
+    projects_path, heads = _operator_registry(tmp_path)
+    state_db = tmp_path / "portal-active-workstream.sqlite3"
+    transport = FakeReadOnlyTransport(heads)
+    wave = __import__(
+        "runner.portfolio_advancement",
+        fromlist=["load_advancement_wave"],
+    ).load_advancement_wave(WAVE)
+    excluded = tuple(
+        (item.subject_kind, item.subject_id)
+        for item in wave.items
+        if item.subject_kind == "repository"
+        and item.subject_id != "repairtracker"
+    )
+
+    result = prepare_portal_wave(
+        wave_path=WAVE,
+        corpus_path=CORPUS,
+        projects_path=projects_path,
+        state_db=state_db,
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=2),),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=2,
+            max_per_family=2,
+            max_per_lane=2,
+        ),
+        run_id="wave-active-workstream",
+        holder="vera",
+        lease_ttl=60.0,
+        token=None,
+        excluded_subjects=excluded,
+        active_subjects=(("workstream", "nature-of-existence"),),
+        transport=transport,
+        clock=lambda: 100.0,
+    )
+
+    assert [packet.subject_id for packet in result.packets] == ["repairtracker"]
+    assert result.claimed == 1
+    assert result.held == 0
+
