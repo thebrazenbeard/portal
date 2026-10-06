@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,8 @@ from .ecosystem_runtime import (
 )
 from .diagnostics import build_host_diagnostics
 from .discovery import (
+    GitHubRepositoryCatalog,
+    build_live_project_registry,
     discover_live_project_registry,
     write_project_registry,
 )
@@ -41,6 +44,7 @@ from .frontier_currentness import (
     PortalHostFrontierStore,
     frontier_policy_sha256,
 )
+from .live_portfolio import refresh_live_public_portfolio
 from .host_bridge import (
     PortalHostBridgeStore,
     PortalHostExecutionAdapter,
@@ -1116,45 +1120,63 @@ def _inferred_wave_owner(wave_path: Path) -> str:
     return canonical[key]
 
 
-def _session_projects_path(args: argparse.Namespace) -> Path:
+def _session_portfolio_paths(
+    args: argparse.Namespace,
+) -> tuple[Path, Path, Path]:
     projects_path = Path(args.projects)
+    wave_path = Path(args.wave)
+    corpus_path = Path(args.corpus)
     discover_owner = getattr(args, "discover_owner", None)
     if getattr(args, "static_projects", False):
         if discover_owner:
             raise ValueError(
                 "--static-projects cannot be combined with --discover-owner"
             )
-        return projects_path
+        return wave_path, corpus_path, projects_path
 
     safe_host_live = bool(
         getattr(args, "host_bridge", False)
         and getattr(args, "host_frontier_currentness", False)
     )
     if not discover_owner and not safe_host_live:
-        return projects_path
+        return wave_path, corpus_path, projects_path
 
     owner = (
         str(discover_owner).strip()
         if discover_owner
-        else _inferred_wave_owner(Path(args.wave))
+        else _inferred_wave_owner(wave_path)
     )
     if not owner:
         raise ValueError("portfolio owner is required")
 
-    curated = load_project_snapshot(projects_path)
-    snapshot = discover_live_project_registry(
-        owner=owner,
-        curated_projects=curated.projects,
+    repositories = GitHubRepositoryCatalog(
         token=_github_token(),
+    ).list_owned_repositories(owner)
+    curated = load_project_snapshot(projects_path)
+    registry = build_live_project_registry(
+        owner=owner,
+        repositories=repositories,
+        curated_projects=curated.projects,
     )
-    output = (
+    live_registry_path = (
         Path(args.write_live_registry)
         if getattr(args, "write_live_registry", None) is not None
         else Path(args.state_db).parent / "projects.live.yaml"
     )
-    write_project_registry(output, snapshot)
-    return output
+    write_project_registry(live_registry_path, registry)
 
+    live = refresh_live_public_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=repositories,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+        output_dir=Path(args.state_db).parent / "live-portfolio",
+    )
+    return live.wave_path, live.corpus_path, live_registry_path
+
+
+def _session_projects_path(args: argparse.Namespace) -> Path:
+    return _session_portfolio_paths(args)[2]
 
 def _session_frontier_currentness(args: argparse.Namespace):
     if not args.host_frontier_currentness:
@@ -1417,7 +1439,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             if args.nodes is None:
                 raise ValueError("--nodes is required unless --resume")
 
-        projects_path = _session_projects_path(args)
+        wave_path, corpus_path, projects_path = _session_portfolio_paths(args)
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
@@ -1428,8 +1450,8 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
         common = dict(
             session_id=args.session_id,
             holder=args.holder,
-            wave_path=Path(args.wave),
-            corpus_path=Path(args.corpus),
+            wave_path=wave_path,
+            corpus_path=corpus_path,
             projects_path=projects_path,
             nodes=nodes,
             budget=_session_budget(args),
@@ -1496,7 +1518,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             if args.nodes is None:
                 raise ValueError("--nodes is required unless --resume")
 
-        projects_path = _session_projects_path(args)
+        wave_path, corpus_path, projects_path = _session_portfolio_paths(args)
         nodes = load_execution_nodes(Path(args.nodes))
         execution_adapter = _session_execution_adapter(args, nodes)
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
@@ -1510,8 +1532,8 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         result = controller.continue_run(
             session_id=args.session_id,
             holder=args.holder,
-            wave_path=Path(args.wave),
-            corpus_path=Path(args.corpus),
+            wave_path=wave_path,
+            corpus_path=corpus_path,
             projects_path=projects_path,
             nodes=nodes,
             budget=_session_budget(args),
