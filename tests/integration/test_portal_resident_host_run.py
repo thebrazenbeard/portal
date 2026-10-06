@@ -128,8 +128,13 @@ def test_resident_between_cycle_hook_pumps_and_refills_with_zero_poll_delay(
     assert result.summary == {"active": 0, "held": 0, "terminal": 2}
     assert store.pending_dispatches(session_id="portfolio") == ()
     assert store.unresolved_dispatches(session_id="portfolio") == ()
+    assert prepare_calls[1]["active_subjects"] == ()
+    assert prepare_calls[1]["excluded_subjects"] == (
+        ("repository", "alpha"),
+    )
     assert prepare_calls[2]["excluded_subjects"] == (
         ("repository", "alpha"),
+        ("repository", "beta"),
     )
 
     controller.close()
