@@ -139,3 +139,92 @@ def test_resident_between_cycle_hook_pumps_and_refills_with_zero_poll_delay(
 
     controller.close()
     store.close()
+
+def test_cli_run_with_host_drivers_pumps_between_refill_generations(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    import portal.cli as portal_cli
+
+    calls: list[tuple[str, object]] = []
+
+    class FakeSession:
+        def __init__(self, path):
+            calls.append(("session_path", path))
+
+        def close(self):
+            pass
+
+        def run_until_idle(self, **kwargs):
+            calls.append(("run_until_idle", kwargs))
+            between_cycles = kwargs.get("between_cycles")
+            assert callable(between_cycles)
+            between_cycles()
+            return SimpleNamespace(
+                session_id=kwargs["session_id"],
+                control_state="RUNNING",
+                cycles=(),
+                stop_reason="MAX_CYCLES",
+                idle_cycles=0,
+                summary={"active": 1, "held": 0, "terminal": 0},
+            )
+
+        def save_resume_spec(self, **kwargs):
+            calls.append(("save_resume_spec", kwargs))
+
+    class FakePump:
+        def __init__(self, *, store, drivers):
+            calls.append(("pump_init", tuple(sorted(drivers))))
+
+        def run_once(self, *, session_id=None, max_dispatches=None):
+            calls.append(("pump", (session_id, max_dispatches)))
+            return SimpleNamespace()
+
+    drivers_path = tmp_path / "drivers.yaml"
+    drivers_path.write_text("unused by patched loader\n", encoding="utf-8")
+
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+    monkeypatch.setattr(
+        portal_cli,
+        "load_host_command_drivers",
+        lambda path: {"github": object()},
+    )
+    monkeypatch.setattr(portal_cli, "PortalHostPump", FakePump)
+
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--nodes", str(
+            Path(__file__).resolve().parents[2]
+            / "tests" / "fixtures" / "portal-nodes-valid.yaml"
+        ),
+        "--static-projects",
+        "--host-bridge",
+        "--host-drivers", str(drivers_path),
+        "--host-max-dispatches", "3",
+        "--max-cycles", "2",
+        "--poll-seconds", "0",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_COMMAND_SESSION_RUN_V1"
+    assert ("pump_init", ("github",)) in calls
+    assert ("pump", ("portfolio", 3)) in calls
+
+    run_kwargs = next(
+        value for name, value in calls if name == "run_until_idle"
+    )
+    assert callable(run_kwargs["between_cycles"])
+
+    save_kwargs = next(
+        value for name, value in calls if name == "save_resume_spec"
+    )
+    assert save_kwargs["spec"]["host_drivers"] == str(drivers_path)
+    assert save_kwargs["spec"]["host_max_dispatches"] == 3
+
