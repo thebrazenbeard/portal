@@ -209,6 +209,9 @@ class PortalCommandSession:
         lease_ttl: float,
         token: str | None,
         occupied_node_slots: Mapping[str, int] | None,
+        frontier_currentness_provider: (
+            Callable[[Path], Iterable[tuple[str, str]]] | None
+        ),
         transport: GitHubTransport | None,
         clock: Callable[[], float],
         allow_restart: bool,
@@ -223,7 +226,26 @@ class PortalCommandSession:
             raise ValueError("Portal session is stopped; use run to restart it")
 
         active_subjects = self._subjects(session_id, "ACTIVE")
-        excluded_subjects = self._excluded_subjects(session_id)
+        active_set = set(active_subjects)
+        excluded_set = set(self._excluded_subjects(session_id))
+        if frontier_currentness_provider is not None:
+            for value in frontier_currentness_provider(Path(wave_path)):
+                if (
+                    not isinstance(value, tuple)
+                    or len(value) != 2
+                    or not all(
+                        isinstance(part, str) and part.strip()
+                        for part in value
+                    )
+                ):
+                    raise ValueError(
+                        "frontier currentness exclusions must be "
+                        "(subject_kind, subject_id) string pairs"
+                    )
+                subject = (value[0].strip(), value[1].strip())
+                if subject not in active_set:
+                    excluded_set.add(subject)
+        excluded_subjects = tuple(sorted(excluded_set))
         next_generation = generation + 1
         wave_run_id = f"{session_id}::g{next_generation}"
 
@@ -300,6 +322,9 @@ class PortalCommandSession:
         lease_ttl: float,
         token: str | None,
         occupied_node_slots: Mapping[str, int] | None = None,
+        frontier_currentness_provider: (
+            Callable[[Path], Iterable[tuple[str, str]]] | None
+        ) = None,
         execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
@@ -315,6 +340,7 @@ class PortalCommandSession:
             lease_ttl=lease_ttl,
             token=token,
             occupied_node_slots=occupied_node_slots,
+            frontier_currentness_provider=frontier_currentness_provider,
             transport=transport,
             clock=clock,
             allow_restart=True,
@@ -343,6 +369,9 @@ class PortalCommandSession:
         token: str | None,
         verifier: str | None = None,
         occupied_node_slots: Mapping[str, int] | None = None,
+        frontier_currentness_provider: (
+            Callable[[Path], Iterable[tuple[str, str]]] | None
+        ) = None,
         execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
@@ -387,6 +416,7 @@ class PortalCommandSession:
             lease_ttl=lease_ttl,
             token=token,
             occupied_node_slots=occupied_node_slots,
+            frontier_currentness_provider=frontier_currentness_provider,
             transport=transport,
             clock=clock,
             allow_restart=False,
@@ -1071,6 +1101,9 @@ class PortalCommandSession:
         poll_seconds: float = 0.0,
         occupied_node_slots: Mapping[str, int] | None = None,
         node_occupancy_provider: Callable[[], Mapping[str, int]] | None = None,
+        frontier_currentness_provider: (
+            Callable[[Path], Iterable[tuple[str, str]]] | None
+        ) = None,
         execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
@@ -1098,6 +1131,7 @@ class PortalCommandSession:
             budget=budget,
             lease_ttl=lease_ttl,
             token=token,
+            frontier_currentness_provider=frontier_currentness_provider,
             transport=transport,
             clock=clock,
         )
