@@ -446,3 +446,64 @@ def test_active_subject_must_exist_in_wave():
             ),
             active_subjects=(("repository", "missing"),),
         )
+
+
+def test_blocked_subject_reserves_collision_without_consuming_execution_budget():
+    blocked = item(
+        "blocked",
+        priority="P0",
+        lead="ONE",
+        repository="owner/shared",
+        family="family-a",
+    )
+    colliding = item(
+        "colliding",
+        priority="P0",
+        lead="VOSS",
+        repository="owner/shared",
+        family="family-b",
+    )
+    unrelated = item(
+        "unrelated",
+        priority="P1",
+        lead="ONE",
+        repository="owner/unrelated",
+        family="family-a",
+    )
+
+    planned = plan_wave_admission(
+        wave(blocked, colliding, unrelated),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+            max_per_lane=1,
+        ),
+        blocked_subjects=(("repository", "blocked"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == [
+        "unrelated"
+    ]
+    reasons = {
+        deferred.subject_id: deferred.reason
+        for deferred in planned.deferred
+    }
+    assert reasons["blocked"] == "BLOCKED_ACTIVE"
+    assert reasons["colliding"] == "COLLISION"
+    assert planned.blocked_subjects == (("repository", "blocked"),)
+    assert planned.summary()["blocked_subjects"] == ["repository:blocked"]
+
+
+def test_subject_cannot_be_active_and_blocked():
+    with pytest.raises(ValueError, match="both active and blocked"):
+        plan_wave_admission(
+            wave(item("same")),
+            budget=WaveExecutionBudget(
+                max_parallel=1,
+                max_per_identity=1,
+                max_per_family=1,
+            ),
+            active_subjects=(("repository", "same"),),
+            blocked_subjects=(("repository", "same"),),
+        )
