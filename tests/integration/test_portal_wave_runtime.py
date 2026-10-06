@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from portal.discovery import (
     RepositoryInventoryItem,
     build_live_project_registry,
     write_project_registry,
 )
+from portal.live_portfolio import refresh_live_local_portfolio
 from portal.models import ExecutionNode
 from portal.wave_runtime import PortalWaveStore, prepare_portal_wave
 from runner.models import ProjectDefinition
@@ -318,3 +321,121 @@ def test_active_workstream_still_consumes_budget_while_queued_workstreams_are_sk
     assert result.claimed == 1
     assert result.held == 0
 
+
+
+def test_prepare_wave_accepts_private_repository_from_explicit_local_overlay(
+    tmp_path: Path,
+):
+    repositories = (
+        RepositoryInventoryItem(
+            name="project-runner",
+            full_name="thebrazenbeard/project-runner",
+            private=False,
+            archived=False,
+            default_branch="main",
+        ),
+        RepositoryInventoryItem(
+            name="private-live",
+            full_name="thebrazenbeard/private-live",
+            private=True,
+            archived=False,
+            default_branch="main",
+        ),
+    )
+    live = refresh_live_local_portfolio(
+        baseline_corpus_path=CORPUS,
+        baseline_wave_path=WAVE,
+        repositories=repositories,
+        observed_at="2026-10-06T19:30:00Z",
+        output_dir=tmp_path / "live-local",
+    )
+    corpus = load_portfolio_corpus(live.corpus_path)
+    curated = tuple(
+        ProjectDefinition.from_mapping(
+            {
+                "id": record.id,
+                "name": record.name,
+                "visibility": record.visibility,
+                "repositories": [record.repository],
+                "capabilities": ["read", "analyze", "propose"],
+                "assignment_scope": "NONE",
+                "review_scope": "NONE",
+                "family_id": record.family_id,
+                "scheduling_state": "SCHEDULABLE",
+            }
+        )
+        for record in corpus.records
+        if not record.archived
+    )
+    snapshot = build_live_project_registry(
+        owner="thebrazenbeard",
+        repositories=repositories,
+        curated_projects=curated,
+    )
+    projects_path = tmp_path / "projects.live.yaml"
+    write_project_registry(projects_path, snapshot)
+    heads = {
+        (record.repository, record.default_branch): "d" * 40
+        for record in corpus.records
+        if not record.archived
+    }
+    transport = FakeReadOnlyTransport(heads)
+
+    result = prepare_portal_wave(
+        wave_path=live.wave_path,
+        corpus_path=live.corpus_path,
+        projects_path=projects_path,
+        state_db=tmp_path / "private-portal.sqlite3",
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=1),),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+            max_per_lane=1,
+        ),
+        run_id="private-live-wave",
+        holder="vera",
+        lease_ttl=60.0,
+        token=None,
+        excluded_subjects=(("repository", "project-runner"),),
+        public_safe=False,
+        transport=transport,
+        clock=lambda: 100.0,
+    )
+
+    assert [packet.subject_id for packet in result.packets] == ["private-live"]
+    assert result.packets[0].effect_ceiling == "NO_EFFECT"
+    assert result.packets[0].repository == "thebrazenbeard/private-live"
+    assert transport.mutations == []
+
+
+def test_prepare_wave_local_mode_rejects_incomplete_count_only_corpus(
+    tmp_path: Path,
+):
+    projects_path, heads = _operator_registry(tmp_path)
+    transport = FakeReadOnlyTransport(heads)
+
+    with pytest.raises(
+        ValueError,
+        match="complete portfolio corpus must enumerate every repository",
+    ):
+        prepare_portal_wave(
+            wave_path=WAVE,
+            corpus_path=CORPUS,
+            projects_path=projects_path,
+            state_db=tmp_path / "incomplete-private.sqlite3",
+            nodes=(ExecutionNode(node_id="alpha", max_parallel=1),),
+            budget=WaveExecutionBudget(
+                max_parallel=1,
+                max_per_identity=1,
+                max_per_family=1,
+                max_per_lane=1,
+            ),
+            run_id="incomplete-private-wave",
+            holder="vera",
+            lease_ttl=60.0,
+            token=None,
+            public_safe=False,
+            transport=transport,
+            clock=lambda: 100.0,
+        )

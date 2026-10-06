@@ -21,7 +21,11 @@ from .github_backend import (
 )
 from .models import ExactSubject
 from .portfolio_advancement import AdvancementItem, load_advancement_wave
-from .portfolio_corpus import PortfolioRecord, load_portfolio_corpus
+from .portfolio_corpus import (
+    PortfolioRecord,
+    load_portfolio_corpus,
+    validate_complete_repository_inventory,
+)
 from .portfolio_operator_binding import bind_wave_to_operator_registry
 from .portfolio_wave_scheduler import collision_keys
 from .registry import load_project_snapshot
@@ -148,6 +152,7 @@ def verify_bound_plan_subject(
     corpus_path: Path,
     projects_path: Path,
     subject_id: str,
+    public_safe: bool = True,
 ) -> VerifiedPlanSubject:
     plan_raw = plan_path.read_bytes()
     try:
@@ -199,7 +204,9 @@ def verify_bound_plan_subject(
             raise ValueError("local corpus does not match wave git blob binding")
     else:
         raise ValueError("unsupported wave corpus binding kind")
-    corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+    corpus = load_portfolio_corpus(corpus_path, public_safe=public_safe)
+    if not public_safe:
+        validate_complete_repository_inventory(corpus)
 
     selected_raw = plan_payload.get("selected")
     if not isinstance(selected_raw, list):
@@ -248,7 +255,7 @@ def verify_bound_plan_subject(
         wave,
         corpus,
         registry,
-        public_safe=True,
+        public_safe=public_safe,
     )
     binding_matches = [
         decision
@@ -335,6 +342,7 @@ def claim_bound_plan_subject(
     holder: str,
     lease_ttl: float,
     allowed_repositories: Iterable[str],
+    public_safe: bool = True,
     token: str | None = None,
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
@@ -359,6 +367,7 @@ def claim_bound_plan_subject(
         corpus_path=Path(corpus_path),
         projects_path=Path(projects_path),
         subject_id=subject_id,
+        public_safe=public_safe,
     )
     repository = verified.record.repository
     authorized = frozenset(str(value) for value in allowed_repositories)

@@ -17,7 +17,7 @@ Mission:
 - durable recovery across chat/runtime loss.
 
 Implemented coordinator core:
-- live repository discovery with private membership kept operator-local;
+- live repository discovery with exact private repository membership kept operator-local; command-session live overlays schedule those private repositories locally as `NO_EFFECT` currentness audits until stronger authority is separately bound, while public portfolio artifacts remain name-redacted;
 - deterministic Project Runner wave admission and execution-node placement;
 - exact-head claims, leases, fencing, durable receipts and reconciliation;
 - zero-mutation advisory workers for source-proposal generation;

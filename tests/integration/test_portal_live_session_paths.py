@@ -99,11 +99,12 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
     assert projects_path != args.projects
 
     corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
-    public_repos = {item["repository"] for item in corpus["records"]}
-    assert public_repos == {
+    local_repos = {item["repository"] for item in corpus["records"]}
+    assert local_repos == {
         "thebrazenbeard/project-runner",
         "thebrazenbeard/new-live",
         "thebrazenbeard/old-live",
+        "thebrazenbeard/private-live",
     }
     assert corpus["counts"] == {
         "total": 4,
@@ -113,7 +114,12 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
         "public_archived": 1,
         "private_archived": 0,
     }
-    assert "private-live" not in corpus_path.read_text(encoding="utf-8")
+    private_record = next(
+        item
+        for item in corpus["records"]
+        if item["repository"] == "thebrazenbeard/private-live"
+    )
+    assert private_record["visibility"] == "private"
 
     wave = json.loads(wave_path.read_text(encoding="utf-8"))
     by_repo = {
@@ -124,6 +130,9 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
     assert by_repo["thebrazenbeard/new-live"]["action"] == "CURRENTNESS_AUDIT"
     assert by_repo["thebrazenbeard/new-live"]["effect_ceiling"] == "NO_EFFECT"
     assert by_repo["thebrazenbeard/old-live"]["execution_state"] == "HELD"
+    assert by_repo["thebrazenbeard/private-live"]["action"] == "CURRENTNESS_AUDIT"
+    assert by_repo["thebrazenbeard/private-live"]["effect_ceiling"] == "NO_EFFECT"
+    assert by_repo["thebrazenbeard/private-live"]["execution_state"] == "QUEUED"
 
     registry = yaml.safe_load(projects_path.read_text(encoding="utf-8"))
     registered = {
@@ -132,6 +141,7 @@ def test_session_portfolio_paths_refresh_membership_wave_and_corpus_once(
         for repo in project["repositories"]
     }
     assert "thebrazenbeard/private-live" in registered
+    assert portal_cli._session_portfolio_public_safe(args) is False
 
 
 def test_command_session_uses_refreshed_live_portfolio_paths(
@@ -168,3 +178,4 @@ def test_command_session_uses_refreshed_live_portfolio_paths(
     assert call["wave_path"] == live_wave
     assert call["corpus_path"] == live_corpus
     assert call["projects_path"] == live_projects
+    assert call["public_safe"] is True

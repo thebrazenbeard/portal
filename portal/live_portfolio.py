@@ -297,3 +297,132 @@ def refresh_live_public_portfolio(
         private_repositories=counts["private"],
         archived_repositories=counts["archived"],
     )
+
+
+def refresh_live_local_portfolio(
+    *,
+    baseline_corpus_path: Path,
+    baseline_wave_path: Path,
+    repositories: Iterable[RepositoryInventoryItem],
+    observed_at: str,
+    output_dir: Path,
+) -> PortalLivePortfolioRefresh:
+    """Render a local runtime overlay that can include exact private membership.
+
+    The public overlay remains the privacy-safe publication surface. Private
+    repositories are added only to this local corpus/wave and enter as
+    NO_EFFECT currentness audits so membership never invents execution authority.
+    """
+
+    repository_tuple = tuple(repositories)
+    output_dir = Path(output_dir)
+    public_result = refresh_live_public_portfolio(
+        baseline_corpus_path=baseline_corpus_path,
+        baseline_wave_path=baseline_wave_path,
+        repositories=repository_tuple,
+        observed_at=observed_at,
+        output_dir=output_dir / "public",
+    )
+
+    private_live = tuple(
+        sorted(
+            (repo for repo in repository_tuple if repo.private),
+            key=lambda repo: repo.full_name.casefold(),
+        )
+    )
+    if not private_live:
+        return PortalLivePortfolioRefresh(
+            corpus_path=public_result.corpus_path,
+            wave_path=public_result.wave_path,
+            public_repositories=public_result.public_repositories,
+            private_repositories=0,
+            archived_repositories=public_result.archived_repositories,
+        )
+
+    corpus_payload = json.loads(
+        public_result.corpus_path.read_text(encoding="utf-8")
+    )
+    wave_payload = json.loads(
+        public_result.wave_path.read_text(encoding="utf-8")
+    )
+
+    records = list(corpus_payload["records"])
+    items = list(wave_payload["items"])
+    seen_ids = {str(record["id"]).casefold() for record in records}
+    seen_repositories = {
+        str(record["repository"]).casefold() for record in records
+    }
+
+    for repo in private_live:
+        record = _discovery_record(repo)
+        record["visibility"] = "private"
+        record_id = str(record["id"]).casefold()
+        repository_key = str(record["repository"]).casefold()
+        if record_id in seen_ids:
+            raise ValueError(
+                f"live local repository id collision: {record['id']}"
+            )
+        if repository_key in seen_repositories:
+            raise ValueError(
+                f"duplicate live local repository: {record['repository']}"
+            )
+        seen_ids.add(record_id)
+        seen_repositories.add(repository_key)
+        records.append(record)
+        items.append(_refresh_wave_item(record=record, baseline_item=None))
+
+    corpus_payload["status_basis"] = (
+        "Live GitHub owner membership overlaid onto the previous public-safe "
+        "curated corpus. Exact private repository membership is retained only "
+        "in this local runtime artifact and must not be published."
+    )
+    corpus_payload["records"] = sorted(
+        records, key=lambda raw: str(raw["id"]).casefold()
+    )
+
+    corpus_path = output_dir / "corpus.live.local.json"
+    _json_write(corpus_path, corpus_payload)
+    local_corpus = load_portfolio_corpus(corpus_path)
+    if len(local_corpus.records) != local_corpus.counts.total:
+        raise ValueError(
+            "local live corpus must enumerate every discovered repository"
+        )
+    if (
+        sum(record.visibility == "public" for record in local_corpus.records)
+        != local_corpus.counts.public
+        or sum(
+            record.visibility == "private"
+            for record in local_corpus.records
+        )
+        != local_corpus.counts.private
+    ):
+        raise ValueError(
+            "local live corpus visibility counts do not match records"
+        )
+
+    binding = dict(wave_payload["corpus_binding"])
+    binding["sha256"] = local_corpus.sha256
+    wave_payload["corpus_binding"] = binding
+    wave_payload["items"] = sorted(
+        items,
+        key=lambda raw: (
+            str(raw["subject_kind"]),
+            str(raw["subject_id"]).casefold(),
+        ),
+    )
+
+    wave_path = output_dir / "advancement_wave.live.local.json"
+    _json_write(wave_path, wave_payload)
+    local_wave = load_advancement_wave(wave_path)
+    validate_wave_against_corpus(
+        local_wave,
+        local_corpus,
+        public_safe=False,
+    )
+    return PortalLivePortfolioRefresh(
+        corpus_path=corpus_path,
+        wave_path=wave_path,
+        public_repositories=public_result.public_repositories,
+        private_repositories=public_result.private_repositories,
+        archived_repositories=public_result.archived_repositories,
+    )

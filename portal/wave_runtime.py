@@ -28,7 +28,10 @@ from runner.promoted_github_tree_runtime import (
     reconcile_github_source_tree_write_outcome_unknown,
 )
 from runner.portfolio_advancement import load_advancement_wave
-from runner.portfolio_corpus import load_portfolio_corpus
+from runner.portfolio_corpus import (
+    load_portfolio_corpus,
+    validate_complete_repository_inventory,
+)
 from runner.portfolio_operator_binding import bind_wave_to_operator_registry
 from runner.portfolio_operator_bridge import claim_bound_plan_subject
 from runner.portfolio_plan_binding import (
@@ -1851,6 +1854,7 @@ def prepare_portal_wave(
     excluded_subjects: Iterable[tuple[str, str]] = (),
     active_subjects: Iterable[tuple[str, str]] = (),
     occupied_node_slots: Mapping[str, int] | None = None,
+    public_safe: bool = True,
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
 ) -> PortalWavePreparationResult:
@@ -1881,13 +1885,15 @@ def prepare_portal_wave(
     effective_excluded = tuple(
         dict.fromkeys((*excluded_tuple, *unsupported_queued))
     )
-    corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+    corpus = load_portfolio_corpus(corpus_path, public_safe=public_safe)
+    if not public_safe:
+        validate_complete_repository_inventory(corpus)
     registry = load_project_snapshot(projects_path)
     binding_report = bind_wave_to_operator_registry(
         wave,
         corpus,
         registry,
-        public_safe=True,
+        public_safe=public_safe,
     )
 
     portal_plan = plan_portal_wave(
@@ -1954,6 +1960,7 @@ def prepare_portal_wave(
             "occupied_node_slots": dict(
                 sorted(occupied_node_slots_map.items())
             ),
+            "public_safe": public_safe,
         }
     )
 
@@ -2010,6 +2017,7 @@ def prepare_portal_wave(
                 holder=holder,
                 lease_ttl=lease_ttl,
                 allowed_repositories=(record.repository,),
+                public_safe=public_safe,
                 token=token,
                 transport=transport,
                 clock=clock,

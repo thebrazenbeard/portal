@@ -216,6 +216,32 @@ def _reject_duplicate(records: tuple[object, ...], attr: str, kind: str) -> None
         seen.add(value)
 
 
+
+def validate_complete_repository_inventory(
+    corpus: PortfolioCorpusSnapshot,
+) -> None:
+    """Require exact repository membership without requiring private workstreams."""
+
+    if len(corpus.records) != corpus.counts.total:
+        raise ValueError(
+            "complete portfolio corpus must enumerate every repository"
+        )
+    public_records = sum(
+        record.visibility == "public" for record in corpus.records
+    )
+    private_records = sum(
+        record.visibility == "private" for record in corpus.records
+    )
+    if (
+        public_records != corpus.counts.public
+        or private_records != corpus.counts.private
+    ):
+        raise ValueError(
+            "complete portfolio visibility counts do not match records"
+        )
+    if sum(record.archived for record in corpus.records) != corpus.counts.archived:
+        raise ValueError("complete portfolio archived record count mismatch")
+
 def load_portfolio_corpus(
     path: Path,
     *,

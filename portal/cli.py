@@ -45,7 +45,10 @@ from .frontier_currentness import (
     PortalHostFrontierStore,
     frontier_policy_sha256,
 )
-from .live_portfolio import refresh_live_public_portfolio
+from .live_portfolio import (
+    refresh_live_local_portfolio,
+    refresh_live_public_portfolio,
+)
 from .host_bridge import (
     PortalHostBridgeStore,
     PortalHostExecutionAdapter,
@@ -1258,7 +1261,7 @@ def _session_portfolio_paths(
     )
     write_project_registry(live_registry_path, registry)
 
-    live = refresh_live_public_portfolio(
+    live = refresh_live_local_portfolio(
         baseline_corpus_path=corpus_path,
         baseline_wave_path=wave_path,
         repositories=repositories,
@@ -1268,8 +1271,21 @@ def _session_portfolio_paths(
     return live.wave_path, live.corpus_path, live_registry_path
 
 
+
+def _session_portfolio_public_safe(args: argparse.Namespace) -> bool:
+    if getattr(args, "static_projects", False):
+        return True
+    discover_owner = getattr(args, "discover_owner", None)
+    safe_host_live = bool(
+        getattr(args, "host_bridge", False)
+        and getattr(args, "host_frontier_currentness", False)
+    )
+    return not bool(discover_owner or safe_host_live)
+
+
 def _session_projects_path(args: argparse.Namespace) -> Path:
     return _session_portfolio_paths(args)[2]
+
 
 def _session_frontier_currentness(args: argparse.Namespace):
     if not args.host_frontier_currentness:
@@ -1602,6 +1618,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             token=_github_token(),
             occupied_node_slots=occupied_node_slots,
             frontier_currentness_provider=frontier_currentness_provider,
+            public_safe=_session_portfolio_public_safe(args),
         )
         if args.once:
             once_common = dict(common)
@@ -1703,6 +1720,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             occupied_node_slots=occupied_node_slots,
             frontier_currentness_provider=frontier_currentness_provider,
             execution_adapter=execution_adapter,
+            public_safe=_session_portfolio_public_safe(args),
         )
         controller.save_resume_spec(
             session_id=args.session_id,

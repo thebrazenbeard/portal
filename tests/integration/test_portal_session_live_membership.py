@@ -98,6 +98,7 @@ def test_safe_host_session_auto_refreshes_live_membership(
     assert name == "run"
     assert kwargs["projects_path"] == tmp_path / "projects.live.yaml"
     assert kwargs["projects_path"].exists()
+    assert kwargs["public_safe"] is False
 
 
 def test_safe_host_continue_auto_refreshes_live_membership(
@@ -126,6 +127,7 @@ def test_safe_host_continue_auto_refreshes_live_membership(
     assert name == "continue"
     assert kwargs["projects_path"] == tmp_path / "projects.live.yaml"
     assert kwargs["projects_path"].exists()
+    assert kwargs["public_safe"] is False
 
 
 def test_static_projects_explicitly_disables_safe_host_auto_discovery(
@@ -157,3 +159,4 @@ def test_static_projects_explicitly_disables_safe_host_auto_discovery(
     capsys.readouterr()
     _name, kwargs = FakeSession.calls[0]
     assert kwargs["projects_path"] == ROOT / "registry" / "projects.yaml"
+    assert kwargs["public_safe"] is True

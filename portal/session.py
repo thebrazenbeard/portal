@@ -219,6 +219,7 @@ class PortalCommandSession:
         frontier_currentness_provider: (
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ),
+        public_safe: bool,
         transport: GitHubTransport | None,
         clock: Callable[[], float],
         allow_restart: bool,
@@ -270,6 +271,7 @@ class PortalCommandSession:
             excluded_subjects=excluded_subjects,
             active_subjects=active_subjects,
             occupied_node_slots=occupied_node_slots,
+            public_safe=public_safe,
             transport=transport,
             clock=clock,
         )
@@ -334,6 +336,7 @@ class PortalCommandSession:
         ) = None,
         resume_spec: Mapping[str, object] | None = None,
         execution_adapter: object | None = None,
+        public_safe: bool = True,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
@@ -349,6 +352,7 @@ class PortalCommandSession:
             token=token,
             occupied_node_slots=occupied_node_slots,
             frontier_currentness_provider=frontier_currentness_provider,
+            public_safe=public_safe,
             transport=transport,
             clock=clock,
             allow_restart=True,
@@ -381,6 +385,7 @@ class PortalCommandSession:
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ) = None,
         execution_adapter: object | None = None,
+        public_safe: bool = True,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
@@ -425,6 +430,7 @@ class PortalCommandSession:
             token=token,
             occupied_node_slots=occupied_node_slots,
             frontier_currentness_provider=frontier_currentness_provider,
+            public_safe=public_safe,
             transport=transport,
             clock=clock,
             allow_restart=False,
@@ -1171,6 +1177,7 @@ class PortalCommandSession:
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ) = None,
         execution_adapter: object | None = None,
+        public_safe: bool = True,
         resume_spec: Mapping[str, object] | None = None,
         between_cycles: Callable[[], object] | None = None,
         transport: GitHubTransport | None = None,
@@ -1200,6 +1207,7 @@ class PortalCommandSession:
             lease_ttl=lease_ttl,
             token=token,
             frontier_currentness_provider=frontier_currentness_provider,
+            public_safe=public_safe,
             transport=transport,
             clock=clock,
         )

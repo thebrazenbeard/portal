@@ -106,6 +106,8 @@ Run the command session with the host bridge:
 
     portal run       --session-id portfolio       --nodes path/to/nodes.yaml       --state-db .portal/portal.sqlite3       --host-bridge       --host-node-occupancy       --max-parallel 8
 
+When live membership refresh is enabled by `--discover-owner`, or by the safe host-live path `--host-bridge --host-frontier-currentness`, P.O.R.T.A.L. builds a local runtime corpus/wave that may contain exact private repository names. Those private names stay in local runtime artifacts and the local project registry; the privacy-safe public overlay still records private membership by count only. Newly discovered private repositories enter as `NO_EFFECT` currentness audits, so authenticated visibility never manufactures mutation authority.
+
 P.O.R.T.A.L. performs admission and node placement first. The host adapter then selects an exact qualified route for each admitted packet.
 
 The session durably binds `adapter_id + route_id` before the adapter queues the host dispatch.

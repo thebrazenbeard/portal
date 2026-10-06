@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import portal.live_portfolio as live_portfolio
 from portal.discovery import RepositoryInventoryItem
 from portal.live_portfolio import refresh_live_public_portfolio
 from runner.portfolio_advancement import (
@@ -264,3 +265,66 @@ def test_live_overlay_rejects_missing_discovery_identities(tmp_path: Path) -> No
             observed_at="2026-10-06T11:30:00Z",
             output_dir=tmp_path / "live",
         )
+
+
+def test_live_local_overlay_keeps_private_repositories_runnable_only_locally(
+    tmp_path: Path,
+) -> None:
+    corpus_path, wave_path = _baseline(tmp_path)
+    result = live_portfolio.refresh_live_local_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=(
+            _repo("alpha"),
+            _repo("beta"),
+            _repo("secret", private=True),
+            _repo("private-archived", private=True, archived=True),
+        ),
+        observed_at="2026-10-06T19:20:00Z",
+        output_dir=tmp_path / "live-local",
+    )
+
+    corpus = load_portfolio_corpus(result.corpus_path)
+    wave = load_advancement_wave(result.wave_path)
+    validate_wave_against_corpus(wave, corpus, public_safe=False)
+
+    assert corpus.counts.total == 4
+    assert corpus.counts.public == 2
+    assert corpus.counts.private == 2
+    assert {record.repository for record in corpus.records} == {
+        "thebrazenbeard/alpha",
+        "thebrazenbeard/beta",
+        "thebrazenbeard/secret",
+        "thebrazenbeard/private-archived",
+    }
+    by_repo = {record.repository: record for record in corpus.records}
+    assert by_repo["thebrazenbeard/secret"].visibility == "private"
+    assert by_repo["thebrazenbeard/private-archived"].archived is True
+
+    items = {
+        item.repositories[0]: item
+        for item in wave.items
+        if item.subject_kind == "repository"
+    }
+    secret = items["thebrazenbeard/secret"]
+    assert secret.action == "CURRENTNESS_AUDIT"
+    assert secret.effect_ceiling == "NO_EFFECT"
+    assert secret.execution_state == "QUEUED"
+    private_archived = items["thebrazenbeard/private-archived"]
+    assert private_archived.execution_state == "HELD"
+    assert private_archived.effect_ceiling == "NO_EFFECT"
+
+    public_result = refresh_live_public_portfolio(
+        baseline_corpus_path=corpus_path,
+        baseline_wave_path=wave_path,
+        repositories=(
+            _repo("alpha"),
+            _repo("beta"),
+            _repo("secret", private=True),
+            _repo("private-archived", private=True, archived=True),
+        ),
+        observed_at="2026-10-06T19:20:00Z",
+        output_dir=tmp_path / "live-public",
+    )
+    assert "secret" not in public_result.corpus_path.read_text(encoding="utf-8")
+    assert "private-archived" not in public_result.wave_path.read_text(encoding="utf-8")
