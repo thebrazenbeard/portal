@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import portal.cli as portal_cli
+from portal.host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
+from portal.route_resolver import PortalRouteAdvertisement
+from portal.session import PortalSessionResult
+from portal.wave_runtime import PortalWavePacket
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _packet() -> PortalWavePacket:
+    return PortalWavePacket(
+        run_id="portfolio::g1",
+        subject_id="portal",
+        repository="thebrazenbeard/portal",
+        ref="work/portal-coordinator-v1",
+        exact_head="a" * 40,
+        node_id="repo-native",
+        lane_id="vera",
+        state="CLAIMED",
+        plan_sha256="b" * 64,
+        fencing_token=1,
+        lineage_id="lineage",
+        work_fingerprint="c" * 64,
+        action="EXECUTE_FRONTIER",
+        effect_ceiling="SOURCE_ONLY",
+        review_gate="EXACT_HEAD_REVIEW",
+        frontier="Advance the bounded frontier.",
+        lead_identity="vera",
+        reviewer_identities=(),
+    )
+
+
+def _queue_host_dispatch(state_db: Path) -> str:
+    store = PortalHostBridgeStore(state_db)
+    route = PortalRouteAdvertisement(
+        adapter_id="github",
+        route_id="repo-native",
+        node_id="repo-native",
+        target_kind="repository",
+        target_id="thebrazenbeard/portal",
+        capabilities=("semantic_work",),
+        effect_capabilities=("SOURCE_ONLY",),
+        authorized_effects=("SOURCE_ONLY",),
+        available=True,
+        attached=True,
+        current=True,
+        preference=50,
+    )
+    store.advertise_route(route, ttl_seconds=60.0, observed_at=100.0)
+    adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
+    result = PortalSessionResult(
+        session_id="portfolio",
+        control_state="RUNNING",
+        generation=1,
+        wave_run_id="portfolio::g1",
+        packets=(_packet(),),
+        summary={"active": 1, "held": 0, "terminal": 0},
+    )
+    binding = adapter.select_routes(result)
+    record = adapter.dispatch(result, binding)[0]
+    dispatch_id = record.evidence_id.removeprefix("host-dispatch:")
+    store.close()
+    return dispatch_id
+
+
+def test_host_advertise_and_routes_cli_round_trip(tmp_path, capsys) -> None:
+    state_db = tmp_path / "portal.sqlite3"
+    code = portal_cli.entrypoint([
+        "host", "advertise",
+        "--state-db", str(state_db),
+        "--adapter-id", "github",
+        "--route-id", "repo-native",
+        "--node-id", "repo-native",
+        "--target-id", "thebrazenbeard/portal",
+        "--capability", "semantic_work",
+        "--effect-capability", "SOURCE_ONLY",
+        "--authorized-effect", "SOURCE_ONLY",
+        "--preference", "50",
+        "--ttl-seconds", "300",
+    ])
+    assert code == 0
+    advertised = json.loads(capsys.readouterr().out)
+    assert advertised["mode"] == "PORTAL_HOST_ROUTE_ADVERTISE_V1"
+    assert advertised["route"]["adapter_id"] == "github"
+
+    code = portal_cli.entrypoint([
+        "host", "routes",
+        "--state-db", str(state_db),
+    ])
+    assert code == 0
+    routes = json.loads(capsys.readouterr().out)
+    assert routes["mode"] == "PORTAL_HOST_ROUTES_V1"
+    assert len(routes["routes"]) == 1
+    assert routes["routes"][0]["route_id"] == "repo-native"
+
+
+def test_host_pending_attempt_and_reconcile_cli_round_trip(
+    tmp_path,
+    capsys,
+) -> None:
+    state_db = tmp_path / "portal.sqlite3"
+    dispatch_id = _queue_host_dispatch(state_db)
+
+    code = portal_cli.entrypoint([
+        "host", "pending",
+        "--state-db", str(state_db),
+        "--session-id", "portfolio",
+    ])
+    assert code == 0
+    pending = json.loads(capsys.readouterr().out)
+    assert pending["mode"] == "PORTAL_HOST_PENDING_V1"
+    assert pending["dispatches"][0]["dispatch_id"] == dispatch_id
+
+    code = portal_cli.entrypoint([
+        "host", "attempt",
+        "--state-db", str(state_db),
+        "--dispatch-id", dispatch_id,
+        "--attempt-id", "github-call-1",
+        "--evidence-id", "github:request:1",
+    ])
+    assert code == 0
+    attempted = json.loads(capsys.readouterr().out)
+    assert attempted["dispatch"]["state"] == "ATTEMPTED"
+
+    code = portal_cli.entrypoint([
+        "host", "reconcile",
+        "--state-db", str(state_db),
+        "--dispatch-id", dispatch_id,
+        "--state", "VERIFIED_COMPLETE",
+        "--evidence-id", "github:commit:deadbeef",
+    ])
+    assert code == 0
+    reconciled = json.loads(capsys.readouterr().out)
+    assert reconciled["dispatch"]["reconciliation_state"] == "VERIFIED_COMPLETE"
+
+
+def test_session_run_host_bridge_passes_execution_adapter(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeSession:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def run(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                session_id=kwargs["session_id"],
+                control_state="RUNNING",
+                generation=1,
+                wave_run_id="portfolio::g1",
+                packets=(),
+                summary={"active": 0, "held": 0, "terminal": 0},
+            )
+
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--host-bridge",
+        "--once",
+    ])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_RUN_V1"
+    assert isinstance(calls[0]["execution_adapter"], PortalHostExecutionAdapter)
+
+
+def test_host_bridge_and_process_worker_modes_are_not_implicitly_mixed(
+    tmp_path,
+    capsys,
+) -> None:
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "portfolio",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--host-bridge",
+        "--worker-backends", str(tmp_path / "workers.yaml"),
+        "--once",
+    ])
+
+    assert code == 2
+    assert "choose host bridge or worker backends" in capsys.readouterr().err
