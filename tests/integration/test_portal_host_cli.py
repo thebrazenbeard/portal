@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import time
+import sys
 from types import SimpleNamespace
 
 import portal.cli as portal_cli
@@ -635,6 +636,195 @@ def test_host_import_snapshot_missing_authority_field_fails_before_any_write(
 
     assert code == 2
     assert "authorized_effects" in capsys.readouterr().err
+
+    assert portal_cli.entrypoint([
+        "host", "routes", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["routes"] == []
+
+    assert portal_cli.entrypoint([
+        "host", "occupancy-status", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["occupied_node_slots"] == {}
+
+
+def test_host_refresh_runs_observation_probe_and_applies_exact_authority(
+    tmp_path,
+    capsys,
+) -> None:
+    probe_script = tmp_path / "probe.py"
+    probe_script.write_text(
+        "import json\n"
+        "print(json.dumps({"
+        "'schema':'PORTAL_HOST_PROBE_RESULT_V1',"
+        "'adapter_id':'workbridge',"
+        "'evidence_id':'probe:workbridge:1',"
+        "'routes':[{'route_id':'lappy:portal','node_id':'lappy',"
+        "'target_kind':'repository','target_id':'thebrazenbeard/portal',"
+        "'capabilities':['semantic_work'],"
+        "'effect_capabilities':['SOURCE_ONLY'],"
+        "'available':True,'attached':True,'current':True,'preference':20}],"
+        "'occupancy':[{'node_id':'lappy','occupied_slots':2}]"
+        "}))\n",
+        encoding="utf-8",
+    )
+    probes = tmp_path / "probes.yaml"
+    probes.write_text(
+        "schema: PORTAL_HOST_COMMAND_PROBES_V1\n"
+        "probes:\n"
+        "  - adapter_id: workbridge\n"
+        f"    command: [{json.dumps(sys.executable)}, {json.dumps(str(probe_script))}]\n",
+        encoding="utf-8",
+    )
+    authority = tmp_path / "authority.yaml"
+    authority.write_text(
+        "schema: PORTAL_HOST_AUTHORITY_V1\n"
+        "grants:\n"
+        "  - adapter_id: workbridge\n"
+        "    route_id: lappy:portal\n"
+        "    node_id: lappy\n"
+        "    target_kind: repository\n"
+        "    target_id: thebrazenbeard/portal\n"
+        "    authorized_effects: [SOURCE_ONLY]\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "refresh",
+        "--state-db", str(state_db),
+        "--probes", str(probes),
+        "--authority", str(authority),
+        "--ttl-seconds", "120",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_HOST_REFRESH_V1"
+    assert payload["probe_count"] == 1
+    assert payload["route_count"] == 1
+    assert payload["occupancy_count"] == 1
+    assert payload["evidence_ids"] == ["probe:workbridge:1"]
+
+    assert portal_cli.entrypoint([
+        "host", "routes", "--state-db", str(state_db),
+    ]) == 0
+    routes = json.loads(capsys.readouterr().out)["routes"]
+    assert routes[0]["adapter_id"] == "workbridge"
+    assert routes[0]["authorized_effects"] == ["SOURCE_ONLY"]
+
+    assert portal_cli.entrypoint([
+        "host", "occupancy-status", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["occupied_node_slots"] == {
+        "lappy": 2
+    }
+
+
+def test_host_refresh_rejects_probe_attempt_to_self_authorize_before_write(
+    tmp_path,
+    capsys,
+) -> None:
+    probe_script = tmp_path / "bad_probe.py"
+    probe_script.write_text(
+        "import json\n"
+        "print(json.dumps({"
+        "'schema':'PORTAL_HOST_PROBE_RESULT_V1',"
+        "'adapter_id':'workbridge',"
+        "'evidence_id':'probe:bad:1',"
+        "'routes':[{'route_id':'lappy:portal','node_id':'lappy',"
+        "'target_kind':'repository','target_id':'thebrazenbeard/portal',"
+        "'capabilities':['semantic_work'],"
+        "'effect_capabilities':['SOURCE_ONLY'],"
+        "'authorized_effects':['SOURCE_ONLY'],"
+        "'available':True,'attached':True,'current':True,'preference':20}],"
+        "'occupancy':[]"
+        "}))\n",
+        encoding="utf-8",
+    )
+    probes = tmp_path / "probes.yaml"
+    probes.write_text(
+        "schema: PORTAL_HOST_COMMAND_PROBES_V1\n"
+        "probes:\n"
+        "  - adapter_id: workbridge\n"
+        f"    command: [{json.dumps(sys.executable)}, {json.dumps(str(probe_script))}]\n",
+        encoding="utf-8",
+    )
+    authority = tmp_path / "authority.yaml"
+    authority.write_text(
+        "schema: PORTAL_HOST_AUTHORITY_V1\n"
+        "grants: []\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "refresh",
+        "--state-db", str(state_db),
+        "--probes", str(probes),
+        "--authority", str(authority),
+    ])
+
+    assert code == 2
+    assert "authorized_effects" in capsys.readouterr().err
+    assert portal_cli.entrypoint([
+        "host", "routes", "--state-db", str(state_db),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["routes"] == []
+
+
+def test_host_refresh_failed_later_probe_does_not_partially_publish(
+    tmp_path,
+    capsys,
+) -> None:
+    valid_script = tmp_path / "valid_probe.py"
+    valid_script.write_text(
+        "import json\n"
+        "print(json.dumps({"
+        "'schema':'PORTAL_HOST_PROBE_RESULT_V1',"
+        "'adapter_id':'alpha',"
+        "'evidence_id':'probe:alpha:1',"
+        "'routes':[{'route_id':'alpha:portal','node_id':'lappy',"
+        "'target_kind':'repository','target_id':'thebrazenbeard/portal',"
+        "'capabilities':['semantic_work'],"
+        "'effect_capabilities':['SOURCE_ONLY'],"
+        "'available':True,'attached':True,'current':True,'preference':10}],"
+        "'occupancy':[{'node_id':'lappy','occupied_slots':1}]"
+        "}))\n",
+        encoding="utf-8",
+    )
+    failing_script = tmp_path / "failing_probe.py"
+    failing_script.write_text(
+        "raise SystemExit(5)\n",
+        encoding="utf-8",
+    )
+    probes = tmp_path / "probes.yaml"
+    probes.write_text(
+        "schema: PORTAL_HOST_COMMAND_PROBES_V1\n"
+        "probes:\n"
+        "  - adapter_id: alpha\n"
+        f"    command: [{json.dumps(sys.executable)}, {json.dumps(str(valid_script))}]\n"
+        "  - adapter_id: beta\n"
+        f"    command: [{json.dumps(sys.executable)}, {json.dumps(str(failing_script))}]\n",
+        encoding="utf-8",
+    )
+    authority = tmp_path / "authority.yaml"
+    authority.write_text(
+        "schema: PORTAL_HOST_AUTHORITY_V1\n"
+        "grants: []\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "refresh",
+        "--state-db", str(state_db),
+        "--probes", str(probes),
+        "--authority", str(authority),
+    ])
+
+    assert code == 2
+    assert "host probe exited with exit code 5" in capsys.readouterr().err
 
     assert portal_cli.entrypoint([
         "host", "routes", "--state-db", str(state_db),

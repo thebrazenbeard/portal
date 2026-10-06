@@ -127,6 +127,39 @@ A host that can already inspect its available adapters may instead emit one tran
 
 The snapshot is host-supplied evidence, not self-authorizing discovery. Every route must explicitly contain `authorized_effects`; an empty list is valid and means the host observed technical capability without granting effect authority. The entire document is validated before mutation, and route/occupancy members are written in one transaction so a stale or conflicting member rolls back the whole snapshot.
 
+For resident hosts that can expose their own live state through commands, P.O.R.T.A.L. can build that snapshot from observation-only probes while keeping authority in a separate file.
+
+Probe manifest:
+
+    schema: PORTAL_HOST_COMMAND_PROBES_V1
+    probes:
+      - adapter_id: workbridge
+        command: ["python", "probe_workbridge.py"]
+        timeout_seconds: 30
+
+Each command must emit one `PORTAL_HOST_PROBE_RESULT_V1` JSON object containing its adapter ID, evidence ID, exact routes, and optional node occupancy. Probe route objects deliberately do not have an `authorized_effects` field. If a probe attempts to include one, the refresh fails before durable host state is changed.
+
+Authority manifest:
+
+    schema: PORTAL_HOST_AUTHORITY_V1
+    grants:
+      - adapter_id: workbridge
+        route_id: lappy:portal
+        node_id: lappy
+        target_kind: repository
+        target_id: thebrazenbeard/portal
+        authorized_effects: [SOURCE_ONLY]
+
+Refresh:
+
+    portal host refresh \
+      --state-db .portal/portal.sqlite3 \
+      --probes path/to/probes.yaml \
+      --authority path/to/authority.yaml \
+      --ttl-seconds 300
+
+The authority key is the full exact route identity: adapter, route, node, target kind, and target ID. An unmatched grant does not create a route. A grant cannot authorize an effect the live probe did not report as technically supported. All probes complete before P.O.R.T.A.L. writes the new observation, so a failed later probe cannot partially publish an earlier probe's state. Duplicate node-wide occupancy sources fail closed instead of being summed or guessed.
+
 A usable route must be available, attached, current, match the assigned node and exact target, satisfy required capabilities, be technically capable of the required effect, and carry authority for that effect.
 
 Technical capability does not create authority. Discovery does not create attachment. Availability does not create currentness.

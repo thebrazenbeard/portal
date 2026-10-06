@@ -54,7 +54,9 @@ from .host_bridge import (
     PortalHostExecutionAdapter,
     PortalHostNodeCurrentness,
 )
+from .host_authority import apply_host_authority, load_host_authority
 from .host_driver_registry import load_host_command_drivers
+from .host_probe_registry import load_host_command_probes
 from .host_pump import PortalHostPump
 from .host_snapshot import load_host_capability_snapshot
 from .node_registry import load_execution_nodes
@@ -575,6 +577,22 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         required=True,
     )
+
+    host_refresh = host_subcommands.add_parser(
+        "refresh",
+        help=(
+            "run observation-only host probes, apply separate exact authority, "
+            "and atomically refresh routes plus occupancy"
+        ),
+    )
+    host_refresh.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_refresh.add_argument("--probes", type=Path, required=True)
+    host_refresh.add_argument("--authority", type=Path, required=True)
+    host_refresh.add_argument("--ttl-seconds", type=float, default=300.0)
 
     host_routes = host_subcommands.add_parser(
         "routes",
@@ -2366,6 +2384,51 @@ def _host_import_snapshot_payload(
         "expires_at": result["expires_at"],
     }
 
+
+def _host_refresh_payload(args: argparse.Namespace) -> dict[str, object]:
+    probes = load_host_command_probes(Path(args.probes))
+    grants = load_host_authority(Path(args.authority))
+
+    observed_at = time.time()
+    observed_routes: list[PortalRouteAdvertisement] = []
+    occupancy: dict[str, int] = {}
+    evidence_ids: list[str] = []
+    for adapter_id, probe in sorted(probes.items()):
+        result = probe.observe()
+        if result.adapter_id != adapter_id:
+            raise ValueError("host probe adapter identity changed during refresh")
+        evidence_ids.append(result.evidence_id)
+        observed_routes.extend(result.routes)
+        for node_id, occupied_slots in result.occupancy:
+            if node_id in occupancy:
+                raise ValueError(
+                    "duplicate node occupancy across host probes"
+                )
+            occupancy[node_id] = occupied_slots
+
+    routes = apply_host_authority(tuple(observed_routes), grants)
+
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        published = store.advertise_snapshot(
+            routes,
+            occupancy,
+            ttl_seconds=args.ttl_seconds,
+            observed_at=observed_at,
+        )
+    finally:
+        store.close()
+
+    return {
+        "mode": "PORTAL_HOST_REFRESH_V1",
+        "probe_count": len(probes),
+        "route_count": len(published["routes"]),
+        "occupancy_count": len(published["occupancy"]),
+        "evidence_ids": evidence_ids,
+        "observed_at": published["observed_at"],
+        "expires_at": published["expires_at"],
+    }
+
 def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -2703,6 +2766,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_advertise_projects_payload(args)
             elif args.host_command == "import-snapshot":
                 payload = _host_import_snapshot_payload(args)
+            elif args.host_command == "refresh":
+                payload = _host_refresh_payload(args)
             elif args.host_command == "routes":
                 payload = _host_routes_payload(args)
             elif args.host_command == "occupancy":
