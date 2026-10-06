@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS portal_host_routes (
     )
 );
 
+CREATE TABLE IF NOT EXISTS portal_host_node_occupancy (
+    node_id TEXT PRIMARY KEY,
+    occupied_slots INTEGER NOT NULL CHECK (occupied_slots >= 0),
+    observed_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS portal_host_dispatches (
     dispatch_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -209,6 +216,93 @@ class PortalHostBridgeStore:
             )
             for row in rows
         )
+
+    def advertise_node_occupancy(
+        self,
+        *,
+        node_id: str,
+        occupied_slots: int,
+        ttl_seconds: float,
+        observed_at: float | None = None,
+    ) -> dict[str, object]:
+        node_id = _required(node_id, "node_id")
+        if type(occupied_slots) is not int or occupied_slots < 0:
+            raise ValueError("occupied_slots must be a non-negative integer")
+        if ttl_seconds <= 0:
+            raise ValueError("host occupancy ttl_seconds must be positive")
+        observed = float(time.time() if observed_at is None else observed_at)
+        expires = observed + float(ttl_seconds)
+
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                """
+                SELECT occupied_slots, observed_at, expires_at
+                FROM portal_host_node_occupancy
+                WHERE node_id = ?
+                """,
+                (node_id,),
+            ).fetchone()
+            if row is not None:
+                existing_observed = float(row["observed_at"])
+                existing_slots = int(row["occupied_slots"])
+                if observed < existing_observed:
+                    raise ValueError("stale host occupancy observation")
+                if observed == existing_observed:
+                    if occupied_slots != existing_slots:
+                        raise ValueError(
+                            "conflicting host occupancy observation"
+                        )
+                    self.connection.commit()
+                    return {
+                        "node_id": node_id,
+                        "occupied_slots": existing_slots,
+                        "observed_at": existing_observed,
+                        "expires_at": float(row["expires_at"]),
+                    }
+
+            self.connection.execute(
+                """
+                INSERT INTO portal_host_node_occupancy(
+                    node_id, occupied_slots, observed_at, expires_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    occupied_slots = excluded.occupied_slots,
+                    observed_at = excluded.observed_at,
+                    expires_at = excluded.expires_at
+                """,
+                (node_id, occupied_slots, observed, expires),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return {
+            "node_id": node_id,
+            "occupied_slots": occupied_slots,
+            "observed_at": observed,
+            "expires_at": expires,
+        }
+
+    def active_node_occupancy(
+        self,
+        *,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        observed = float(time.time() if now is None else now)
+        rows = self.connection.execute(
+            """
+            SELECT node_id, occupied_slots
+            FROM portal_host_node_occupancy
+            WHERE expires_at > ?
+            ORDER BY node_id
+            """,
+            (observed,),
+        ).fetchall()
+        return {
+            str(row["node_id"]): int(row["occupied_slots"])
+            for row in rows
+        }
 
     @staticmethod
     def _dispatch_payload(
@@ -539,6 +633,44 @@ class PortalHostBridgeStore:
             self.connection.rollback()
             raise
         return self.load_dispatch(dispatch_id)
+
+
+class PortalHostNodeCurrentness:
+    """Fail-closed node occupancy supplied by the external execution host."""
+
+    def __init__(
+        self,
+        *,
+        store: PortalHostBridgeStore,
+        required_node_ids: Iterable[str],
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        required: set[str] = set()
+        for raw_node_id in required_node_ids:
+            node_id = _required(raw_node_id, "required node_id")
+            if node_id in required:
+                raise ValueError(f"duplicate required host occupancy node: {node_id}")
+            required.add(node_id)
+        self.store = store
+        self.required_node_ids = tuple(sorted(required))
+        self.clock = clock
+
+    def __call__(self) -> dict[str, int]:
+        active = self.store.active_node_occupancy(now=float(self.clock()))
+        missing = [
+            node_id
+            for node_id in self.required_node_ids
+            if node_id not in active
+        ]
+        if missing:
+            raise ValueError(
+                "missing current host occupancy for node: "
+                + ", ".join(missing)
+            )
+        return {
+            node_id: active[node_id]
+            for node_id in self.required_node_ids
+        }
 
 
 class PortalHostExecutionAdapter:
