@@ -31,6 +31,7 @@ from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _INERT_ACTIONS = {"PRESERVE_ONLY", "REFRESH_IF_REACTIVATED"}
+_CLAIMABLE_EFFECT_CEILINGS = {"NO_EFFECT", "SOURCE_ONLY"}
 
 
 @dataclass(frozen=True)
@@ -210,8 +211,11 @@ def verify_bound_plan_subject(
         raise ValueError("bound plan bridge V1 supports repository subjects only")
     if item.execution_state != "QUEUED":
         raise ValueError("bound plan subject is not queued")
-    if item.action in _INERT_ACTIONS or item.effect_ceiling != "SOURCE_ONLY":
-        raise ValueError("bound plan subject is not source-execution admissible")
+    if (
+        item.action in _INERT_ACTIONS
+        or item.effect_ceiling not in _CLAIMABLE_EFFECT_CEILINGS
+    ):
+        raise ValueError("bound plan subject is not claim-admissible")
 
     expected_selected = _selected_item_payload(item)
     if dict(selected) != expected_selected:
