@@ -183,11 +183,22 @@ def verify_bound_plan_subject(
     if wave_binding.get("corpus_binding") != dict(wave.corpus_binding):
         raise ValueError("admission plan corpus binding mismatch")
 
-    expected_blob = str(wave.corpus_binding.get("git_blob_sha", ""))
-    if not expected_blob:
-        raise ValueError("wave corpus git blob binding is missing")
-    if _git_blob_sha_for_path(corpus_path) != expected_blob:
-        raise ValueError("local corpus does not match wave git blob binding")
+    binding_kind = wave.corpus_binding.get("binding_kind")
+    if binding_kind == "LOCAL_SHA256":
+        expected_sha256 = str(wave.corpus_binding.get("sha256", ""))
+        if _SHA256.fullmatch(expected_sha256) is None:
+            raise ValueError("wave local corpus sha256 binding is invalid")
+        observed_sha256 = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+        if not hmac.compare_digest(expected_sha256, observed_sha256):
+            raise ValueError("local corpus sha256 does not match wave binding")
+    elif binding_kind in (None, "GIT_BLOB"):
+        expected_blob = str(wave.corpus_binding.get("git_blob_sha", ""))
+        if not expected_blob:
+            raise ValueError("wave corpus git blob binding is missing")
+        if _git_blob_sha_for_path(corpus_path) != expected_blob:
+            raise ValueError("local corpus does not match wave git blob binding")
+    else:
+        raise ValueError("unsupported wave corpus binding kind")
     corpus = load_portfolio_corpus(corpus_path, public_safe=True)
 
     selected_raw = plan_payload.get("selected")
