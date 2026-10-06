@@ -1109,10 +1109,10 @@ class PortalCommandSession:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ) -> PortalRefillResult:
-        if type(max_cycles) is not int or max_cycles < 1:
-            raise ValueError("max_cycles must be a positive integer")
-        if type(max_idle_cycles) is not int or max_idle_cycles < 1:
-            raise ValueError("max_idle_cycles must be a positive integer")
+        if type(max_cycles) is not int or max_cycles < 0:
+            raise ValueError("max_cycles must be a non-negative integer")
+        if type(max_idle_cycles) is not int or max_idle_cycles < 0:
+            raise ValueError("max_idle_cycles must be a non-negative integer")
         if poll_seconds < 0:
             raise ValueError("poll_seconds must be non-negative")
         if occupied_node_slots is not None and node_occupancy_provider is not None:
@@ -1170,7 +1170,8 @@ class PortalCommandSession:
                 summary=dict(initial["summary"]),
             )
 
-        for _ in range(1, max_cycles):
+        cycle_count = 1
+        while max_cycles == 0 or cycle_count < max_cycles:
             current = self.status(session_id)
             if current["control_state"] == "STOPPED":
                 stop_reason = "STOPPED"
@@ -1209,6 +1210,7 @@ class PortalCommandSession:
 
             advanced = self.continue_run(**generation_common())
             cycles.append(advanced)
+            cycle_count += 1
             if execution_adapter is not None:
                 self._dispatch_generation(
                     session_id=session_id,
@@ -1233,7 +1235,10 @@ class PortalCommandSession:
                 idle_cycles = 0
             else:
                 idle_cycles += 1
-                if idle_cycles >= max_idle_cycles:
+                if (
+                    max_idle_cycles > 0
+                    and idle_cycles >= max_idle_cycles
+                ):
                     stop_reason = "WAITING_ACTIVE"
                     break
 
