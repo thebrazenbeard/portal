@@ -167,7 +167,12 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=ROOT / "topology" / "dependencies.yaml",
     )
-    run.add_argument("--nodes", type=Path, required=True)
+    run.add_argument("--nodes", type=Path)
+    run.add_argument(
+        "--resume",
+        action="store_true",
+        help="restart from the durable non-secret configuration of an existing session",
+    )
     run.add_argument(
         "--state-db",
         type=Path,
@@ -1397,16 +1402,26 @@ def _apply_session_resume_spec(
 
 
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
-    projects_path = _session_projects_path(args)
-    nodes = load_execution_nodes(Path(args.nodes))
-    execution_adapter = _session_execution_adapter(args, nodes)
-    occupied_node_slots, node_occupancy_provider = _session_occupancy(
-        args,
-        nodes,
-    )
-    frontier_currentness_provider = _session_frontier_currentness(args)
     controller = PortalCommandSession(Path(args.state_db))
+    execution_adapter = None
     try:
+        if args.resume:
+            spec = controller.load_resume_spec(
+                session_id=args.session_id,
+                holder=args.holder,
+            )
+            _apply_session_resume_spec(args, spec)
+        elif args.nodes is None:
+            raise ValueError("--nodes is required unless --resume")
+
+        projects_path = _session_projects_path(args)
+        nodes = load_execution_nodes(Path(args.nodes))
+        execution_adapter = _session_execution_adapter(args, nodes)
+        occupied_node_slots, node_occupancy_provider = _session_occupancy(
+            args,
+            nodes,
+        )
+        frontier_currentness_provider = _session_frontier_currentness(args)
         common = dict(
             session_id=args.session_id,
             holder=args.holder,
