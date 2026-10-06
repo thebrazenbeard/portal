@@ -248,6 +248,7 @@ def test_live_overlay_rejects_missing_discovery_identities(tmp_path: Path) -> No
     corpus_path, wave_path = _baseline(tmp_path)
     payload = json.loads(wave_path.read_text(encoding="utf-8"))
     payload["identities"].pop("DISCOVERY")
+    payload["identities"]["OTHER"] = "schema-valid alternate identity"
     wave_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     import pytest
