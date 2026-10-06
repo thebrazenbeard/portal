@@ -535,3 +535,63 @@ def test_session_continue_resume_reconstructs_operational_inputs(
     assert kwargs["verifier"] == "vera-review"
     assert kwargs["occupied_node_slots"] == {"worklaptop": 0}
 
+def test_session_run_resume_restarts_from_durable_configuration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    FakeSession.calls.clear()
+    nodes_path = ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"
+    FakeSession.resume_spec = {
+        "schema": "PORTAL_COMMAND_SESSION_RESUME_V1",
+        "holder": "vera",
+        "wave": str(ROOT / "portfolio" / "advancement_wave.public.json"),
+        "corpus": str(ROOT / "portfolio" / "corpus.public.json"),
+        "projects": str(ROOT / "registry" / "projects.yaml"),
+        "discover_owner": None,
+        "write_live_registry": None,
+        "static_projects": True,
+        "nodes": str(nodes_path),
+        "lease_ttl": 222.0,
+        "max_parallel": 3,
+        "max_per_identity": 2,
+        "max_per_family": 2,
+        "max_per_lane": 1,
+        "verifier": "vera-review",
+        "host_bridge": False,
+        "worker_backends": None,
+        "workspace_root": str(tmp_path / "workers"),
+        "worker_holder_prefix": "portal-host",
+        "delivery_lease_ttl": 120.0,
+        "occupied_nodes": ["worklaptop=0"],
+        "project_runner_tasks": [],
+        "host_node_occupancy": False,
+        "host_frontier_currentness": False,
+    }
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+
+    try:
+        code = portal_cli.entrypoint([
+            "run",
+            "--state-db", str(tmp_path / "portal.sqlite3"),
+            "--session-id", "portfolio",
+            "--resume",
+            "--once",
+        ])
+    finally:
+        FakeSession.resume_spec = None
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == (
+        "PORTAL_COMMAND_SESSION_RUN_V1"
+    )
+    assert FakeSession.calls[0][0] == "load_resume_spec"
+    name, kwargs = next(
+        item for item in FakeSession.calls if item[0] == "run"
+    )
+    assert name == "run"
+    assert kwargs["holder"] == "vera"
+    assert kwargs["lease_ttl"] == 222.0
+    assert kwargs["budget"].max_parallel == 3
+    assert kwargs["occupied_node_slots"] == {"worklaptop": 0}
+
