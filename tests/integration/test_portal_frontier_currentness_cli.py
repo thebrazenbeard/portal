@@ -137,3 +137,59 @@ def test_session_continue_can_require_host_frontier_currentness(
     name, kwargs = FakeSession.calls[0]
     assert name == "continue"
     assert callable(kwargs["frontier_currentness_provider"])
+
+def test_host_frontier_status_can_classify_wave_currentness(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    state_db = tmp_path / "portal.sqlite3"
+    wave = ROOT / "portfolio" / "advancement_wave.public.json"
+
+    code = portal_cli.entrypoint([
+        "host", "frontier-advertise",
+        "--state-db", str(state_db),
+        "--wave", str(wave),
+        "--subject-id", "project-runner",
+        "--ref", "main",
+        "--exact-head", "a" * 40,
+        "--ttl-seconds", "300",
+    ])
+    assert code == 0
+    capsys.readouterr()
+
+    class FakeTransport:
+        def __init__(self, *, token=None):
+            pass
+
+        def read_ref(self, repository, ref):
+            if repository == "thebrazenbeard/project-runner":
+                return "b" * 40
+            return "a" * 40
+
+    monkeypatch.setattr(
+        portal_cli,
+        "GitHubRestTransport",
+        FakeTransport,
+    )
+
+    code = portal_cli.entrypoint([
+        "host", "frontier-status",
+        "--state-db", str(state_db),
+        "--wave", str(wave),
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    classification = payload["classification"]
+    project_runner = next(
+        item
+        for item in classification["excluded_subjects"]
+        if item["subject_id"] == "project-runner"
+    )
+    assert project_runner == {
+        "subject_kind": "repository",
+        "subject_id": "project-runner",
+        "reason": "STALE_FRONTIER_HEAD",
+    }
+
