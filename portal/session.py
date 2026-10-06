@@ -341,11 +341,41 @@ class PortalCommandSession:
         budget: WaveExecutionBudget,
         lease_ttl: float,
         token: str | None,
+        verifier: str | None = None,
         occupied_node_slots: Mapping[str, int] | None = None,
         execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
+        if verifier is not None:
+            verifier = verifier.strip()
+            if not verifier:
+                raise ValueError("verifier is required when reconciliation is enabled")
+            current = self.status(session_id)
+            if current["control_state"] == "STOPPED":
+                raise ValueError("Portal session is stopped; use run to restart it")
+
+            if execution_adapter is not None:
+                reconcile_adapter = getattr(execution_adapter, "reconcile", None)
+                if reconcile_adapter is not None:
+                    records = tuple(reconcile_adapter(current))
+                    if records:
+                        self.record_reconciliations(
+                            session_id=session_id,
+                            holder=holder,
+                            records=records,
+                            clock=clock,
+                        )
+
+            self.reconcile_active(
+                session_id=session_id,
+                holder=holder,
+                verifier=verifier,
+                token=token,
+                transport=transport,
+                clock=clock,
+            )
+
         result = self._advance(
             session_id=session_id,
             holder=holder,
