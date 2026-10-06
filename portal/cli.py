@@ -149,6 +149,14 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument(
+        "--static-projects",
+        action="store_true",
+        help=(
+            "use --projects exactly as supplied instead of refreshing live "
+            "membership for the safe host-session path"
+        ),
+    )
+    run.add_argument(
         "--workers",
         type=Path,
         default=ROOT / "registry" / "workers.yaml",
@@ -276,6 +284,16 @@ def _parser() -> argparse.ArgumentParser:
         "--projects",
         type=Path,
         default=ROOT / "registry" / "projects.yaml",
+    )
+    continue_cmd.add_argument("--discover-owner")
+    continue_cmd.add_argument("--write-live-registry", type=Path)
+    continue_cmd.add_argument(
+        "--static-projects",
+        action="store_true",
+        help=(
+            "use --projects exactly as supplied instead of refreshing live "
+            "membership for the safe host-session path"
+        ),
     )
     continue_cmd.add_argument("--nodes", type=Path, required=True)
     continue_cmd.add_argument("--lease-ttl", type=float, default=300.0)
@@ -994,6 +1012,69 @@ def _session_occupancy(
     return None, provider
 
 
+def _inferred_wave_owner(wave_path: Path) -> str:
+    wave = load_advancement_wave(Path(wave_path))
+    owners: set[str] = set()
+    canonical: dict[str, str] = {}
+    for item in wave.items:
+        if item.subject_kind != "repository":
+            continue
+        for repository in item.repositories:
+            owner, separator, _name = repository.partition("/")
+            if not separator or not owner:
+                raise ValueError("wave repository must use owner/name")
+            key = owner.casefold()
+            owners.add(key)
+            canonical.setdefault(key, owner)
+    if len(owners) != 1:
+        raise ValueError(
+            "cannot infer one portfolio owner from wave; "
+            "use --discover-owner or --static-projects"
+        )
+    key = next(iter(owners))
+    return canonical[key]
+
+
+def _session_projects_path(args: argparse.Namespace) -> Path:
+    projects_path = Path(args.projects)
+    discover_owner = getattr(args, "discover_owner", None)
+    if getattr(args, "static_projects", False):
+        if discover_owner:
+            raise ValueError(
+                "--static-projects cannot be combined with --discover-owner"
+            )
+        return projects_path
+
+    safe_host_live = bool(
+        getattr(args, "host_bridge", False)
+        and getattr(args, "host_frontier_currentness", False)
+    )
+    if not discover_owner and not safe_host_live:
+        return projects_path
+
+    owner = (
+        str(discover_owner).strip()
+        if discover_owner
+        else _inferred_wave_owner(Path(args.wave))
+    )
+    if not owner:
+        raise ValueError("portfolio owner is required")
+
+    curated = load_project_snapshot(projects_path)
+    snapshot = discover_live_project_registry(
+        owner=owner,
+        curated_projects=curated.projects,
+        token=_github_token(),
+    )
+    output = (
+        Path(args.write_live_registry)
+        if getattr(args, "write_live_registry", None) is not None
+        else Path(args.state_db).parent / "projects.live.yaml"
+    )
+    write_project_registry(output, snapshot)
+    return output
+
+
 def _session_frontier_currentness(args: argparse.Namespace):
     if not args.host_frontier_currentness:
         return None
@@ -1072,7 +1153,7 @@ def _session_result_payload(
 
 
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
-    projects_path = _wave_projects_path(args)
+    projects_path = _session_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
     occupied_node_slots, node_occupancy_provider = _session_occupancy(
@@ -1124,6 +1205,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
+    projects_path = _session_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
     execution_adapter = _session_execution_adapter(args, nodes)
     occupied_node_slots, node_occupancy_provider = _session_occupancy(
@@ -1140,7 +1222,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             holder=args.holder,
             wave_path=Path(args.wave),
             corpus_path=Path(args.corpus),
-            projects_path=Path(args.projects),
+            projects_path=projects_path,
             nodes=nodes,
             budget=_session_budget(args),
             lease_ttl=args.lease_ttl,
