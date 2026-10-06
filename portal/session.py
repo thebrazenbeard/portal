@@ -381,7 +381,6 @@ class PortalCommandSession:
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ) = None,
         execution_adapter: object | None = None,
-        resume_spec: Mapping[str, object] | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> PortalSessionResult:
@@ -1172,6 +1171,7 @@ class PortalCommandSession:
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ) = None,
         execution_adapter: object | None = None,
+        resume_spec: Mapping[str, object] | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
