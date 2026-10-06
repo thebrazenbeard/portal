@@ -33,6 +33,7 @@ from .discovery import (
     discover_live_project_registry,
     write_project_registry,
 )
+from .host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
 from .node_registry import load_execution_nodes
 from .process_adapter import (
     PortalProposalProcessAdapter,
@@ -43,6 +44,7 @@ from .runtime import (
     PortalRunStore,
     run_portal_until_idle,
 )
+from .route_resolver import PortalRouteAdvertisement
 from .session import PortalCommandSession
 from .wave_runtime import (
     PortalWaveStore,
@@ -169,6 +171,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--max-per-family", type=int, default=2)
     run.add_argument("--max-per-lane", type=int, default=2)
     run.add_argument("--verifier", default="vera")
+    run.add_argument(
+        "--host-bridge",
+        action="store_true",
+        help="queue admitted work for an external ChatGPT/plugin host",
+    )
     run.add_argument("--worker-backends", type=Path)
     run.add_argument(
         "--workspace-root",
@@ -237,6 +244,12 @@ def _parser() -> argparse.ArgumentParser:
     continue_cmd.add_argument("--max-per-identity", type=int, default=2)
     continue_cmd.add_argument("--max-per-family", type=int, default=2)
     continue_cmd.add_argument("--max-per-lane", type=int, default=2)
+    continue_cmd.add_argument("--verifier", default="vera")
+    continue_cmd.add_argument(
+        "--host-bridge",
+        action="store_true",
+        help="queue admitted work for an external ChatGPT/plugin host",
+    )
     continue_cmd.add_argument("--worker-backends", type=Path)
     continue_cmd.add_argument(
         "--workspace-root",
@@ -293,6 +306,109 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(".portal/portal.sqlite3"),
     )
     stop.add_argument("--holder", default="vera")
+
+    host = subcommands.add_parser(
+        "host",
+        help="manage durable external host routes and dispatch evidence",
+    )
+    host_subcommands = host.add_subparsers(
+        dest="host_command",
+        required=True,
+    )
+
+    host_advertise = host_subcommands.add_parser(
+        "advertise",
+        help="advertise one current target-bound host execution route",
+    )
+    host_advertise.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_advertise.add_argument("--adapter-id", required=True)
+    host_advertise.add_argument("--route-id", required=True)
+    host_advertise.add_argument("--node-id", required=True)
+    host_advertise.add_argument("--target-kind", default="repository")
+    host_advertise.add_argument("--target-id", required=True)
+    host_advertise.add_argument(
+        "--capability",
+        action="append",
+        required=True,
+        dest="capabilities",
+    )
+    host_advertise.add_argument(
+        "--effect-capability",
+        action="append",
+        required=True,
+        dest="effect_capabilities",
+    )
+    host_advertise.add_argument(
+        "--authorized-effect",
+        action="append",
+        required=True,
+        dest="authorized_effects",
+    )
+    host_advertise.add_argument("--preference", type=int, default=0)
+    host_advertise.add_argument("--ttl-seconds", type=float, default=300.0)
+    host_advertise.add_argument("--unavailable", action="store_true")
+    host_advertise.add_argument("--detached", action="store_true")
+    host_advertise.add_argument("--stale", action="store_true")
+
+    host_routes = host_subcommands.add_parser(
+        "routes",
+        help="show non-expired host route advertisements",
+    )
+    host_routes.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+
+    host_pending = host_subcommands.add_parser(
+        "pending",
+        help="show exact host dispatches not yet marked attempted",
+    )
+    host_pending.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_pending.add_argument("--session-id")
+
+    host_attempt = host_subcommands.add_parser(
+        "attempt",
+        help="durably cross the effect boundary before invoking a host route",
+    )
+    host_attempt.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_attempt.add_argument("--dispatch-id", required=True)
+    host_attempt.add_argument("--attempt-id", required=True)
+    host_attempt.add_argument("--evidence-id", required=True)
+
+    host_reconcile = host_subcommands.add_parser(
+        "reconcile",
+        help="record host-owned execution reconciliation evidence",
+    )
+    host_reconcile.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_reconcile.add_argument("--dispatch-id", required=True)
+    host_reconcile.add_argument(
+        "--state",
+        choices=(
+            "IN_PROGRESS",
+            "OUTCOME_UNKNOWN",
+            "VERIFIED_COMPLETE",
+            "VERIFIED_HELD",
+        ),
+        required=True,
+    )
+    host_reconcile.add_argument("--evidence-id", required=True)
 
     wave = subcommands.add_parser(
         "wave",
@@ -668,6 +784,12 @@ def _session_execution_adapter(
     args: argparse.Namespace,
     nodes,
 ):
+    if args.host_bridge and args.worker_backends is not None:
+        raise ValueError("choose host bridge or worker backends, not both")
+    if args.host_bridge:
+        return PortalHostExecutionAdapter(
+            store=PortalHostBridgeStore(Path(args.state_db)),
+        )
     if args.worker_backends is None:
         return None
 
@@ -740,6 +862,8 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             )
     finally:
         controller.close()
+        if isinstance(execution_adapter, PortalHostExecutionAdapter):
+            execution_adapter.store.close()
     return _session_result_payload(
         mode="PORTAL_COMMAND_SESSION_RUN_V1",
         result=result,
@@ -761,11 +885,14 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             budget=_session_budget(args),
             lease_ttl=args.lease_ttl,
             token=_github_token(),
+            verifier=args.verifier,
             occupied_node_slots=_occupied_node_slots(args.occupied_nodes),
             execution_adapter=execution_adapter,
         )
     finally:
         controller.close()
+        if isinstance(execution_adapter, PortalHostExecutionAdapter):
+            execution_adapter.store.close()
     return _session_result_payload(
         mode="PORTAL_COMMAND_SESSION_CONTINUE_V1",
         result=result,
@@ -1219,6 +1346,91 @@ def _ecosystem_propose_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_advertise_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        route = PortalRouteAdvertisement(
+            adapter_id=args.adapter_id,
+            route_id=args.route_id,
+            node_id=args.node_id,
+            target_kind=args.target_kind,
+            target_id=args.target_id,
+            capabilities=tuple(args.capabilities),
+            effect_capabilities=tuple(args.effect_capabilities),
+            authorized_effects=tuple(args.authorized_effects),
+            available=not args.unavailable,
+            attached=not args.detached,
+            current=not args.stale,
+            preference=args.preference,
+        )
+        store.advertise_route(
+            route,
+            ttl_seconds=args.ttl_seconds,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_ROUTE_ADVERTISE_V1",
+        "route": asdict(route),
+    }
+
+
+def _host_routes_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        routes = store.active_routes()
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_ROUTES_V1",
+        "routes": [asdict(route) for route in routes],
+    }
+
+
+def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        dispatches = store.pending_dispatches(session_id=args.session_id)
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_PENDING_V1",
+        "dispatches": list(dispatches),
+    }
+
+
+def _host_attempt_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        dispatch = store.mark_attempted(
+            dispatch_id=args.dispatch_id,
+            attempt_id=args.attempt_id,
+            evidence_id=args.evidence_id,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_ATTEMPT_V1",
+        "dispatch": dispatch,
+    }
+
+
+def _host_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        dispatch = store.record_reconciliation(
+            dispatch_id=args.dispatch_id,
+            state=args.state,
+            evidence_id=args.evidence_id,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_RECONCILE_V1",
+        "dispatch": dispatch,
+    }
+
+
 def _ecosystem_status_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalEcosystemStore(Path(args.state_db))
     try:
@@ -1250,6 +1462,20 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
             payload = _complete_payload(args)
         elif args.command == "stop":
             payload = _stop_payload(args)
+        elif args.command == "host":
+            if args.host_command == "advertise":
+                payload = _host_advertise_payload(args)
+            elif args.host_command == "routes":
+                payload = _host_routes_payload(args)
+            elif args.host_command == "pending":
+                payload = _host_pending_payload(args)
+            elif args.host_command == "attempt":
+                payload = _host_attempt_payload(args)
+            elif args.host_command == "reconcile":
+                payload = _host_reconcile_payload(args)
+            else:
+                parser.error("unsupported host command")
+                return 2
         elif args.command == "wave":
             if args.wave_command == "prepare":
                 payload = _wave_prepare_payload(args)
