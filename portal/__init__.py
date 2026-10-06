@@ -6,6 +6,7 @@ from .adapters import (
     PortalRouteBinding,
 )
 from .coordinator import plan_portal_wave
+from .diagnostics import build_host_diagnostics
 from .host_bridge import (
     PortalHostBridgeStore,
     PortalHostExecutionAdapter,
@@ -95,6 +96,7 @@ __all__ = [
     "PortalWavePreparationResult",
     "PortalWaveStore",
     "RepositoryInventoryItem",
+    "build_host_diagnostics",
     "build_live_project_registry",
     "discover_live_project_registry",
     "plan_portal_wave",
