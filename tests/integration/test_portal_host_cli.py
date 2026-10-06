@@ -354,3 +354,87 @@ def test_host_occupancy_missing_unsourced_node_fails_closed(
     assert code == 2
     assert "missing current host occupancy for node: lappy" in capsys.readouterr().err
 
+
+
+def test_host_pump_cli_loads_manifest_and_runs_existing_pump(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    state_db = tmp_path / "portal.sqlite3"
+    drivers_path = tmp_path / "drivers.yaml"
+    drivers_path.write_text(
+        "schema: PORTAL_HOST_COMMAND_DRIVERS_V1\ndrivers: []\n",
+        encoding="utf-8",
+    )
+    fake_drivers = {"workbridge": object()}
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        portal_cli,
+        "load_host_command_drivers",
+        lambda path: (
+            calls.append({"drivers_path": path}) or fake_drivers
+        ),
+        raising=False,
+    )
+
+    class FakePump:
+        def __init__(self, *, store, drivers):
+            calls.append({"store": store, "drivers": drivers})
+
+        def run_once(self, *, session_id=None, max_dispatches=None):
+            calls.append(
+                {
+                    "session_id": session_id,
+                    "max_dispatches": max_dispatches,
+                }
+            )
+            return SimpleNamespace(
+                items=(
+                    SimpleNamespace(
+                        dispatch_id="dispatch-1",
+                        adapter_id="workbridge",
+                        route_id="lappy",
+                        state="VERIFIED_COMPLETE",
+                        evidence_id="receipt-1",
+                        reason=None,
+                    ),
+                ),
+                attempted=1,
+                verified_complete=1,
+                verified_held=0,
+                in_progress=0,
+                outcome_unknown=0,
+                no_driver=0,
+                race_lost=0,
+                route_unqualified=0,
+            )
+
+    monkeypatch.setattr(
+        portal_cli,
+        "PortalHostPump",
+        FakePump,
+        raising=False,
+    )
+
+    code = portal_cli.entrypoint([
+        "host", "pump",
+        "--state-db", str(state_db),
+        "--drivers", str(drivers_path),
+        "--session-id", "portfolio",
+        "--max-dispatches", "2",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_HOST_PUMP_V1"
+    assert payload["attempted"] == 1
+    assert payload["verified_complete"] == 1
+    assert payload["items"][0]["dispatch_id"] == "dispatch-1"
+    assert calls[0] == {"drivers_path": drivers_path}
+    assert calls[1]["drivers"] is fake_drivers
+    assert calls[2] == {
+        "session_id": "portfolio",
+        "max_dispatches": 2,
+    }
