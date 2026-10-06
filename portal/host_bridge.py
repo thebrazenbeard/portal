@@ -543,6 +543,37 @@ class PortalHostBridgeStore:
             ).fetchall()
         return tuple(self._row_payload(row) for row in rows)
 
+    def unresolved_dispatches(
+        self,
+        *,
+        session_id: str | None = None,
+    ) -> tuple[dict[str, object], ...]:
+        parameters: tuple[object, ...] = ()
+        session_clause = ""
+        if session_id is not None:
+            session_id = _required(session_id, "session_id")
+            session_clause = " AND session_id = ?"
+            parameters = (session_id,)
+
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM portal_host_dispatches
+            WHERE state = 'ATTEMPTED'
+              AND (
+                    reconciliation_state IS NULL
+                    OR reconciliation_state NOT IN (
+                        'VERIFIED_COMPLETE',
+                        'VERIFIED_HELD'
+                    )
+              )
+            """ + session_clause + """
+            ORDER BY created_at, dispatch_id
+            """,
+            parameters,
+        ).fetchall()
+        return tuple(self._row_payload(row) for row in rows)
+
     def find_dispatch(
         self,
         *,
