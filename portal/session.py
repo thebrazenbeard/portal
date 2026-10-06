@@ -556,13 +556,14 @@ class PortalCommandSession:
         subject_id: str,
         verifier: str,
         token: str | None,
+        execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
     ) -> dict[str, object]:
         self._require_session(session_id=session_id, holder=holder)
         row = self.connection.execute(
             """
-            SELECT state, wave_run_id
+            SELECT state, wave_run_id, adapter_id, route_id
             FROM portal_command_subjects
             WHERE session_id = ? AND subject_kind = ? AND subject_id = ?
             """,
@@ -574,6 +575,61 @@ class PortalCommandSession:
             return self.status(session_id)
         if str(row[0]) != "ACTIVE" or row[1] is None:
             raise ValueError("Portal session subject is not active")
+
+        adapter_id = str(row[2]) if row[2] is not None else None
+        route_id = str(row[3]) if row[3] is not None else None
+        if adapter_id is not None or route_id is not None:
+            if adapter_id is None or route_id is None:
+                raise ValueError(
+                    "route-bound subject has incomplete execution route"
+                )
+            if execution_adapter is None:
+                raise ValueError(
+                    "route-bound subject requires owning execution adapter "
+                    "for completion"
+                )
+            reconcile_adapter = getattr(execution_adapter, "reconcile", None)
+            if reconcile_adapter is None:
+                raise ValueError(
+                    "owning execution adapter cannot reconcile completion"
+                )
+
+            current = self.status(session_id)
+            records = tuple(reconcile_adapter(current))
+            matching = tuple(
+                record
+                for record in records
+                if (
+                    record.subject_kind == subject_kind
+                    and record.subject_id == subject_id
+                )
+            )
+            if len(matching) != 1:
+                raise ValueError(
+                    "owning execution adapter did not return exactly one "
+                    "reconciliation record for subject"
+                )
+            self.record_reconciliations(
+                session_id=session_id,
+                holder=holder,
+                records=matching,
+                clock=clock,
+            )
+            refreshed = self.status(session_id)
+            subject = next(
+                item
+                for item in refreshed["subjects"]
+                if (
+                    item["subject_kind"] == subject_kind
+                    and item["subject_id"] == subject_id
+                )
+            )
+            if subject["state"] != "TERMINAL":
+                raise ValueError(
+                    "subject is not verified complete: "
+                    + str(subject["verification_state"])
+                )
+            return refreshed
 
         result: PortalWaveVerificationResult = verify_portal_wave_delivery(
             state_db=self.path,
