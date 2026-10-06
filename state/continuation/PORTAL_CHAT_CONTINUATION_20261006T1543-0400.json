@@ -1,0 +1,90 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V3",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1543-0400",
+  "created_local": "2026-10-06T15:43:38-04:00",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "branch_head_before_checkpoint": {
+    "sha": "ada9d63d15776d8d01e7e4a3dda7d3dec6175ade",
+    "message": "portal: admit private repos from local live inventory",
+    "ci": {
+      "test": "SUCCESS",
+      "dependency_review": "SUCCESS",
+      "local_pytest": "675 passed"
+    }
+  },
+  "operational_qualification": {
+    "github_effect_readback": true,
+    "capacity_release": true,
+    "automatic_refill": true,
+    "resident_refill": true,
+    "verified_idle": true,
+    "outcome_unknown_process_boundary": true,
+    "unavailable_route_fail_closed": true,
+    "stale_pid_reuse_reconciliation": true,
+    "identity_unverified_preserved": true
+  },
+  "live_portfolio": {
+    "authenticated_total": 84,
+    "public": 65,
+    "private": 19,
+    "private_effect_ceiling": "NO_EFFECT",
+    "private_archived_held": 3,
+    "private_currentness_queued": 16,
+    "public_artifacts_redact_private_names": true,
+    "local_mode_requires_complete_repository_inventory": true
+  },
+  "chat_host_bindings": {
+    "receipt": "C:\\Users\\patri\\AppData\\Local\\PortalChatRuntime\\20261006\\CHAT_BINDING.json",
+    "environment": "C:\\Users\\patri\\AppData\\Local\\PortalChatRuntime\\20261006\\.venv",
+    "pre_active": {
+      "repository": "thebrazenbeard/pre-active",
+      "sha": "a6900dc2d2fb65f4ea66db95fca1b9c5b022450b",
+      "version": "0.1.0",
+      "import_verified": true,
+      "cli_verified": true,
+      "tests_exit_code": 0,
+      "daemon_started": false
+    },
+    "volition": {
+      "repository": "thebrazenbeard/volition",
+      "sha": "dbc628d376515a0a523b1eecdf62129cca5d6b08",
+      "version": "0.10.0",
+      "import_verified": true,
+      "tests_exit_code": 0
+    },
+    "native_chatgpt_plugin_found": false,
+    "native_chatgpt_runtime_install": false,
+    "claim_ceiling": "HOST_INSTALL + SOURCE_CONTEXT_BINDING; NOT MODEL_RUNTIME_CODE_INJECTION; NOT RESIDENT_DAEMON_STARTED; NOT NEW_EFFECT_AUTHORITY"
+  },
+  "invariants": [
+    "PORTAL_OWNS_COORDINATION_STATE; EXECUTION_SUBSTRATES_OWN_EXECUTION_EFFECT_STATE",
+    "ACTIVE_SUBJECTS_CONSUME_BUDGET_AND_COLLISION",
+    "WORKER_SUCCESS_NE_VERIFIED_COMPLETION",
+    "BIND_EXACT_ROUTE_BEFORE_ATTEMPT",
+    "NO_SILENT_ROUTE_SUBSTITUTION_AFTER_ATTEMPT",
+    "OUTCOME_UNKNOWN_REMAINS_ACTIVE_AND_ROUTE_PINNED",
+    "AVAILABILITY_NE_ATTACHMENT_NE_CURRENTNESS_NE_CAPABILITY_NE_AUTHORITY",
+    "DECLARED_CAPACITY_NE_LIVE_FREE_CAPACITY",
+    "HOLD_NE_CANCELLATION",
+    "STOP_PRESERVES_ACTIVE_AND_UNRESOLVED_WORK",
+    "PRIVATE_MEMBERSHIP_NE_EXECUTION_AUTHORITY",
+    "HOST_PACKAGE_INSTALL_NE_NATIVE_CHATGPT_RUNTIME_CONSUMPTION"
+  ],
+  "next_frontier": [
+    "Fresh-read PR/head/CI before mutation.",
+    "Reduce manual host adapter advertisement using structured capability evidence without hardcoding transport or manufacturing authority.",
+    "Preserve complete local repository membership plus public private-name redaction.",
+    "Preserve ambiguous route pinning and identity-unverified occupancy.",
+    "Use red-green-regression for host discovery binding changes.",
+    "Consider Pre-Active/Volition cognition integration only with COGNITION_REQUEST != EFFECT_AUTHORITY.",
+    "Do not start resident Pre-Active daemon or deploy Portal without separate authority."
+  ],
+  "predecessor": "PORTAL_CHAT_CONTINUATION_20261006T1444-0400",
+  "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1543-0400"
+}
