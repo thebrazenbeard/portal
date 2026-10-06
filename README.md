@@ -22,11 +22,11 @@ P.O.R.T.A.L. was seeded from Project Runner because the required execution loops
 
 ## Current implementation state
 
-The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile worker receipts before freeing lanes, and refill newly available capacity across successive generations.
+The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
 
 The preferred human-facing source surface is now the durable command session. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
 
-This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters still have to be live, current, target-bound and authorized for the exact work they perform.
+This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
 ## Internal-first donor policy
 
@@ -74,9 +74,11 @@ That form performs durable admission/reconciliation/refill but does not invent a
 
 The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
 
-For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, the host records the attempt boundary before the external effect, and owning-substrate evidence reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
+For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
 
-See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host pending`, `host unresolved`, attempt marking, reconciliation, and refill.
+Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The pump consumes only already-bound work, persists the attempt before calling the driver, leaves ambiguous driver failures unresolved, tolerates competing-host attempt races without replay, and propagates process-control exceptions. Source-level integration coverage closes the full loop: admit -> queue -> durable attempt -> owning-driver verification -> free capacity -> refill -> verified idle.
+
+See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host take`, `host pending`, `host unresolved`, reconciliation, and refill.
 
 `portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same execution-adapter and occupancy-currentness configuration needed by the selected route.
 
