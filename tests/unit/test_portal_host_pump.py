@@ -235,3 +235,87 @@ def test_unresolved_subject_does_not_block_unrelated_pending_dispatch(
     assert store.load_dispatch(stuck)["reconciliation_state"] is None
     assert store.load_dispatch(ready)["reconciliation_state"] == "VERIFIED_COMPLETE"
     store.close()
+
+def test_competing_host_attempt_is_skipped_without_driver_execution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    dispatch_id = _queue(
+        store,
+        run_id="portfolio::g1",
+        subject_id="portal",
+    )
+    original = store.mark_attempted
+    raced = {"done": False}
+    calls = {"execute": 0}
+
+    def competing_mark(**kwargs):
+        if not raced["done"]:
+            raced["done"] = True
+            original(
+                dispatch_id=dispatch_id,
+                attempt_id="other-host",
+                evidence_id="other-host:request",
+            )
+        return original(**kwargs)
+
+    monkeypatch.setattr(store, "mark_attempted", competing_mark)
+
+    class Driver:
+        def execute(self, dispatch, *, attempt_id):
+            calls["execute"] += 1
+            return PortalHostDriverResult(
+                state="VERIFIED_COMPLETE",
+                evidence_id="should-not-run",
+            )
+
+    pump = PortalHostPump(
+        store=store,
+        drivers={"github": Driver()},
+        attempt_id_factory=lambda dispatch: "this-host",
+    )
+    result = pump.run_once(session_id="portfolio")
+
+    assert result.attempted == 0
+    assert result.race_lost == 1
+    assert calls["execute"] == 0
+    current = store.load_dispatch(dispatch_id)
+    assert current["state"] == "ATTEMPTED"
+    assert current["attempt_id"] == "other-host"
+    assert current["reconciliation_state"] is None
+    store.close()
+
+
+def test_pump_does_not_swallow_process_control_exceptions(
+    tmp_path: Path,
+) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    dispatch_id = _queue(
+        store,
+        run_id="portfolio::g1",
+        subject_id="portal",
+    )
+
+    class Driver:
+        def execute(self, dispatch, *, attempt_id):
+            raise KeyboardInterrupt()
+
+    pump = PortalHostPump(
+        store=store,
+        drivers={"github": Driver()},
+        attempt_id_factory=lambda dispatch: "interrupt-attempt",
+    )
+
+    try:
+        pump.run_once(session_id="portfolio")
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("KeyboardInterrupt must propagate")
+
+    current = store.load_dispatch(dispatch_id)
+    assert current["state"] == "ATTEMPTED"
+    assert current["reconciliation_state"] is None
+    store.close()
+
