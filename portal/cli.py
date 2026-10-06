@@ -15,6 +15,7 @@ from runner.execution_promotion import (
     load_json_document,
     review_key_from_environment,
 )
+from runner.github_backend import GitHubRestTransport
 from runner.models import ProjectSchedulingState
 from runner.portfolio_advancement import load_advancement_wave
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
@@ -32,6 +33,12 @@ from .ecosystem_runtime import (
 from .discovery import (
     discover_live_project_registry,
     write_project_registry,
+)
+from .frontier_currentness import (
+    PortalFrontierObservation,
+    PortalHostFrontierCurrentness,
+    PortalHostFrontierStore,
+    frontier_policy_sha256,
 )
 from .host_bridge import (
     PortalHostBridgeStore,
@@ -215,6 +222,14 @@ def _parser() -> argparse.ArgumentParser:
             "without another occupancy source"
         ),
     )
+    run.add_argument(
+        "--host-frontier-currentness",
+        action="store_true",
+        help=(
+            "require fresh exact-head host currentness evidence for "
+            "newly admitted repository frontiers"
+        ),
+    )
     run.add_argument("--max-cycles", type=int, default=100)
     run.add_argument("--max-idle-cycles", type=int, default=1)
     run.add_argument("--poll-seconds", type=float, default=0.0)
@@ -303,6 +318,14 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "require fresh host-published occupancy for enabled nodes "
             "without another occupancy source"
+        ),
+    )
+    continue_cmd.add_argument(
+        "--host-frontier-currentness",
+        action="store_true",
+        help=(
+            "require fresh exact-head host currentness evidence for "
+            "newly admitted repository frontiers"
         ),
     )
 
@@ -427,6 +450,44 @@ def _parser() -> argparse.ArgumentParser:
         help="show non-expired host node occupancy snapshots",
     )
     host_occupancy_status.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+
+    host_frontier_advertise = host_subcommands.add_parser(
+        "frontier-advertise",
+        help="attest one bounded frontier against an exact repository head",
+    )
+    host_frontier_advertise.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_frontier_advertise.add_argument(
+        "--wave",
+        type=Path,
+        default=ROOT / "portfolio" / "advancement_wave.public.json",
+    )
+    host_frontier_advertise.add_argument("--subject-id", required=True)
+    host_frontier_advertise.add_argument("--ref", required=True)
+    host_frontier_advertise.add_argument("--exact-head", required=True)
+    host_frontier_advertise.add_argument(
+        "--disposition",
+        choices=("CURRENT", "HELD"),
+        default="CURRENT",
+    )
+    host_frontier_advertise.add_argument(
+        "--ttl-seconds",
+        type=float,
+        default=300.0,
+    )
+
+    host_frontier_status = host_subcommands.add_parser(
+        "frontier-status",
+        help="show non-expired host semantic frontier attestations",
+    )
+    host_frontier_status.add_argument(
         "--state-db",
         type=Path,
         default=Path(".portal/portal.sqlite3"),
@@ -928,6 +989,26 @@ def _session_occupancy(
     return None, provider
 
 
+def _session_frontier_currentness(args: argparse.Namespace):
+    if not args.host_frontier_currentness:
+        return None
+
+    transport = GitHubRestTransport(token=_github_token())
+
+    def provider(wave_path: Path) -> tuple[tuple[str, str], ...]:
+        store = PortalHostFrontierStore(Path(args.state_db))
+        try:
+            snapshot = PortalHostFrontierCurrentness(
+                store=store,
+                head_reader=transport.read_ref,
+            ).classify(load_advancement_wave(Path(wave_path)))
+        finally:
+            store.close()
+        return snapshot.excluded_subjects
+
+    return provider
+
+
 def _session_budget(args: argparse.Namespace) -> WaveExecutionBudget:
     return WaveExecutionBudget(
         max_parallel=args.max_parallel,
@@ -993,6 +1074,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
         args,
         nodes,
     )
+    frontier_currentness_provider = _session_frontier_currentness(args)
     controller = PortalCommandSession(Path(args.state_db))
     try:
         common = dict(
@@ -1006,6 +1088,7 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
             lease_ttl=args.lease_ttl,
             token=_github_token(),
             occupied_node_slots=occupied_node_slots,
+            frontier_currentness_provider=frontier_currentness_provider,
         )
         if args.once:
             once_common = dict(common)
@@ -1042,6 +1125,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         args,
         nodes,
     )
+    frontier_currentness_provider = _session_frontier_currentness(args)
     if node_occupancy_provider is not None:
         occupied_node_slots = node_occupancy_provider()
     controller = PortalCommandSession(Path(args.state_db))
@@ -1058,6 +1142,7 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             token=_github_token(),
             verifier=args.verifier,
             occupied_node_slots=occupied_node_slots,
+            frontier_currentness_provider=frontier_currentness_provider,
             execution_adapter=execution_adapter,
         )
     finally:
@@ -1598,6 +1683,62 @@ def _host_occupancy_status_payload(
     }
 
 
+def _host_frontier_advertise_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    wave = load_advancement_wave(Path(args.wave))
+    matches = tuple(
+        item
+        for item in wave.items
+        if item.subject_kind == "repository"
+        and item.subject_id == args.subject_id
+    )
+    if len(matches) != 1:
+        raise ValueError("frontier subject must match exactly one repository item")
+    item = matches[0]
+    if len(item.repositories) != 1:
+        raise ValueError("repository frontier must bind exactly one repository")
+
+    observation = PortalFrontierObservation(
+        subject_kind=item.subject_kind,
+        subject_id=item.subject_id,
+        repository=item.repositories[0],
+        ref=args.ref,
+        exact_head=args.exact_head,
+        frontier_sha256=frontier_policy_sha256(item),
+        disposition=args.disposition,
+    )
+    store = PortalHostFrontierStore(Path(args.state_db))
+    try:
+        store.advertise(
+            observation,
+            ttl_seconds=args.ttl_seconds,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_FRONTIER_ADVERTISE_V1",
+        "observation": asdict(observation),
+    }
+
+
+def _host_frontier_status_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    store = PortalHostFrontierStore(Path(args.state_db))
+    try:
+        observations = [
+            asdict(observation)
+            for _key, observation in sorted(store.active().items())
+        ]
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_FRONTIER_STATUS_V1",
+        "observations": observations,
+    }
+
+
 def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -1694,6 +1835,10 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_occupancy_payload(args)
             elif args.host_command == "occupancy-status":
                 payload = _host_occupancy_status_payload(args)
+            elif args.host_command == "frontier-advertise":
+                payload = _host_frontier_advertise_payload(args)
+            elif args.host_command == "frontier-status":
+                payload = _host_frontier_status_payload(args)
             elif args.host_command == "pending":
                 payload = _host_pending_payload(args)
             elif args.host_command == "unresolved":
