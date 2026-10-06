@@ -155,6 +155,9 @@ def test_session_run_host_bridge_passes_execution_adapter(
         def close(self):
             pass
 
+        def save_resume_spec(self, **kwargs):
+            pass
+
         def run(self, **kwargs):
             calls.append(kwargs)
             return SimpleNamespace(
