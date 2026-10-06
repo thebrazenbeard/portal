@@ -197,3 +197,42 @@ def test_host_bridge_and_process_worker_modes_are_not_implicitly_mixed(
 
     assert code == 2
     assert "choose host bridge or worker backends" in capsys.readouterr().err
+
+def test_complete_host_bridge_passes_owning_adapter(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeSession:
+        def __init__(self, path):
+            pass
+
+        def close(self):
+            pass
+
+        def complete(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "session_id": kwargs["session_id"],
+                "control_state": "RUNNING",
+                "generation": 1,
+                "summary": {"active": 0, "held": 0, "terminal": 1},
+                "subjects": [],
+            }
+
+    monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
+    code = portal_cli.entrypoint([
+        "complete",
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--session-id", "portfolio",
+        "--subject-id", "portal",
+        "--verifier", "vera-review",
+        "--host-bridge",
+    ])
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "PORTAL_COMMAND_SESSION_COMPLETE_V1"
+    assert isinstance(calls[0]["execution_adapter"], PortalHostExecutionAdapter)
+
