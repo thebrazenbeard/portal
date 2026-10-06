@@ -60,6 +60,7 @@ class PortalHostPumpResult:
     outcome_unknown: int
     no_driver: int
     race_lost: int
+    route_unqualified: int
 
 
 class PortalHostPump:
@@ -116,6 +117,7 @@ class PortalHostPump:
         outcome_unknown = 0
         no_driver = 0
         race_lost = 0
+        route_unqualified = 0
 
         for dispatch in pending:
             dispatch_id = _required(
@@ -159,24 +161,40 @@ class PortalHostPump:
                 )
             except ValueError:
                 current = self.store.load_dispatch(dispatch_id)
-                if current.get("state") != "ATTEMPTED":
-                    raise
-                race_lost += 1
-                items.append(
-                    PortalHostPumpItemResult(
-                        dispatch_id=dispatch_id,
-                        adapter_id=adapter_id,
-                        route_id=route_id,
-                        state="RACE_LOST",
-                        evidence_id=(
-                            str(current["dispatch_evidence_id"])
-                            if current.get("dispatch_evidence_id") is not None
-                            else None
-                        ),
-                        reason="dispatch was attempted by another host",
+                current_state = str(current.get("state") or "")
+                if current_state == "ATTEMPTED":
+                    race_lost += 1
+                    items.append(
+                        PortalHostPumpItemResult(
+                            dispatch_id=dispatch_id,
+                            adapter_id=adapter_id,
+                            route_id=route_id,
+                            state="RACE_LOST",
+                            evidence_id=(
+                                str(current["dispatch_evidence_id"])
+                                if current.get("dispatch_evidence_id") is not None
+                                else None
+                            ),
+                            reason="dispatch was attempted by another host",
+                        )
                     )
-                )
-                continue
+                    continue
+                if current_state == "QUEUED":
+                    route_unqualified += 1
+                    items.append(
+                        PortalHostPumpItemResult(
+                            dispatch_id=dispatch_id,
+                            adapter_id=adapter_id,
+                            route_id=route_id,
+                            state="ROUTE_UNQUALIFIED",
+                            reason=(
+                                "bound route was not currently qualified "
+                                "at the attempt boundary"
+                            ),
+                        )
+                    )
+                    continue
+                raise
             attempted += 1
 
             execute = getattr(driver, "execute", None)
@@ -258,4 +276,5 @@ class PortalHostPump:
             outcome_unknown=outcome_unknown,
             no_driver=no_driver,
             race_lost=race_lost,
+            route_unqualified=route_unqualified,
         )
