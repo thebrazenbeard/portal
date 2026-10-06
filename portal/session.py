@@ -332,6 +332,7 @@ class PortalCommandSession:
         frontier_currentness_provider: (
             Callable[[Path], Iterable[tuple[str, str]]] | None
         ) = None,
+        resume_spec: Mapping[str, object] | None = None,
         execution_adapter: object | None = None,
         transport: GitHubTransport | None = None,
         clock: Callable[[], float] = time.time,
@@ -1212,6 +1213,13 @@ class PortalCommandSession:
             }
 
         first = self.run(**generation_common())
+        if resume_spec is not None:
+            self.save_resume_spec(
+                session_id=session_id,
+                holder=holder,
+                spec=resume_spec,
+                clock=clock,
+            )
         cycles: list[PortalSessionResult] = [first]
         if execution_adapter is not None:
             self._dispatch_generation(
