@@ -527,6 +527,28 @@ def _parser() -> argparse.ArgumentParser:
     )
     host_pending.add_argument("--session-id")
 
+    host_take = host_subcommands.add_parser(
+        "take",
+        help=(
+            "atomically take the next queued dispatch for one of the "
+            "host's available adapters and cross the attempt boundary"
+        ),
+    )
+    host_take.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_take.add_argument("--session-id")
+    host_take.add_argument(
+        "--adapter-id",
+        action="append",
+        required=True,
+        dest="adapter_ids",
+    )
+    host_take.add_argument("--attempt-id", required=True)
+    host_take.add_argument("--evidence-id", required=True)
+
     host_unresolved = host_subcommands.add_parser(
         "unresolved",
         help="show attempted host effects that still require reconciliation",
@@ -1890,6 +1912,23 @@ def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_take_payload(args: argparse.Namespace) -> dict[str, object]:
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        dispatch = store.take_pending_dispatch(
+            session_id=args.session_id,
+            adapter_ids=tuple(args.adapter_ids),
+            attempt_id=args.attempt_id,
+            evidence_id=args.evidence_id,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_TAKE_V1",
+        "dispatch": dispatch,
+    }
+
+
 def _host_unresolved_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
@@ -1980,6 +2019,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_frontier_status_payload(args)
             elif args.host_command == "pending":
                 payload = _host_pending_payload(args)
+            elif args.host_command == "take":
+                payload = _host_take_payload(args)
             elif args.host_command == "unresolved":
                 payload = _host_unresolved_payload(args)
             elif args.host_command == "attempt":
