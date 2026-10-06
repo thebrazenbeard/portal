@@ -74,7 +74,11 @@ That form performs durable admission/reconciliation/refill but does not invent a
 
 The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
 
-`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same optional `--worker-backends`, `--workspace-root`, `--worker-holder-prefix`, and `--delivery-lease-ttl` execution-adapter configuration.
+For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, the host records the attempt boundary before the external effect, and owning-substrate evidence reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
+
+See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host pending`, `host unresolved`, attempt marking, reconciliation, and refill.
+
+`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same execution-adapter and occupancy-currentness configuration needed by the selected route.
 
 Plan a bounded portfolio wave:
 
