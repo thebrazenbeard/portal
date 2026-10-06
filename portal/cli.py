@@ -314,6 +314,11 @@ def _parser() -> argparse.ArgumentParser:
     complete.add_argument("--subject-kind", default="repository")
     complete.add_argument("--subject-id", required=True)
     complete.add_argument("--verifier", default="vera")
+    complete.add_argument(
+        "--host-bridge",
+        action="store_true",
+        help="verify completion through the subject's bound external host route",
+    )
 
     stop = subcommands.add_parser(
         "stop",
@@ -996,6 +1001,13 @@ def _hold_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _complete_payload(args: argparse.Namespace) -> dict[str, object]:
+    execution_adapter = (
+        PortalHostExecutionAdapter(
+            store=PortalHostBridgeStore(Path(args.state_db)),
+        )
+        if args.host_bridge
+        else None
+    )
     controller = PortalCommandSession(Path(args.state_db))
     try:
         status = controller.complete(
@@ -1005,9 +1017,12 @@ def _complete_payload(args: argparse.Namespace) -> dict[str, object]:
             subject_id=args.subject_id,
             verifier=args.verifier,
             token=_github_token(),
+            execution_adapter=execution_adapter,
         )
     finally:
         controller.close()
+        if isinstance(execution_adapter, PortalHostExecutionAdapter):
+            execution_adapter.store.close()
     return {
         "mode": "PORTAL_COMMAND_SESSION_COMPLETE_V1",
         **status,
