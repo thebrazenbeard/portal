@@ -1,6 +1,12 @@
 """P.O.R.T.A.L. — Portfolio Orchestration & Repository Tracking Access Layer."""
 
+from .adapters import (
+    PortalDispatchRecord,
+    PortalReconciliationRecord,
+    PortalRouteBinding,
+)
 from .coordinator import plan_portal_wave
+from .execution_router import CapabilityExecutionAdapter
 from .discovery import (
     GitHubRepositoryCatalog,
     RepositoryInventoryItem,
@@ -13,6 +19,15 @@ from .models import (
     PortalAssignment,
     PortalNodeDeferral,
     PortalPlan,
+)
+from .process_adapter import (
+    PortalProposalProcessAdapter,
+    build_process_proposal_execution_adapter,
+)
+from .route_resolver import (
+    PortalRouteAdvertisement,
+    PortalRouteRequest,
+    resolve_portal_route,
 )
 from .runtime import (
     PortalCycleResult,
@@ -35,6 +50,15 @@ from .wave_runtime import (
 )
 
 __all__ = [
+    "resolve_portal_route",
+    "build_process_proposal_execution_adapter",
+    "PortalRouteRequest",
+    "PortalRouteBinding",
+    "PortalRouteAdvertisement",
+    "PortalReconciliationRecord",
+    "PortalProposalProcessAdapter",
+    "PortalDispatchRecord",
+    "CapabilityExecutionAdapter",
     "ExecutionNode",
     "GitHubRepositoryCatalog",
     "PortalAssignment",
