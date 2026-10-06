@@ -373,3 +373,34 @@ def test_complete_refuses_route_bound_subject_without_owning_adapter(
     controller.close()
     store.close()
 
+def test_bulk_route_advertisement_rolls_back_on_stale_member(
+    tmp_path: Path,
+) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    existing = _route(
+        route_id="repo-native:thebrazenbeard/portal",
+        target_id="thebrazenbeard/portal",
+    )
+    store.advertise_route(
+        existing,
+        ttl_seconds=60.0,
+        observed_at=100.0,
+    )
+
+    new_route = _route(
+        route_id="repo-native:thebrazenbeard/new",
+        target_id="thebrazenbeard/new",
+    )
+    with pytest.raises(ValueError, match="stale host route observation"):
+        store.advertise_routes(
+            (new_route, existing),
+            ttl_seconds=60.0,
+            observed_at=99.0,
+        )
+
+    active = store.active_routes(now=100.0)
+    assert [route.target_id for route in active] == [
+        "thebrazenbeard/portal",
+    ]
+    store.close()
+
