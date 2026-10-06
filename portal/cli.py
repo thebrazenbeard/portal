@@ -289,7 +289,7 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(".portal/portal.sqlite3"),
     )
-    continue_cmd.add_argument("--holder", default="vera")
+    continue_cmd.add_argument("--holder")
     continue_cmd.add_argument(
         "--wave",
         type=Path,
@@ -315,7 +315,12 @@ def _parser() -> argparse.ArgumentParser:
             "membership for the safe host-session path"
         ),
     )
-    continue_cmd.add_argument("--nodes", type=Path, required=True)
+    continue_cmd.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse the durable non-secret configuration from the prior run",
+    )
+    continue_cmd.add_argument("--nodes", type=Path)
     continue_cmd.add_argument("--lease-ttl", type=float, default=300.0)
     continue_cmd.add_argument("--max-parallel", type=int, default=6)
     continue_cmd.add_argument("--max-per-identity", type=int, default=2)
@@ -1264,6 +1269,133 @@ def _session_resume_spec(
     }
 
 
+def _apply_session_resume_spec(
+    args: argparse.Namespace,
+    spec: dict[str, object],
+) -> None:
+    if spec.get("schema") != "PORTAL_COMMAND_SESSION_RESUME_V1":
+        raise ValueError("unsupported Portal session resume spec")
+
+    required = {
+        "holder",
+        "wave",
+        "corpus",
+        "projects",
+        "discover_owner",
+        "write_live_registry",
+        "static_projects",
+        "nodes",
+        "lease_ttl",
+        "max_parallel",
+        "max_per_identity",
+        "max_per_family",
+        "max_per_lane",
+        "verifier",
+        "host_bridge",
+        "worker_backends",
+        "workspace_root",
+        "worker_holder_prefix",
+        "delivery_lease_ttl",
+        "occupied_nodes",
+        "project_runner_tasks",
+        "host_node_occupancy",
+        "host_frontier_currentness",
+    }
+    missing = sorted(required.difference(spec))
+    if missing:
+        raise ValueError(
+            "Portal session resume spec is missing: " + ", ".join(missing)
+        )
+
+    def required_text(key: str) -> str:
+        value = spec[key]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"resume spec {key} must be a non-empty string")
+        return value.strip()
+
+    def optional_text(key: str) -> str | None:
+        value = spec[key]
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"resume spec {key} must be null or a non-empty string"
+            )
+        return value.strip()
+
+    def integer(key: str) -> int:
+        value = spec[key]
+        if type(value) is not int or value < 1:
+            raise ValueError(f"resume spec {key} must be a positive integer")
+        return value
+
+    def number(key: str) -> float:
+        value = spec[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"resume spec {key} must be numeric")
+        value = float(value)
+        if value <= 0:
+            raise ValueError(f"resume spec {key} must be positive")
+        return value
+
+    def boolean(key: str) -> bool:
+        value = spec[key]
+        if type(value) is not bool:
+            raise ValueError(f"resume spec {key} must be a boolean")
+        return value
+
+    def string_list(key: str) -> list[str]:
+        value = spec[key]
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) and item.strip()
+            for item in value
+        ):
+            raise ValueError(
+                f"resume spec {key} must be a list of non-empty strings"
+            )
+        return [item.strip() for item in value]
+
+    stored_holder = required_text("holder")
+    if args.holder is not None and args.holder.strip() != stored_holder:
+        raise ValueError("resume holder differs from stored session holder")
+
+    args.holder = stored_holder
+    args.wave = Path(required_text("wave"))
+    args.corpus = Path(required_text("corpus"))
+    args.projects = Path(required_text("projects"))
+    args.discover_owner = optional_text("discover_owner")
+    write_live_registry = optional_text("write_live_registry")
+    args.write_live_registry = (
+        Path(write_live_registry)
+        if write_live_registry is not None
+        else None
+    )
+    args.static_projects = boolean("static_projects")
+    args.nodes = Path(required_text("nodes"))
+    args.lease_ttl = number("lease_ttl")
+    args.max_parallel = integer("max_parallel")
+    args.max_per_identity = integer("max_per_identity")
+    args.max_per_family = integer("max_per_family")
+    args.max_per_lane = integer("max_per_lane")
+    args.verifier = required_text("verifier")
+    args.host_bridge = boolean("host_bridge")
+    worker_backends = optional_text("worker_backends")
+    args.worker_backends = (
+        Path(worker_backends)
+        if worker_backends is not None
+        else None
+    )
+    args.workspace_root = Path(required_text("workspace_root"))
+    args.worker_holder_prefix = required_text("worker_holder_prefix")
+    args.delivery_lease_ttl = number("delivery_lease_ttl")
+    args.occupied_nodes = string_list("occupied_nodes")
+    args.project_runner_tasks = string_list("project_runner_tasks")
+    args.host_node_occupancy = boolean("host_node_occupancy")
+    args.host_frontier_currentness = boolean(
+        "host_frontier_currentness"
+    )
+
+
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     projects_path = _session_projects_path(args)
     nodes = load_execution_nodes(Path(args.nodes))
@@ -1330,18 +1462,32 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
-    projects_path = _session_projects_path(args)
-    nodes = load_execution_nodes(Path(args.nodes))
-    execution_adapter = _session_execution_adapter(args, nodes)
-    occupied_node_slots, node_occupancy_provider = _session_occupancy(
-        args,
-        nodes,
-    )
-    frontier_currentness_provider = _session_frontier_currentness(args)
-    if node_occupancy_provider is not None:
-        occupied_node_slots = node_occupancy_provider()
     controller = PortalCommandSession(Path(args.state_db))
+    execution_adapter = None
     try:
+        if args.resume:
+            spec = controller.load_resume_spec(
+                session_id=args.session_id,
+                holder=args.holder,
+            )
+            _apply_session_resume_spec(args, spec)
+        else:
+            if args.holder is None:
+                args.holder = "vera"
+            if args.nodes is None:
+                raise ValueError("--nodes is required unless --resume")
+
+        projects_path = _session_projects_path(args)
+        nodes = load_execution_nodes(Path(args.nodes))
+        execution_adapter = _session_execution_adapter(args, nodes)
+        occupied_node_slots, node_occupancy_provider = _session_occupancy(
+            args,
+            nodes,
+        )
+        frontier_currentness_provider = _session_frontier_currentness(args)
+        if node_occupancy_provider is not None:
+            occupied_node_slots = node_occupancy_provider()
+
         result = controller.continue_run(
             session_id=args.session_id,
             holder=args.holder,
@@ -1356,6 +1502,11 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
             occupied_node_slots=occupied_node_slots,
             frontier_currentness_provider=frontier_currentness_provider,
             execution_adapter=execution_adapter,
+        )
+        controller.save_resume_spec(
+            session_id=args.session_id,
+            holder=args.holder,
+            spec=_session_resume_spec(args),
         )
     finally:
         controller.close()
