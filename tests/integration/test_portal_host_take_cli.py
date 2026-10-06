@@ -6,6 +6,7 @@ from pathlib import Path
 import portal.cli as portal_cli
 from portal.adapters import PortalRouteBinding
 from portal.host_bridge import PortalHostBridgeStore
+from portal.route_resolver import PortalRouteAdvertisement
 from portal.session import PortalSessionResult
 from portal.wave_runtime import PortalWavePacket
 
@@ -51,6 +52,24 @@ def _queue(
         subject_id=subject_id,
         adapter_id=adapter_id,
         route_id=f"{adapter_id}:{subject_id}",
+    )
+    store.advertise_route(
+        PortalRouteAdvertisement(
+            adapter_id=adapter_id,
+            route_id=binding.route_id,
+            node_id="repo-native",
+            target_kind="repository",
+            target_id=f"thebrazenbeard/{subject_id}",
+            capabilities=("semantic_work",),
+            effect_capabilities=("SOURCE_ONLY",),
+            authorized_effects=("SOURCE_ONLY",),
+            available=True,
+            attached=True,
+            current=True,
+            preference=50,
+        ),
+        observed_at=0.0,
+        ttl_seconds=1_000_000_000_000.0,
     )
     queued = store.queue_dispatch(
         result=result,
