@@ -258,6 +258,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--run-id", default="portal-default")
     status.add_argument("--session-id")
+    status.add_argument(
+        "--host-details",
+        action="store_true",
+        help=(
+            "include queued-route diagnostics, unresolved attempts, "
+            "current host routes and node occupancy"
+        ),
+    )
 
     continue_cmd = subcommands.add_parser(
         "continue",
@@ -1432,10 +1440,74 @@ def _status_payload(args: argparse.Namespace) -> dict[str, object]:
             status = controller.status(args.session_id)
         finally:
             controller.close()
-        return {
+
+        payload: dict[str, object] = {
             "mode": "PORTAL_COMMAND_SESSION_STATUS_V1",
             **status,
         }
+        if args.host_details:
+            host_store = PortalHostBridgeStore(Path(args.state_db))
+            try:
+                pending = tuple(
+                    host_store.pending_dispatch_diagnostics(
+                        session_id=args.session_id,
+                    )
+                )
+                unresolved = tuple(
+                    host_store.unresolved_dispatches(
+                        session_id=args.session_id,
+                    )
+                )
+                routes = tuple(host_store.active_routes())
+                occupancy = host_store.active_node_occupancy()
+            finally:
+                host_store.close()
+
+            qualified = sum(
+                bool(item.get("route_qualified"))
+                for item in pending
+            )
+            payload["host"] = {
+                "pending": {
+                    "count": len(pending),
+                    "qualified": qualified,
+                    "unqualified": len(pending) - qualified,
+                    "items": list(pending),
+                },
+                "unresolved": {
+                    "count": len(unresolved),
+                    "items": list(unresolved),
+                },
+                "routes": {
+                    "count": len(routes),
+                    "items": [
+                        {
+                            "adapter_id": route.adapter_id,
+                            "route_id": route.route_id,
+                            "node_id": route.node_id,
+                            "target_kind": route.target_kind,
+                            "target_id": route.target_id,
+                            "capabilities": list(route.capabilities),
+                            "effect_capabilities": list(
+                                route.effect_capabilities
+                            ),
+                            "authorized_effects": list(
+                                route.authorized_effects
+                            ),
+                            "available": route.available,
+                            "attached": route.attached,
+                            "current": route.current,
+                            "preference": route.preference,
+                        }
+                        for route in routes
+                    ],
+                },
+                "node_occupancy": occupancy,
+            }
+        return payload
+
+    if args.host_details:
+        raise ValueError("--host-details requires --session-id")
 
     store = PortalRunStore(Path(args.state_db))
     try:
