@@ -58,6 +58,7 @@ def test_portal_run_once_cli_binds_runtime_configuration(
     assert captured["max_cycles"] == 1
     assert captured["max_idle_cycles"] == 1
     assert captured["max_parallel"] == 2
+    assert captured["holder"] == "vera"
     assert [node.node_id for node in captured["nodes"]] == [
         "lappy",
         "worklaptop",
@@ -235,3 +236,17 @@ def test_portal_run_can_use_live_discovered_registry(
     payload = json.loads(capsys.readouterr().out)
     assert payload["run_id"] == "live-run"
     assert len(captured["projects"]) == 4
+
+def test_legacy_run_without_nodes_fails_with_deliberate_error(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    code = portal_cli.entrypoint([
+        "run",
+        "--once",
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+    ])
+
+    assert code == 2
+    assert "--nodes is required" in capsys.readouterr().err
+
