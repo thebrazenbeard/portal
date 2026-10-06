@@ -76,6 +76,20 @@ The process-proposal adapter is capability-routed and exact-target-bound. It can
 
 For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
 
+Seed one identical host capability across every exact repository target in a project registry without inventing wildcard authority:
+
+    portal host advertise-projects \
+      --projects registry/projects.yaml \
+      --adapter-id github \
+      --route-prefix repo-native \
+      --node-id repo-native \
+      --capability semantic_work \
+      --effect-capability SOURCE_ONLY \
+      --authorized-effect NO_PROTECTED_EFFECT \
+      --ttl-seconds 300
+
+The batch is atomic and still stores one exact target-bound route per repository. The operator must explicitly provide technical effect capability and authorized effect; bulk advertisement never upgrades authority. Use a stronger `--authorized-effect` only when that exact host/target scope is separately authorized.
+
 Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The pump consumes only already-bound work, persists the attempt before calling the driver, leaves ambiguous driver failures unresolved, tolerates competing-host attempt races without replay, and propagates process-control exceptions. Source-level integration coverage closes the full loop: admit -> queue -> durable attempt -> owning-driver verification -> free capacity -> refill -> verified idle.
 
 See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host take`, `host pending`, `host unresolved`, reconciliation, and refill.
