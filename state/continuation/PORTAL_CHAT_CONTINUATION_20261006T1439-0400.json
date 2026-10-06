@@ -1,0 +1,131 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V2",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1439-0400",
+  "created_local": "2026-10-06T14:39-04:00",
+  "purpose": "Durable handoff because Patrick explicitly said the originating ChatGPT conversation is full and requested a repository continuation plus a new-chat restore command.",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "branch_head_before_checkpoint": {
+    "sha": "d4b1b0eddb6643795d505e56ef8f1c31160a94aa",
+    "message": "state: bind Portal chat continuation 20261006T1351",
+    "ci": {
+      "test": "SUCCESS",
+      "pytest": "672 passed in 27.08s",
+      "dependency_review": "SUCCESS"
+    }
+  },
+  "implementation_subject": {
+    "sha": "618a5f63211b13d390b74d522734fca9bf743bbc",
+    "message": "docs: document atomic project route advertisement",
+    "relationship_to_precheckpoint_head": "Two commits behind d4b1b0eddb6643795d505e56ef8f1c31160a94aa; intervening commits only add the 20261006T1351 continuation markdown/json pair."
+  },
+  "checkpoint": {
+    "markdown_path": "state/continuation/PORTAL_CHAT_CONTINUATION_20261006T1439-0400.md",
+    "markdown_commit": "4140c9097cba5ff85fffa600ced671d7f1a1bb99",
+    "json_path": "state/continuation/PORTAL_CHAT_CONTINUATION_20261006T1439-0400.json",
+    "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1439-0400"
+  },
+  "predecessor_continuation": {
+    "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1351-0400",
+    "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1351-0400"
+  },
+  "task": "Resume and build the portal repo and populate it until it works like Patrick wants: one durable whole-portfolio coordinator that refreshes currentness, fills safe parallel capacity, routes through qualified adapters, verifies owning-substrate effects, refills capacity, survives chat loss, and fails closed on ambiguity.",
+  "verified_capabilities": [
+    "durable command session run/continue/hold/complete/status/stop",
+    "resident bounded reconcile/refill",
+    "active/held/terminal durable projection",
+    "verification-gated completion and capacity release",
+    "active subjects consume collision and budget capacity",
+    "live occupied-node accounting",
+    "capability/currentness/authority based route resolution",
+    "composite execution routing without hardcoded workstation or repository transport",
+    "durable bind-before-dispatch route evidence",
+    "adapter-owned reconciliation",
+    "OUTCOME_UNKNOWN remains active and route-pinned",
+    "no silent route substitution after attempt boundary",
+    "external host bridge with expiring route, occupancy, and frontier currentness",
+    "atomic host dispatch take/attempt boundary",
+    "bounded host pump",
+    "host driver registry and command-backed host driver support",
+    "semantic frontier currentness",
+    "Project Runner task currentness integration",
+    "live portfolio membership/currentness",
+    "diagnostics",
+    "exact project-level route advertisement",
+    "closed-loop source-level acceptance coverage"
+  ],
+  "invariants": [
+    "PORTAL_OWNS_COORDINATION_STATE; EXECUTION_SUBSTRATES_OWN_EXECUTION_EFFECT_STATE",
+    "ACTIVE_SUBJECTS_CONSUME_BUDGET_AND_COLLISION",
+    "WORKER_SUCCESS_NE_VERIFIED_COMPLETION",
+    "BIND_EXACT_ROUTE_BEFORE_ATTEMPT",
+    "NO_SILENT_ROUTE_SUBSTITUTION_AFTER_ATTEMPT",
+    "OUTCOME_UNKNOWN_REMAINS_ACTIVE_AND_ROUTE_PINNED",
+    "AVAILABILITY_NE_ATTACHMENT_NE_CURRENTNESS_NE_TECHNICAL_CAPABILITY_NE_AUTHORITY",
+    "DECLARED_CAPACITY_NE_LIVE_FREE_CAPACITY",
+    "HOLD_NE_CANCELLATION",
+    "STOP_PRESERVES_ACTIVE_AND_UNRESOLVED_WORK",
+    "SOURCE_PASS_NE_INSTALL_NE_ROUTE_NE_RUNTIME_NE_EFFECT",
+    "PLUGIN_DISCOVERY_NE_AUTHORITY"
+  ],
+  "major_files": [
+    "PORTAL.md",
+    "portal/session.py",
+    "portal/route_resolver.py",
+    "portal/execution_router.py",
+    "portal/host_bridge.py",
+    "portal/host_pump.py",
+    "portal/host_command_driver.py",
+    "portal/host_driver_registry.py",
+    "portal/frontier_currentness.py",
+    "portal/task_currentness.py",
+    "portal/live_portfolio.py",
+    "portal/process_adapter.py",
+    "portal/diagnostics.py",
+    "docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md"
+  ],
+  "next_frontier": [
+    "Fresh-read Draft PR #1 head and exact-head CI before mutation.",
+    "Compare live head with this checkpoint and reconcile unexpected movement; never force.",
+    "Inspect outstanding delegated or mutation ownership before shared writes.",
+    "Read current PORTAL.md and docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md.",
+    "Refresh adapters actually available in the new ChatGPT runtime.",
+    "Refresh live Project Runner task/currentness and host occupancy, classifying stale/orphaned versus truly active work.",
+    "Choose a bounded non-protected test portfolio and advertise exact target routes.",
+    "Register only host drivers the current host can actually drive.",
+    "Run one real closed-loop qualification: refresh, admit, bind, queue, durable take/attempt marker, reversible non-protected effect, owning-substrate verify, reconcile, capacity release, refill or verified idle.",
+    "Exercise fresh-process/chat recovery of OUTCOME_UNKNOWN and prove it remains active and route-pinned until reconciled.",
+    "If bounded qualification is green, widen portfolio lanes while preserving collision, occupancy, route currentness, and authority ceilings.",
+    "Fix discovered source defects using red-green-regression.",
+    "Persist another continuation before the next chat/runtime boundary."
+  ],
+  "authority": {
+    "allowed": [
+      "working-branch source changes",
+      "working-branch tests",
+      "working-branch documentation",
+      "durable continuation writes",
+      "bounded reversible non-protected operational qualification"
+    ],
+    "prohibited_without_new_exact_authority": [
+      "merge PR #1",
+      "direct main mutation",
+      "deployment",
+      "native Project install or replacement",
+      "production-provider mutation",
+      "credential or permission changes",
+      "paid spend",
+      "destructive cleanup",
+      "protected-effect promotion",
+      "canonical-memory writes",
+      "private publication"
+    ]
+  },
+  "historical_note": "Earlier development evidence showed many stale/orphaned Project Runner registrations with relatively few genuinely running tasks. Treat this as historical evidence only and refresh live task/currentness state before present claims or cleanup.",
+  "restore_rule": "Treat this checkpoint as evidence, refresh mutable Git/CI/route/task state, then resume the highest-value non-colliding runnable frontier. Do not stop at a status recap."
+}
