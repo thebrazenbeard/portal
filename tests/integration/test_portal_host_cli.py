@@ -438,3 +438,70 @@ def test_host_pump_cli_loads_manifest_and_runs_existing_pump(
         "session_id": "portfolio",
         "max_dispatches": 2,
     }
+
+def test_host_advertise_projects_bulk_routes_are_exact_and_deduped(
+    tmp_path,
+    capsys,
+) -> None:
+    projects = tmp_path / "projects.yaml"
+    projects.write_text(
+        "projects:\n"
+        "- id: alpha\n"
+        "  name: Alpha\n"
+        "  visibility: public\n"
+        "  repositories:\n"
+        "  - thebrazenbeard/alpha\n"
+        "  - thebrazenbeard/shared\n"
+        "  capabilities: [read]\n"
+        "- id: beta\n"
+        "  name: Beta\n"
+        "  visibility: public\n"
+        "  repositories:\n"
+        "  - thebrazenbeard/shared\n"
+        "  - thebrazenbeard/beta\n"
+        "  capabilities: [read]\n",
+        encoding="utf-8",
+    )
+    state_db = tmp_path / "portal.sqlite3"
+
+    code = portal_cli.entrypoint([
+        "host", "advertise-projects",
+        "--state-db", str(state_db),
+        "--projects", str(projects),
+        "--adapter-id", "github",
+        "--route-prefix", "repo-native",
+        "--node-id", "repo-native",
+        "--capability", "semantic_work",
+        "--effect-capability", "SOURCE_ONLY",
+        "--authorized-effect", "NO_PROTECTED_EFFECT",
+        "--preference", "50",
+        "--ttl-seconds", "300",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_HOST_PROJECT_ROUTES_ADVERTISE_V1"
+    assert payload["repository_count"] == 3
+    assert [item["target_id"] for item in payload["routes"]] == [
+        "thebrazenbeard/alpha",
+        "thebrazenbeard/beta",
+        "thebrazenbeard/shared",
+    ]
+    assert [item["route_id"] for item in payload["routes"]] == [
+        "repo-native:thebrazenbeard/alpha",
+        "repo-native:thebrazenbeard/beta",
+        "repo-native:thebrazenbeard/shared",
+    ]
+    assert {
+        tuple(item["authorized_effects"])
+        for item in payload["routes"]
+    } == {("NO_PROTECTED_EFFECT",)}
+
+    code = portal_cli.entrypoint([
+        "host", "routes",
+        "--state-db", str(state_db),
+    ])
+    assert code == 0
+    routes = json.loads(capsys.readouterr().out)["routes"]
+    assert len(routes) == 3
+
