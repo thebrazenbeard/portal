@@ -50,6 +50,8 @@ from .host_bridge import (
     PortalHostExecutionAdapter,
     PortalHostNodeCurrentness,
 )
+from .host_driver_registry import load_host_command_drivers
+from .host_pump import PortalHostPump
 from .node_registry import load_execution_nodes
 from .process_adapter import (
     PortalProposalProcessAdapter,
@@ -628,6 +630,19 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     host_reconcile.add_argument("--evidence-id", required=True)
+
+    host_pump = host_subcommands.add_parser(
+        "pump",
+        help="execute queued host dispatches through configured bounded drivers",
+    )
+    host_pump.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    host_pump.add_argument("--drivers", type=Path, required=True)
+    host_pump.add_argument("--session-id")
+    host_pump.add_argument("--max-dispatches", type=int)
 
     wave = subcommands.add_parser(
         "wave",
@@ -2289,6 +2304,33 @@ def _host_reconcile_payload(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
+    drivers = load_host_command_drivers(Path(args.drivers))
+    store = PortalHostBridgeStore(Path(args.state_db))
+    try:
+        result = PortalHostPump(
+            store=store,
+            drivers=drivers,
+        ).run_once(
+            session_id=args.session_id,
+            max_dispatches=args.max_dispatches,
+        )
+    finally:
+        store.close()
+    return {
+        "mode": "PORTAL_HOST_PUMP_V1",
+        "items": [asdict(item) for item in result.items],
+        "attempted": result.attempted,
+        "verified_complete": result.verified_complete,
+        "verified_held": result.verified_held,
+        "in_progress": result.in_progress,
+        "outcome_unknown": result.outcome_unknown,
+        "no_driver": result.no_driver,
+        "race_lost": result.race_lost,
+        "route_unqualified": result.route_unqualified,
+    }
+
+
 def _ecosystem_status_payload(args: argparse.Namespace) -> dict[str, object]:
     store = PortalEcosystemStore(Path(args.state_db))
     try:
@@ -2343,6 +2385,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _host_attempt_payload(args)
             elif args.host_command == "reconcile":
                 payload = _host_reconcile_payload(args)
+            elif args.host_command == "pump":
+                payload = _host_pump_payload(args)
             else:
                 parser.error("unsupported host command")
                 return 2
