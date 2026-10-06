@@ -250,10 +250,10 @@ class PortalHostBridgeStore:
                 authorized_effects_json, available, attached, current,
                 preference
             FROM portal_host_routes
-            WHERE expires_at > ?
+            WHERE observed_at <= ? AND expires_at > ?
             ORDER BY adapter_id, route_id, node_id, target_kind, target_id
             """,
-            (observed,),
+            (observed, observed),
         ).fetchall()
         return tuple(
             PortalRouteAdvertisement(
@@ -354,10 +354,10 @@ class PortalHostBridgeStore:
             """
             SELECT node_id, occupied_slots
             FROM portal_host_node_occupancy
-            WHERE expires_at > ?
+            WHERE observed_at <= ? AND expires_at > ?
             ORDER BY node_id
             """,
-            (observed,),
+            (observed, observed),
         ).fetchall()
         return {
             str(row["node_id"]): int(row["occupied_slots"])
