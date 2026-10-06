@@ -628,6 +628,43 @@ class PortalHostBridgeStore:
             ).fetchall()
         return tuple(self._row_payload(row) for row in rows)
 
+    def pending_dispatch_diagnostics(
+        self,
+        *,
+        session_id: str | None = None,
+        now: float | None = None,
+    ) -> tuple[dict[str, object], ...]:
+        observed = float(time.time() if now is None else now)
+        parameters: tuple[object, ...] = ()
+        session_clause = ""
+        if session_id is not None:
+            session_id = _required(session_id, "session_id")
+            session_clause = " AND session_id = ?"
+            parameters = (session_id,)
+
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM portal_host_dispatches
+            WHERE state = 'QUEUED'
+            """ + session_clause + """
+            ORDER BY created_at, dispatch_id
+            """,
+            parameters,
+        ).fetchall()
+
+        diagnostics: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._row_payload(row)
+            payload["route_qualified"] = (
+                self._dispatch_route_is_currently_qualified(
+                    row,
+                    now=observed,
+                )
+            )
+            diagnostics.append(payload)
+        return tuple(diagnostics)
+
     def take_pending_dispatch(
         self,
         *,
