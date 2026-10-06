@@ -64,7 +64,17 @@ Run a durable portfolio command session (the occupied-node values are a current 
       --occupied-node lappy=54 \
       --occupied-node worklaptop=0
 
-`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`.
+That form performs durable admission/reconciliation/refill but does not invent an execution route. To enable the built-in advisory process-proposal adapter, supply an explicit worker-backend manifest:
+
+    portal run \
+      --session-id portfolio \
+      --nodes path/to/nodes.yaml \
+      --worker-backends path/to/worker-backends.yaml \
+      --workspace-root .portal/workers
+
+The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
+
+`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same optional `--worker-backends`, `--workspace-root`, `--worker-holder-prefix`, and `--delivery-lease-ttl` execution-adapter configuration.
 
 Plan a bounded portfolio wave:
 
