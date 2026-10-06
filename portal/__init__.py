@@ -12,6 +12,12 @@ from .host_bridge import (
     PortalHostNodeCurrentness,
 )
 from .execution_router import CapabilityExecutionAdapter
+from .host_pump import (
+    PortalHostDriverResult,
+    PortalHostPump,
+    PortalHostPumpItemResult,
+    PortalHostPumpResult,
+)
 from .discovery import (
     GitHubRepositoryCatalog,
     RepositoryInventoryItem,
@@ -67,6 +73,10 @@ __all__ = [
     "PortalHostBridgeStore",
     "PortalHostExecutionAdapter",
     "PortalHostNodeCurrentness",
+    "PortalHostDriverResult",
+    "PortalHostPump",
+    "PortalHostPumpItemResult",
+    "PortalHostPumpResult",
     "CapabilityExecutionAdapter",
     "ExecutionNode",
     "LocalProjectRunnerTaskCurrentness",
