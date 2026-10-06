@@ -64,6 +64,7 @@ def _queue(
     subject_id: str,
     adapter_id: str = "github",
     route_id: str | None = None,
+    queued_at: float = 100.0,
 ) -> str:
     if route_id is None:
         route_id = f"{adapter_id}:{subject_id}"
@@ -95,7 +96,7 @@ def _queue(
         result=result,
         packet=packet,
         binding=binding,
-        queued_at=100.0,
+        queued_at=queued_at,
     )
     return str(queued["dispatch_id"])
 
@@ -317,5 +318,68 @@ def test_pump_does_not_swallow_process_control_exceptions(
     current = store.load_dispatch(dispatch_id)
     assert current["state"] == "ATTEMPTED"
     assert current["reconciliation_state"] is None
+    store.close()
+
+def test_stale_queued_route_does_not_block_unrelated_safe_dispatch(
+    tmp_path: Path,
+) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    alpha = _queue(
+        store,
+        run_id="portfolio::g1",
+        subject_id="alpha",
+        queued_at=90.0,
+    )
+    beta = _queue(
+        store,
+        run_id="portfolio::g2",
+        subject_id="beta",
+        queued_at=100.0,
+    )
+
+    store.advertise_route(
+        PortalRouteAdvertisement(
+            adapter_id="github",
+            route_id="github:alpha",
+            node_id="repo-native",
+            target_kind="repository",
+            target_id="thebrazenbeard/alpha",
+            capabilities=("semantic_work",),
+            effect_capabilities=("SOURCE_ONLY",),
+            authorized_effects=("SOURCE_ONLY",),
+            available=True,
+            attached=True,
+            current=False,
+            preference=50,
+        ),
+        observed_at=1.0,
+        ttl_seconds=1_000_000_000_000.0,
+    )
+
+    executed: list[str] = []
+
+    class Driver:
+        def execute(self, dispatch, *, attempt_id):
+            executed.append(str(dispatch["subject_id"]))
+            return PortalHostDriverResult(
+                state="VERIFIED_COMPLETE",
+                evidence_id=f"github:{dispatch['subject_id']}:verified",
+            )
+
+    pump = PortalHostPump(
+        store=store,
+        drivers={"github": Driver()},
+        attempt_id_factory=lambda dispatch: (
+            "attempt:" + str(dispatch["subject_id"])
+        ),
+    )
+    result = pump.run_once(session_id="portfolio")
+
+    assert executed == ["beta"]
+    assert result.route_unqualified == 1
+    assert result.attempted == 1
+    assert result.verified_complete == 1
+    assert store.load_dispatch(alpha)["state"] == "QUEUED"
+    assert store.load_dispatch(beta)["reconciliation_state"] == "VERIFIED_COMPLETE"
     store.close()
 
