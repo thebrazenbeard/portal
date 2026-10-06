@@ -1871,6 +1871,16 @@ def prepare_portal_wave(
     occupied_node_slots_map = dict(occupied_node_slots or {})
 
     wave = load_advancement_wave(wave_path)
+    active_set = set(active_tuple)
+    unsupported_queued = tuple(
+        (item.subject_kind, item.subject_id)
+        for item in wave.items
+        if item.subject_kind != "repository"
+        and (item.subject_kind, item.subject_id) not in active_set
+    )
+    effective_excluded = tuple(
+        dict.fromkeys((*excluded_tuple, *unsupported_queued))
+    )
     corpus = load_portfolio_corpus(corpus_path, public_safe=True)
     registry = load_project_snapshot(projects_path)
     binding_report = bind_wave_to_operator_registry(
@@ -1885,7 +1895,7 @@ def prepare_portal_wave(
         budget=budget,
         nodes=node_tuple,
         occupied_collision_keys=occupied_tuple,
-        excluded_subjects=excluded_tuple,
+        excluded_subjects=effective_excluded,
         active_subjects=active_tuple,
         occupied_node_slots=occupied_node_slots_map,
     )
@@ -1893,7 +1903,7 @@ def prepare_portal_wave(
         wave_path,
         budget=budget,
         occupied_collision_keys=occupied_tuple,
-        excluded_subjects=excluded_tuple,
+        excluded_subjects=effective_excluded,
         active_subjects=active_tuple,
     )
     plan_binding = plan_payload.get("plan_binding")
@@ -1935,7 +1945,7 @@ def prepare_portal_wave(
             "occupied_collision_keys": sorted(occupied_tuple),
             "excluded_subjects": sorted(
                 f"{kind}:{subject_id}"
-                for kind, subject_id in excluded_tuple
+                for kind, subject_id in effective_excluded
             ),
             "active_subjects": sorted(
                 f"{kind}:{subject_id}"
