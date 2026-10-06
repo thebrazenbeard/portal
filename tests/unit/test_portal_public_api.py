@@ -6,7 +6,11 @@ import portal
 def test_public_api_exposes_execution_routing_contract() -> None:
     expected = {
         "CapabilityExecutionAdapter",
+        "LocalProjectRunnerTaskCurrentness",
         "PortalDispatchRecord",
+        "PortalHostBridgeStore",
+        "PortalHostExecutionAdapter",
+        "PortalHostNodeCurrentness",
         "PortalProposalProcessAdapter",
         "PortalReconciliationRecord",
         "PortalRouteAdvertisement",
