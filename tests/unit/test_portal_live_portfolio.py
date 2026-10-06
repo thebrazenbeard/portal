@@ -249,6 +249,9 @@ def test_live_overlay_rejects_missing_discovery_identities(tmp_path: Path) -> No
     payload = json.loads(wave_path.read_text(encoding="utf-8"))
     payload["identities"].pop("DISCOVERY")
     payload["identities"]["OTHER"] = "schema-valid alternate identity"
+    for item in payload["items"]:
+        if item["lead_identity"] == "DISCOVERY":
+            item["lead_identity"] = "OTHER"
     wave_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     import pytest
