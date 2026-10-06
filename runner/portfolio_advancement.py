@@ -168,6 +168,9 @@ def validate_wave_against_corpus(
     public_safe: bool,
 ) -> None:
     binding = wave.corpus_binding
+    if binding.get("binding_kind") == "LOCAL_SHA256":
+        if str(binding.get("sha256", "")) != corpus.sha256:
+            raise ValueError("wave local corpus sha256 does not match corpus")
     if int(binding["total_repository_count"]) != corpus.counts.total:
         raise ValueError("wave total repository count does not match corpus")
     if int(binding["private_repository_count"]) != corpus.counts.private:
