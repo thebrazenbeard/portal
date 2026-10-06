@@ -210,3 +210,25 @@ def test_unknown_live_occupancy_node_fails_closed() -> None:
             nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
             occupied_node_slots={"ghost": 1},
         )
+
+
+def test_blocked_subject_reserves_collision_without_using_assignment_budget() -> None:
+    wave = _wave(
+        _item("blocked", "example/shared", lead="vera"),
+        _item("colliding", "example/shared", lead="review"),
+        _item("unrelated", "example/unrelated", lead="vera"),
+    )
+    plan = plan_portal_wave(
+        wave,
+        budget=_budget(1),
+        nodes=(ExecutionNode(node_id="worklaptop", max_parallel=1),),
+        blocked_subjects=(("repository", "blocked"),),
+    )
+
+    assert [item.subject_id for item in plan.assignments] == ["unrelated"]
+    reasons = {
+        item.subject_id: item.reason
+        for item in plan.runner_plan.deferred
+    }
+    assert reasons["blocked"] == "BLOCKED_ACTIVE"
+    assert reasons["colliding"] == "COLLISION"
