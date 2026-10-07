@@ -38,11 +38,11 @@ The resident-host source composes:
 - `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;
 - Pre-Active scheduler/observer state and `autonomous.turn` admission;
 - the current Pre-Active `VolitionBridge`, where validated `volition.signal` events can produce endogenous cognition requests without effect authority;
-- P.O.R.T.A.L. cognition-route discovery and deterministic route selection;
+- a resident cognition route bound to Pre-Active's persisted active model target;
 - durable cognition provenance and Vera host-acceptance receipts;
 - the same IPC path for human and autonomous cognition.
 
-Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
+The resident Vera host does not select cognition by scanning whatever local model servers happen to be installed. A staged runtime binds one explicit loopback OpenAI-compatible cognition target into Pre-Active state before host launch; the host reads that active target, verifies that its configured model is currently advertised, and fails closed if the target is absent, stale, unreachable, or mismatched. Generic Ollama/Codex discovery remains available as diagnostic compatibility surface, but it is not the resident Vera cognition policy and there is no silent Ollama fallback. Changing the bound model target changes runtime identity and still does not grant protected-effect authority.
 
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 

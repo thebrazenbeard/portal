@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import portal.desktop_cognition as desktop_cognition
 from portal.desktop_cognition import (
     CognitionRequest,
     CognitionRoute,
@@ -232,3 +233,115 @@ def test_unavailable_stale_or_insufficient_routes_are_not_selected() -> None:
         )
         is None
     )
+
+
+def test_resident_pre_active_target_discovery_surface_exists() -> None:
+    assert callable(getattr(desktop_cognition, "discover_pre_active_target_routes", None))
+
+
+def test_resident_routes_bind_only_the_active_pre_active_target() -> None:
+    routes = desktop_cognition.discover_pre_active_target_routes(
+        active_target_probe=lambda: {
+            "name": "vera-base",
+            "provider": "openai-compatible",
+            "base_url": "http://127.0.0.1:18081/v1",
+            "model": "qwen3.5-4b-local",
+            "api_key_env": None,
+            "active": True,
+            "updated_at": 100.0,
+        },
+        models_probe=lambda base_url: {
+            "object": "list",
+            "data": [{"id": "qwen3.5-4b-local", "object": "model"}],
+        },
+    )
+
+    assert len(routes) == 1
+    route = routes[0]
+    assert route.route_id == "preactive-target:vera-base"
+    assert route.provider == "pre_active_target"
+    assert route.model_or_agent == "qwen3.5-4b-local"
+    assert route.base_url == "http://127.0.0.1:18081/v1"
+    assert route.local is True
+    assert route.auto_admissible is True
+    assert route.effect_authority_ceiling == "COGNITION_ONLY_NO_PROTECTED_EFFECT"
+
+
+def test_resident_routes_fail_closed_without_an_active_or_ready_pre_active_target() -> None:
+    assert desktop_cognition.discover_pre_active_target_routes(
+        active_target_probe=lambda: None,
+        models_probe=lambda _base_url: (_ for _ in ()).throw(
+            AssertionError("must not probe without a target")
+        ),
+    ) == ()
+
+    assert desktop_cognition.discover_pre_active_target_routes(
+        active_target_probe=lambda: {
+            "name": "vera-base",
+            "provider": "openai-compatible",
+            "base_url": "http://127.0.0.1:18081/v1",
+            "model": "qwen3.5-4b-local",
+            "active": True,
+        },
+        models_probe=lambda _base_url: {
+            "object": "list",
+            "data": [{"id": "different-model", "object": "model"}],
+        },
+    ) == ()
+
+
+def test_resident_target_discovery_uses_bound_api_key_environment(
+    monkeypatch,
+) -> None:
+    import io
+    import json
+    import urllib.request
+
+    observed: dict[str, object] = {}
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float):
+        observed["authorization"] = request.headers.get("Authorization")
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "object": "list",
+                    "data": [{"id": "qwen3.5-4b-local", "object": "model"}],
+                }
+            ).encode("utf-8")
+        )
+
+    monkeypatch.setenv("VERA_LOCAL_MODEL_TOKEN", "secret-token")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    routes = desktop_cognition.discover_pre_active_target_routes(
+        active_target_probe=lambda: {
+            "name": "vera-base",
+            "provider": "openai-compatible",
+            "base_url": "http://127.0.0.1:18081/v1",
+            "model": "qwen3.5-4b-local",
+            "api_key_env": "VERA_LOCAL_MODEL_TOKEN",
+            "active": True,
+        },
+    )
+
+    assert len(routes) == 1
+    assert routes[0].api_key_env == "VERA_LOCAL_MODEL_TOKEN"
+    assert observed["authorization"] == "Bearer secret-token"
+
+
+def test_resident_routes_reject_non_loopback_targets_even_if_persisted_active() -> None:
+    routes = desktop_cognition.discover_pre_active_target_routes(
+        active_target_probe=lambda: {
+            "name": "unsafe",
+            "provider": "openai-compatible",
+            "base_url": "https://example.com/v1",
+            "model": "remote-model",
+            "active": True,
+        },
+        models_probe=lambda _base_url: {
+            "object": "list",
+            "data": [{"id": "remote-model", "object": "model"}],
+        },
+    )
+
+    assert routes == ()

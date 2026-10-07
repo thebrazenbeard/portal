@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import json
+import os
 import shutil
 import subprocess
 from typing import Callable, Mapping
+import urllib.parse
 import urllib.request
 
 
@@ -27,11 +30,126 @@ class CognitionRoute:
     effect_authority_ceiling: str
     preference: int = 100
     observed_version: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
 
 
 CommandProbe = Callable[[str, tuple[str, ...]], str | None]
 OllamaTagsProbe = Callable[[], Mapping[str, object] | None]
 PreActiveModelsProbe = Callable[[], Mapping[str, object] | None]
+PreActiveTargetProbe = Callable[[], Mapping[str, object] | None]
+OpenAIModelsProbe = Callable[[str], Mapping[str, object] | None]
+
+
+def _loopback_openai_base_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    base_url = value.strip().rstrip("/")
+    if not base_url:
+        return None
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return None
+    try:
+        is_loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        is_loopback = parsed.hostname.lower() == "localhost"
+    return base_url if is_loopback else None
+
+
+def _default_openai_models(
+    base_url: str,
+    *,
+    api_key_env: str | None = None,
+) -> Mapping[str, object] | None:
+    headers = {"Accept": "application/json"}
+    if api_key_env:
+        token = os.environ.get(api_key_env)
+        if not token:
+            return None
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/models",
+        headers=headers,
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            value = json.load(response)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def discover_pre_active_target_routes(
+    *,
+    active_target_probe: PreActiveTargetProbe,
+    models_probe: OpenAIModelsProbe | None = None,
+) -> tuple[CognitionRoute, ...]:
+    target = active_target_probe()
+    if not isinstance(target, Mapping) or target.get("active") is not True:
+        return ()
+    if target.get("provider") != "openai-compatible":
+        return ()
+
+    name = target.get("name")
+    model = target.get("model")
+    base_url = _loopback_openai_base_url(target.get("base_url"))
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or not isinstance(model, str)
+        or not model.strip()
+        or base_url is None
+    ):
+        return ()
+
+    api_key_env = target.get("api_key_env")
+    if api_key_env is not None and not isinstance(api_key_env, str):
+        return ()
+    normalized_api_key_env = (
+        api_key_env.strip() if isinstance(api_key_env, str) else None
+    ) or None
+
+    if models_probe is None:
+        advertised = _default_openai_models(
+            base_url,
+            api_key_env=normalized_api_key_env,
+        )
+    else:
+        advertised = models_probe(base_url)
+    if not isinstance(advertised, Mapping):
+        return ()
+    data = advertised.get("data")
+    if not isinstance(data, list):
+        return ()
+    model_id = model.strip()
+    advertised_ids = {
+        item.get("id")
+        for item in data
+        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+    }
+    if model_id not in advertised_ids:
+        return ()
+    return (
+        CognitionRoute(
+            route_id=f"preactive-target:{name.strip()}",
+            provider="pre_active_target",
+            model_or_agent=model_id,
+            local=True,
+            available=True,
+            current=True,
+            capabilities=("text",),
+            incremental_paid_compute=False,
+            auto_admissible=True,
+            effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
+            preference=1,
+            base_url=base_url,
+            api_key_env=normalized_api_key_env,
+        ),
+    )
 
 
 def _default_command_probe(name: str, args: tuple[str, ...]) -> str | None:

@@ -9,7 +9,7 @@ import time
 import traceback
 from typing import Any
 
-from .desktop_cognition import discover_cognition_routes
+from .desktop_cognition import discover_pre_active_target_routes
 from .desktop_ipc import DesktopRuntimeCommandHandler
 from .desktop_pre_active import (
     process_one_autonomous_turn,
@@ -37,8 +37,17 @@ def _atomic_json(path: Path, payload: object) -> None:
 
 
 def _runtime_id(source_manifest: dict[str, object]) -> str:
+    sources = source_manifest.get("sources", [])
+    if "cognition_target" in source_manifest:
+        identity_payload: object = {
+            "sources": sources,
+            "cognition_target": source_manifest.get("cognition_target"),
+        }
+    else:
+        # Preserve the V1 runtime identity derivation for historical installs.
+        identity_payload = sources
     raw = json.dumps(
-        source_manifest.get("sources", []),
+        identity_payload,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -161,6 +170,49 @@ def claim_bridge_request(
     return claimed_path
 
 
+def _cognition_target_binding(value: object) -> tuple[object, ...] | None:
+    if not isinstance(value, dict):
+        return None
+    name = value.get("name")
+    provider = value.get("provider")
+    base_url = value.get("base_url")
+    model = value.get("model")
+    api_key_env = value.get("api_key_env")
+    if not all(isinstance(item, str) for item in (name, provider, base_url, model)):
+        return None
+    if api_key_env is not None and not isinstance(api_key_env, str):
+        return None
+    return (
+        name.strip(),
+        provider.strip(),
+        base_url.strip().rstrip("/"),
+        model.strip(),
+        (api_key_env.strip() if isinstance(api_key_env, str) else None) or None,
+    )
+
+
+def discover_resident_cognition_routes(
+    pre_active: object,
+    *,
+    expected_target: object,
+    models_probe=None,
+):
+    active_target_probe = getattr(pre_active, "get_active_model_target", None)
+    if not callable(active_target_probe):
+        return ()
+    expected_binding = _cognition_target_binding(expected_target)
+    active_target = active_target_probe()
+    if (
+        expected_binding is None
+        or _cognition_target_binding(active_target) != expected_binding
+    ):
+        return ()
+    return discover_pre_active_target_routes(
+        active_target_probe=lambda: active_target,
+        models_probe=models_probe,
+    )
+
+
 def run_host(runtime_root: Path) -> int:
     layout = prepare_runtime_layout(runtime_root)
     runtime_root = layout["runtime_root"]
@@ -214,8 +266,15 @@ def run_host(runtime_root: Path) -> int:
     cognition_ledger = CognitionLedger(
         state_root / "cognition" / "desktop-cognition.sqlite3"
     )
+    def resident_routes():
+        return discover_resident_cognition_routes(
+            pre_active,
+            expected_target=source_manifest.get("cognition_target"),
+        )
+
     cognition_engine = ResidentCognitionEngine(
         ledger=cognition_ledger,
+        discover_routes=resident_routes,
         accept_result=VeraRuntimeAcceptance(
             vera,
             runtime_id=runtime_id,
@@ -258,7 +317,7 @@ def run_host(runtime_root: Path) -> int:
 
     handler = DesktopRuntimeCommandHandler(
         engine=cognition_engine,
-        discover_routes=discover_cognition_routes,
+        discover_routes=resident_routes,
         runtime_status=status,
     )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -209,17 +210,32 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             raise RuntimeError("Ollama response was empty")
         return text.strip()
 
-    if route.provider == "pre_active_local":
+    if route.provider in {"pre_active_local", "pre_active_target"}:
+        base_url = (
+            "http://127.0.0.1:18081/v1"
+            if route.provider == "pre_active_local"
+            else route.base_url
+        )
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise RuntimeError("Pre-Active target route is missing its bound base URL")
         payload = json.dumps(
             {
                 "model": route.model_or_agent,
                 "messages": [{"role": "user", "content": task}],
             }
         ).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if route.api_key_env:
+            token = os.environ.get(route.api_key_env)
+            if not token:
+                raise RuntimeError(
+                    "Pre-Active target API key environment is not populated"
+                )
+            headers["Authorization"] = f"Bearer {token}"
         request = urllib.request.Request(
-            "http://127.0.0.1:18081/v1/chat/completions",
+            f"{base_url.rstrip('/')}/chat/completions",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         with urllib.request.urlopen(request, timeout=180.0) as response:
             body = json.load(response)
