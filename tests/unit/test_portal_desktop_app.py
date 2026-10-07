@@ -293,3 +293,17 @@ def test_loaded_runtime_ipc_cannot_override_stale_supervisor_health():
     snapshot = DesktopViewModel(FakeClient([]), supervisor=Supervisor()).refresh()
     assert snapshot.runtime_state == 'DEGRADED'
     assert snapshot.health_reason == 'heartbeat_stale_process_alive'
+
+
+@pytest.mark.parametrize(
+    ("subject", "label"),
+    [
+        ({"state": "ACTIVE", "verification_state": None, "dispatch_state": "FAILED_RETRYABLE"}, "FAILED_RETRYABLE"),
+        ({"state": "ACTIVE", "verification_state": None, "dispatch_state": "FAILED_DETERMINISTIC"}, "FAILED_DETERMINISTIC"),
+        ({"state": "ACTIVE", "verification_state": None, "dispatch_state": "OUTCOME_UNKNOWN"}, "OUTCOME_UNKNOWN"),
+        ({"state": "ACTIVE", "verification_state": None, "dispatch_state": "DISPATCHED"}, "Pending"),
+        ({"state": "HELD", "verification_state": "VERIFIED_HELD", "dispatch_state": "FAILED_RETRYABLE"}, "VERIFIED_HELD"),
+    ],
+)
+def test_desktop_portfolio_displays_worker_failures_instead_of_pending(subject, label):
+    assert PortalDesktopApp._portfolio_result_label(subject) == label

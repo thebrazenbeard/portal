@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -199,6 +200,15 @@ def test_run_without_profile_bootstraps_live_runtime_profile(tmp_path, monkeypat
         assert profile["discovered_effect_ceiling"] == "SOURCE_ONLY"
         assert Path(profile["nodes"]).is_file()
         assert Path(profile["worker_backends"]).is_file()
+        import yaml
+        worker_manifest = yaml.safe_load(
+            Path(profile["worker_backends"]).read_text(encoding="utf-8")
+        )
+        assert worker_manifest["workers"][0]["pass_env"] == (
+            ["APPDATA", "GH_CONFIG_DIR"]
+            if os.name == "nt"
+            else ["GH_CONFIG_DIR", "XDG_CONFIG_HOME"]
+        )
         assert result["portfolio_source"] == "LIVE_GITHUB"
         assert result["inventory"] == {
             "public": 67,
