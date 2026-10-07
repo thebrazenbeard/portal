@@ -79,6 +79,11 @@ class DesktopRuntimeCommandHandler:
                         "error": row["error"],
                         "updated_at": row["updated_at"],
                         "evidence_id": row["evidence_id"],
+                        "acceptance": (
+                            json.loads(str(row["acceptance_json"]))
+                            if row.get("acceptance_json")
+                            else None
+                        ),
                         "protected_effect_authority": False,
                     }
                     for row in items

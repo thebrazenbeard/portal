@@ -16,6 +16,7 @@ from .desktop_pre_active import (
     process_one_volition_signal,
 )
 from .desktop_runtime import CognitionLedger, ResidentCognitionEngine
+from .desktop_vera_acceptance import VeraRuntimeAcceptance
 
 
 def _atomic_json(path: Path, payload: object) -> None:
@@ -167,7 +168,13 @@ def run_host(runtime_root: Path) -> int:
     cognition_ledger = CognitionLedger(
         state_root / "cognition" / "desktop-cognition.sqlite3"
     )
-    cognition_engine = ResidentCognitionEngine(ledger=cognition_ledger)
+    cognition_engine = ResidentCognitionEngine(
+        ledger=cognition_ledger,
+        accept_result=VeraRuntimeAcceptance(
+            vera,
+            runtime_id=runtime_id,
+        ),
+    )
 
     started_at = time.time()
     running = True
