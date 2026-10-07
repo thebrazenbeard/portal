@@ -126,7 +126,10 @@ def test_slow_model_keeps_heartbeat_and_status_responsive_and_responses_durable(
         assert release.wait(5)
         return "slow cognition result"
 
-    factory = lambda root, manifest: ResidentHost(root, manifest, discover=lambda: (LOCAL,), invoke=invoke)
+    def factory(root, manifest):
+        host = ResidentHost(root, manifest, discover=lambda: (LOCAL,), invoke=invoke)
+        host.portal._ensure_session(session_id="known-session", holder="qualification", now=time.time())
+        return host
     server = threading.Thread(target=serve, args=(tmp_path, MANIFEST), kwargs={"stop": stop, "host_factory": factory})
     server.start()
     try:
@@ -139,9 +142,35 @@ def test_slow_model_keeps_heartbeat_and_status_responsive_and_responses_durable(
         assert status["pid"] > 0
         assert status["state"] == "ACTIVE"
         assert status["worker_operation"] == "desktop_cognize"
+        began = time.monotonic()
+        portfolio = FileBridgeClient(tmp_path, timeout_seconds=.5, poll_seconds=.01).request(
+            "desktop_portfolio", action="status", session_id="new-session")
+        assert time.monotonic() - began < .5
+        assert portfolio["configured"] is False
+        assert portfolio["session"] is None
+        assert portfolio["cache"] is True
+        assert portfolio["observed_at"] <= time.time()
+        cached_session = FileBridgeClient(tmp_path, timeout_seconds=.5, poll_seconds=.01).request(
+            "desktop_portfolio", action="status", session_id="known-session")
+        assert cached_session["session"]["control_state"] == "RUNNING"
+        assert "known-session" in cached_session["sessions"]
+        mutation_result = {}
+        def stop_portfolio():
+            mutation_result.update(FileBridgeClient(tmp_path, timeout_seconds=3).request(
+                "desktop_portfolio", action="stop", session_id="known-session"))
+        mutation = threading.Thread(target=stop_portfolio)
+        mutation.start()
+        time.sleep(.2)
+        assert mutation.is_alive()
+        still_running = FileBridgeClient(tmp_path, timeout_seconds=.5, poll_seconds=.01).request(
+            "desktop_portfolio", action="status", session_id="known-session")
+        assert still_running["session"]["control_state"] == "RUNNING"
         first_heartbeat = _wait_for(tmp_path / "bridge/heartbeat.json")["observed_at"]
         _wait_for(tmp_path / "bridge/heartbeat.json", lambda b: b["observed_at"] > first_heartbeat)
         release.set()
+        mutation.join(3)
+        assert not mutation.is_alive()
+        assert mutation_result["session"]["control_state"] == "STOPPED"
         response = _wait_for(tmp_path / "bridge/responses/slow.json")
         assert response["result"]["state"] == "COMPLETED"
         assert response["result"]["provenance"]["provider"] == "ollama"
@@ -194,7 +223,8 @@ def test_stalled_cognition_marks_degraded_without_losing_heartbeat(tmp_path):
         (tmp_path / "bridge/requests/stalled.json").write_text(json.dumps({
             "command": "desktop_cognize", "request_id": "stalled", "reason": "test", "task": "wait"}))
         assert entered.wait(3)
-        degraded = _wait_for(tmp_path / "bridge/heartbeat.json", lambda b: b["state"] == "DEGRADED")
+        degraded = _wait_for(tmp_path / "bridge/heartbeat.json", lambda b:
+                             b["state"] == "DEGRADED" and b.get("worker_operation") == "desktop_cognize")
         assert degraded["failure"] == "resident_worker_not_progressing"
         assert degraded["worker_alive"] is True
         status = FileBridgeClient(tmp_path, timeout_seconds=1).request("desktop_status")

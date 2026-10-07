@@ -297,7 +297,18 @@ class ResidentHost:
                 "components": components, "source_manifest": self.manifest,
                 "vera_currentness": vera_context, "last_cognition": activity[0] if activity else None,
                 "last_progress_at": self.last_progress, "pending_effects": [],
+                "portfolio_cache": self.portfolio_snapshot(),
                 "protected_effect_authority": False, "native_openai_router_replaced": False}
+
+    def portfolio_snapshot(self):
+        from .desktop_portfolio import DesktopPortfolioController
+        if not hasattr(self, "portfolio"):
+            self.portfolio = DesktopPortfolioController(self.root, session=self.portal)
+        # Read exclusively on the component owner. Cached status never invokes
+        # admission, a driver, or a second SQLite connection on the IPC thread.
+        default = self.portfolio.handle({"action": "status", "session_id": "portfolio"})
+        sessions = {session_id: self.portal.status(session_id) for session_id in default["sessions"]}
+        return {"observed_at": time.time(), "default": {**default, "session": None}, "sessions": sessions}
 
     def handle(self, request):
         command = request.get("command")
@@ -451,6 +462,20 @@ def serve(root: Path, manifest: dict[str, object], *, stop: threading.Event | No
                         if not 1 <= limit <= 200:
                             raise ValueError("limit must be between 1 and 200")
                         result = {**activity, "items": activity["items"][:limit]}
+                    elif command == "desktop_portfolio" and request.get("action", "status") == "status":
+                        session_id = str(request.get("session_id") or "portfolio").strip()
+                        if not session_id or len(session_id) > 128:
+                            raise ValueError("session_id must contain 1 to 128 characters")
+                        cached = snapshot.get("portfolio_cache", {})
+                        default = cached.get("default", {
+                            "schema": "PORTAL_DESKTOP_PORTFOLIO_V1", "configured": False,
+                            "profile": None, "profile_error": None, "session": None, "sessions": [],
+                            "dispatch_mode": "ADMISSION_ONLY", "protected_effect_authority": False,
+                            "message": "Portfolio snapshot is waiting for resident component startup.",
+                        })
+                        result = {**default, "session": cached.get("sessions", {}).get(session_id),
+                                  "cache": True, "observed_at": cached.get("observed_at"),
+                                  "runtime_state": snapshot["state"]}
                     elif command == "shutdown":
                         stop.set()
                         result = {"stopping": True, "runtime_id": snapshot["runtime_id"], "protected_effect_authority": False}

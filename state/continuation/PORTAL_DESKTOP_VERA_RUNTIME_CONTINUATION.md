@@ -288,3 +288,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Read-only portfolio IPC is included. Qualification receipt writes atomically; source-event dedup is unique per proof. Windows transient response sharing denial polls the same durable ID without another submission.
 - TDD correlation/replacement tests failed first; final qualifier+IPC surface -> 18 passed. Includes real Pre-Active Engine, VolitionBridge, QualifiedVeraRuntime and filesystem IPC with fake local cognition. All component remote mains freshly unchanged: Vera e5af8cb740267bb5674864571e915842bf5e6677; Pre-Active 1f23a809d7274df506e03e2d9052525538c3bcf6; Volition dbc628d376515a0a523b1eecdf62129cca5d6b08.
 - Exact head: commit containing this continuation. Next: current-source staged installer using discovered Ollama, UI closure proof and complete regression result. No live install replaced.
+
+## Responsive portfolio monitoring checkpoint — 2026-10-07
+- State-owner publishes cached portfolio snapshots with observation time. Portfolio Refresh returns immediately during slow cognition, shows cache/current runtime state and never opens competing mutable stores.
+- Stop/Hold/Run/Continue remain serialized; they cannot cancel or claim completion of in-flight cognition or worker effects. Cached unknown and known session monitoring does not imply new admission.
+- Slow-model test proved status deadline failure before fix; final resident/layout/controller surface -> 18 passed, including known RUNNING cached session <=0.5s and Stop transitioning only after admitted cognition returns.
+- Exact head: commit containing this continuation. Lou-Pole semantic candidates remain under active repair: upstream locality/cost proof for generic loopback gateways and submission-only crash recovery. Next checkpoint closes those, then clean staged proof.
