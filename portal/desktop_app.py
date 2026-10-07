@@ -298,6 +298,9 @@ class PortalDesktopApp:
             command=self.deny_selected_authority,
         )
         self.deny_button.pack(side="left", padx=(8, 0))
+        # A missing authority request must not look like an actionable grant.
+        self.approve_button.configure(state="disabled")
+        self.deny_button.configure(state="disabled")
 
         self.status_var = tk.StringVar(value="")
         ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
@@ -361,6 +364,9 @@ class PortalDesktopApp:
         ) or "No cognition activity recorded."
         self._set_text(self.activity_text, activity)
         self._pending_effects = snapshot.pending_effects
+        button_state = "normal" if snapshot.pending_effects else "disabled"
+        self.approve_button.configure(state=button_state)
+        self.deny_button.configure(state=button_state)
         self.effects_list.delete(0, "end")
         for effect in snapshot.pending_effects:
             self.effects_list.insert(
@@ -582,6 +588,20 @@ class PortalDesktopApp:
                 self._events.put(("portfolio_error", f"{type(exc).__name__}: {exc}"))
         threading.Thread(target=work, daemon=True).start()
 
+    @staticmethod
+    def _portfolio_result_label(subject: dict[str, object]) -> str:
+        verified = subject.get("verification_state")
+        if isinstance(verified, str) and verified:
+            return verified
+        dispatch = subject.get("dispatch_state")
+        if dispatch in {
+            "FAILED_RETRYABLE", "FAILED_DETERMINISTIC",
+            "OUTCOME_UNKNOWN", "FAILED_PRECONDITION",
+            "FAILED_EXECUTION",
+        }:
+            return str(dispatch)
+        return "Pending"
+
     def _render_portfolio(self, result: dict) -> None:
         session = result.get("session")
         self.portfolio_tree.delete(*self.portfolio_tree.get_children())
@@ -634,7 +654,7 @@ class PortalDesktopApp:
                     item.get("subject_id"),
                     item.get("state"),
                     route,
-                    item.get("verification_state") or "Pending",
+                    self._portfolio_result_label(item),
                 ),
             )
             self._portfolio_subjects[key] = {

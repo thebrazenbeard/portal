@@ -361,23 +361,31 @@ def _run_proposal_slot(
             spec=backend,
             workspace_root=workspace_root,
         )
-        if worker.receipt_class != "PROPOSED_SOURCE_TREE":
-            raise ValueError(
-                "advisory source worker must return PROPOSED_SOURCE_TREE"
+        if worker.receipt_class in {
+            "FAILED_RETRYABLE", "FAILED_DETERMINISTIC", "OUTCOME_UNKNOWN"
+        }:
+            # A valid failure receipt does not have a source proposal.
+            # Preserve its exact class and durable receipt evidence.
+            proposal = None
+        elif worker.receipt_class == "PROPOSED_SOURCE_TREE":
+            proposal_artifacts = tuple(
+                artifact
+                for artifact in worker.artifacts
+                if artifact.kind == "SOURCE_TREE_PROPOSAL"
             )
-        proposal_artifacts = tuple(
-            artifact
-            for artifact in worker.artifacts
-            if artifact.kind == "SOURCE_TREE_PROPOSAL"
-        )
-        if len(proposal_artifacts) != 1:
-            raise ValueError(
-                "PROPOSED_SOURCE_TREE requires exactly one SOURCE_TREE_PROPOSAL artifact"
+            if len(proposal_artifacts) != 1:
+                raise ValueError(
+                    "PROPOSED_SOURCE_TREE requires exactly one SOURCE_TREE_PROPOSAL artifact"
+                )
+            proposal = load_source_tree_proposal(
+                proposal_artifacts[0].path,
+                packet=claim.payload,
             )
-        proposal = load_source_tree_proposal(
-            proposal_artifacts[0].path,
-            packet=claim.payload,
-        )
+        else:
+            raise ValueError(
+                "advisory source worker must return PROPOSED_SOURCE_TREE "
+                "or a defined failure receipt"
+            )
         receipt_class = worker.receipt_class
         evidence_sha256 = worker.evidence_sha256
         reason = worker.reason

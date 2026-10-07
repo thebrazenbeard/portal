@@ -339,6 +339,15 @@ class DesktopPortfolioController:
                         "node_id": node_id,
                         "kind": "CODEX_GH_PROPOSAL_V1",
                         "timeout_seconds": 840,
+                        # The generic process sandbox remains minimal. Only
+                        # this authenticated GitHub proposal worker receives
+                        # the path to existing CLI credential configuration.
+                        # These are paths/config selectors, not token values.
+                        "pass_env": (
+                            ["APPDATA", "GH_CONFIG_DIR"]
+                            if os.name == "nt"
+                            else ["GH_CONFIG_DIR", "XDG_CONFIG_HOME"]
+                        ),
                         "codex": str(Path(str(executables["codex"])).resolve()),
                         "gh": str(Path(str(executables["gh"])).resolve()),
                         "git": str(Path(str(executables["git"])).resolve()),

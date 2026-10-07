@@ -516,3 +516,53 @@ def test_source_proposal_refuses_stale_source_before_any_mutation(
         )
 
     assert transport.mutations == []
+
+
+@pytest.mark.parametrize(
+    "failure_class",
+    ["FAILED_RETRYABLE", "FAILED_DETERMINISTIC", "OUTCOME_UNKNOWN"],
+)
+def test_advisory_worker_preserves_failure_receipt_class(tmp_path: Path, failure_class: str) -> None:
+    db, transport, packet = _seed(tmp_path)
+    worker = tmp_path / "worker-failure.py"
+    worker.write_text(
+        "import argparse,json\n"
+        "from pathlib import Path\n"
+        "p=argparse.ArgumentParser()\n"
+        "p.add_argument('--portal-packet',required=True)\n"
+        "p.add_argument('--portal-receipt',required=True)\n"
+        "a=p.parse_args()\n"
+        "Path(a.portal_receipt).write_text(json.dumps({"
+        "'schema':'PORTAL_WORKER_RECEIPT_V1',"
+        f"'receipt_class':'{failure_class}',"
+        "'reason':'existing GitHub session not reachable',"
+        "'artifacts':[]}))\n",
+        encoding="utf-8",
+    )
+    result = run_wave_proposal_workers_once(
+        state_db=db,
+        run_id="proposal-run",
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=1),),
+        backends={"alpha": ProcessWorkerSpec(
+            command=(sys.executable, str(worker)),
+            timeout_seconds=10.0,
+            pass_env=(),
+        )},
+        workspace_root=tmp_path / "workers",
+        holder_prefix="portal-proposal",
+        delivery_lease_ttl=30.0,
+        token=None,
+        transport=transport,
+        clock=time.time,
+    )
+    assert result.slots[0].receipt_class == failure_class
+    assert result.slots[0].state == failure_class
+    store = PortalWaveStore(db)
+    try:
+        delivery = store.load_delivery(
+            run_id="proposal-run", subject_id=packet.subject_id
+        )
+    finally:
+        store.close()
+    assert delivery["receipt_class"] == failure_class
+    assert "GitHub session" in delivery["reason"]
