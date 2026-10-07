@@ -5,12 +5,12 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import time
+import traceback
 
-from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .desktop_install import InstallSpec, RuntimeSource, StageRootConflict, prepare_stage_root
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
@@ -57,7 +57,7 @@ def _run(
         env=env,
         check=True,
         text=True,
-        capture_output=capture,
+        capture_output=True,
     )
 
 
@@ -165,38 +165,68 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
     return {str(key): str(path) for key, path in value.items()}
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        completed = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                f"if(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue){{exit 0}}else{{exit 1}}",
-            ],
-            check=False,
-            capture_output=True,
-        )
-    except OSError:
-        return False
-    return completed.returncode == 0
+def host_shim_text(runtime_root: Path) -> str:
+    return (
+        "import os\n"
+        f"os.environ['VERA_RUNTIME_ROOT'] = {str(runtime_root)!r}\n"
+        "from portal.desktop_host import main\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
 
 
-def _host_running(runtime_root: Path) -> bool:
-    heartbeat = runtime_root / "bridge" / "heartbeat.json"
-    if not heartbeat.is_file():
-        return False
-    try:
-        payload = json.loads(heartbeat.read_text(encoding="utf-8-sig"))
-        pid = int(payload["pid"])
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-        return False
-    return _pid_alive(pid)
+def _check_components(python: Path, runtime_root: Path) -> dict[str, object]:
+    completed = _run(
+        [str(python), "-m", "portal.desktop_host", "--runtime-root", str(runtime_root), "--check"],
+        cwd=runtime_root,
+        capture=True,
+    )
+    payload = json.loads(completed.stdout)
+    if not isinstance(payload, dict) or payload.get("components_loaded") is not True:
+        raise RuntimeError("resident component check did not report components_loaded=true")
+    return payload
 
 
-def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | None:
-    if _host_running(runtime_root):
-        return None
+def _verify_existing_binding(python: Path, runtime_root: Path) -> None:
+    # Execute in the installation's interpreter so import-origin checks bind
+    # the editable installed packages, rather than this bootstrap checkout.
+    _run([
+        str(python), "-c",
+        "from pathlib import Path; import sys; from portal.desktop_host import load_manifest; load_manifest(Path(sys.argv[1]))",
+        str(runtime_root),
+    ], cwd=runtime_root, capture=True)
+
+
+def _check_existing_runtime(runtime_root: Path, python: Path, spec: InstallSpec) -> None:
+    from .desktop_ipc import FileBridgeClient
+    from .desktop_supervisor import RuntimeState, RuntimeSupervisor, RuntimeSupervisorConfig
+
+    supervisor = RuntimeSupervisor(RuntimeSupervisorConfig(runtime_root))
+    status = supervisor.status()
+    if status.state is RuntimeState.OFFLINE:
+        _check_components(python, runtime_root)
+        _start_host(runtime_root, python)
+        return
+    if (
+        status.components_loaded is not True
+        or status.heartbeat_age_seconds is None
+        or status.heartbeat_age_seconds > supervisor.config.heartbeat_ttl_seconds
+        or (status.state is not RuntimeState.ACTIVE and not (
+            status.state is RuntimeState.BLOCKED and status.reason == "no_admissible_cognition_route"
+        ))
+    ):
+        raise RuntimeError(f"runtime is not healthy enough for logon activation: {status.reason}")
+    payload = FileBridgeClient(runtime_root, timeout_seconds=5.0).request("desktop_status")
+    manifest = payload.get("source_manifest")
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("sources") != spec.to_mapping()["sources"]
+        or payload.get("protected_effect_authority") is not False
+    ):
+        raise RuntimeError("running runtime does not match the exact installation source bindings")
+
+
+def _launch_logged(runtime_root: Path, python: Path, script: Path) -> int:
     logs = runtime_root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     stdout = open(logs / "runtime.stdout.log", "ab", buffering=0)
@@ -206,10 +236,10 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
     creationflags = (
         getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         | getattr(subprocess, "DETACHED_PROCESS", 0)
-    )
+    ) if os.name == "nt" else 0
     try:
-        return subprocess.Popen(
-            [str(python), "-m", "portal.desktop_host"],
+        process = subprocess.Popen(
+            [str(python), str(script)],
             cwd=str(runtime_root),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -218,9 +248,32 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
             close_fds=True,
             creationflags=creationflags,
         )
+        return int(process.pid)
     finally:
         stdout.close()
         stderr.close()
+
+
+def _start_host(runtime_root: Path, python: Path) -> None:
+    from .desktop_supervisor import RuntimeState, RuntimeSupervisor, RuntimeSupervisorConfig
+
+    supervisor = RuntimeSupervisor(
+        RuntimeSupervisorConfig(runtime_root),
+        launcher=lambda exe, script: _launch_logged(runtime_root, exe, script),
+    )
+    status = supervisor.ensure_started()
+    deadline = time.monotonic() + 30.0
+    while status.state is RuntimeState.STARTING and time.monotonic() < deadline:
+        time.sleep(0.1)
+        status = supervisor.status()
+    if (
+        status.components_loaded is not True
+        or status.heartbeat_age_seconds is None
+        or status.heartbeat_age_seconds > supervisor.config.heartbeat_ttl_seconds
+        or status.state in (RuntimeState.OFFLINE, RuntimeState.STARTING, RuntimeState.DEGRADED)
+        or (status.state is RuntimeState.BLOCKED and status.reason != "no_admissible_cognition_route")
+    ):
+        raise RuntimeError(f"runtime startup failed: {status.reason}; inspect logs/runtime.stderr.log")
 
 
 def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
@@ -251,6 +304,7 @@ def _record_activation_state(
     requested: bool,
     qualified: bool,
     active: bool,
+    local_cognition_qualified: bool = True,
 ) -> None:
     path = runtime_root / "RUNTIME_INSTALL_SPEC.json"
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -261,7 +315,7 @@ def _record_activation_state(
         "qualified": qualified,
         "active": active,
     }
-    payload["claim_ceiling"] = (
+    payload["claim_ceiling"] = ("" if local_cognition_qualified else "COMPONENT_CHECKED_COGNITION_NOT_PROVEN_") + (
         "QUALIFIED_USER_LOCAL_RUNTIME_ACTIVE_AT_LOGON_"
         "NOT_NATIVE_CHATGPT_ROUTER_NOT_PROTECTED_EFFECT_AUTHORITY"
         if active
@@ -282,89 +336,122 @@ def install(
     runtime_root: Path,
     spec: InstallSpec,
     activate: bool,
+    dry_run: bool = False,
+    allow_local_no_paid_compute: bool = False,
 ) -> dict[str, object]:
-    runtime_root = prepare_stage_root(runtime_root, spec)
-    spec.write(runtime_root / "RUNTIME_INSTALL_SPEC.json")
-
-    python = _install_sources(runtime_root, spec)
-    imports = _verify_imports(python, runtime_root)
-    _start_host(runtime_root, python)
-    qualification = _qualify(runtime_root, python)
-
-    host_launcher = runtime_root / "StartVeraRuntime.cmd"
-    host_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_host"),
-        encoding="ascii",
-    )
-    desktop_launcher = runtime_root / "PortalDesktop.cmd"
-    desktop_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_app"),
-        encoding="ascii",
-    )
-
-    task_name = None
-    if activate:
-        task_name = "VeraDesktopRuntime-" + re.sub(
-            r"[^A-Za-z0-9_.-]",
-            "_",
-            spec.install_id,
-        )
-        _run(
-            build_logon_task_command(
-                task_name=task_name,
-                launcher=host_launcher,
-            )
-        )
-        query = _run(
-            [
-                "schtasks.exe",
-                "/Query",
-                "/TN",
-                task_name,
-                "/FO",
-                "LIST",
-                "/V",
-            ],
-            capture=True,
-        )
-        if task_name not in query.stdout:
-            raise RuntimeError("registered logon task could not be read back")
-
-    _record_activation_state(
-        runtime_root,
-        requested=activate,
-        qualified=True,
-        active=bool(activate),
-    )
-
-    result = {
-        "schema": "PORTAL_DESKTOP_INSTALLATION_RESULT_V1",
-        "runtime_root": str(runtime_root),
-        "install_id": spec.install_id,
-        "source_map": {
-            item.component: {
-                "repository": item.repository,
-                "ref": item.ref,
-                "sha": item.sha,
-            }
-            for item in spec.sources
-        },
-        "imports": imports,
-        "qualification": qualification,
-        "activation": {
-            "requested": activate,
-            "task_name": task_name,
-            "active_at_logon": bool(activate),
-        },
-        "protected_effect_authority": False,
-        "native_openai_router_replaced": False,
-        "installed_at": time.time(),
+    spec.validate()
+    runtime_root = Path(runtime_root).resolve()
+    user_root = Path.home().resolve()
+    if runtime_root == user_root or not runtime_root.is_relative_to(user_root):
+        raise ValueError("runtime root must be a dedicated directory inside the current user's home")
+    policy = {"allow_local_no_paid_compute": bool(allow_local_no_paid_compute)}
+    prior_path = runtime_root / "RUNTIME_INSTALL_SPEC.json"
+    prior: dict[str, object] | None = None
+    if prior_path.exists():
+        if InstallSpec.read(prior_path) != spec:
+            raise StageRootConflict("stage root is already bound to a different exact source spec; choose a new root")
+        prior = json.loads(prior_path.read_text(encoding="utf-8-sig"))
+        if prior.get("cognition_policy", {"allow_local_no_paid_compute": False}) != policy:
+            raise StageRootConflict("stage root is already bound to a different cognition policy; choose a new root")
+    source_map = {
+        item.component: {"repository": item.repository, "ref": item.ref, "sha": item.sha}
+        for item in spec.sources
     }
-    (runtime_root / "INSTALLATION_RESULT.json").write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return result
+    if dry_run:
+        return {
+            "schema": "PORTAL_DESKTOP_INSTALLATION_PLAN_V1", "dry_run": True,
+            "runtime_root": str(runtime_root), "install_id": spec.install_id,
+            "source_map": source_map, "cognition_policy": policy,
+            "activation_requested": activate, "protected_effect_authority": False,
+        }
+
+    activation = prior.get("activation", {}) if prior else {}
+    result_path = runtime_root / "INSTALLATION_RESULT.json"
+    qualified_prior = isinstance(activation, dict) and activation.get("qualified") is True
+    if qualified_prior:
+        if not result_path.is_file():
+            raise StageRootConflict("qualified runtime lacks its installation result; restore evidence or choose a new root")
+        result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(result, dict) or not isinstance(result.get("qualification"), dict) or result["qualification"].get("qualified") is not True:
+            raise StageRootConflict("qualified runtime has invalid installation evidence; choose a new root")
+        _verify_existing_binding(_venv_python(runtime_root), runtime_root)
+        # Re-running an exact installation returns its retained evidence. It
+        # must never checkout sources, reinstall packages, or reset activation
+        # while those editable sources may be executing in a resident process.
+        if not activate or activation.get("active") is True:
+            return {**result, "reused_installation": True, "qualification_rechecked": False}
+    else:
+        from .desktop_supervisor import RuntimeState, RuntimeSupervisor, RuntimeSupervisorConfig
+        observed = RuntimeSupervisor(RuntimeSupervisorConfig(runtime_root)).status()
+        if observed.state is not RuntimeState.OFFLINE:
+            raise StageRootConflict("unqualified root may have a resident process; inspect health and stage a separate root before installation")
+
+    runtime_root = prepare_stage_root(runtime_root, spec)
+    log = runtime_root / "logs/install.log"
+    try:
+        if not qualified_prior:
+            payload = json.loads(prior_path.read_text(encoding="utf-8-sig"))
+            payload["cognition_policy"] = policy
+            _write_json(prior_path, payload)
+            python = _install_sources(runtime_root, spec)
+            imports = _verify_imports(python, runtime_root)
+            qualification = _check_components(python, runtime_root)
+            (runtime_root / "host/vera_unified_host.py").write_text(host_shim_text(runtime_root), encoding="utf-8")
+            (runtime_root / "StartVeraRuntime.cmd").write_text(launcher_text(runtime_root, python, "portal.desktop_supervisor"), encoding="utf-8")
+            (runtime_root / "PortalDesktop.cmd").write_text(launcher_text(runtime_root, python, "portal.desktop_app"), encoding="utf-8")
+            _start_host(runtime_root, python)
+            if allow_local_no_paid_compute:
+                qualification = _qualify(runtime_root, python)
+            qualification = {**qualification, "qualified": True, "local_cognition_qualified": bool(allow_local_no_paid_compute)}
+        else:
+            imports = result.get("imports", {})
+            qualification = result["qualification"]
+            _check_existing_runtime(runtime_root, _venv_python(runtime_root), spec)
+
+        task_name = None
+        if activate:
+            task_name = "VeraDesktopRuntime-" + re.sub(r"[^A-Za-z0-9_.-]", "_", spec.install_id)
+            _run(build_logon_task_command(task_name=task_name, launcher=runtime_root / "StartVeraRuntime.cmd"))
+            query = _run(["schtasks.exe", "/Query", "/TN", task_name, "/FO", "LIST", "/V"], capture=True)
+            if task_name not in query.stdout:
+                raise RuntimeError("registered logon task could not be read back; inspect task state before retry")
+
+        _record_activation_state(runtime_root, requested=activate, qualified=True, active=bool(activate), local_cognition_qualified=bool(qualification.get("local_cognition_qualified")))
+        result = {
+            "schema": "PORTAL_DESKTOP_INSTALLATION_RESULT_V1",
+            "runtime_root": str(runtime_root),
+            "install_id": spec.install_id,
+            "source_map": source_map,
+            "cognition_policy": policy,
+            "imports": imports,
+            "qualification": qualification,
+            "activation": {
+                "requested": activate,
+                "task_name": task_name,
+                "active_at_logon": bool(activate),
+            },
+            "protected_effect_authority": False,
+            "native_openai_router_replaced": False,
+            "installed_at": time.time(),
+        }
+        _write_json(result_path, result)
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"{time.time()}: installation component checks passed; local cognition proof={allow_local_no_paid_compute}; activation={activate}\n")
+        return result
+    except Exception as exc:
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"{time.time()}: installation failed; no activation success claimed\n")
+            stream.write(traceback.format_exc())
+            if isinstance(exc, subprocess.CalledProcessError):
+                stream.write(f"\nstdout:\n{exc.stdout or ''}\nstderr:\n{exc.stderr or ''}\n")
+            stream.write("Inspect this log and runtime.stderr.log; keep the exact spec and retry the same staged root or select a new root for changed sources/policy.\n")
+        raise
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    temp.replace(path)
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
@@ -415,11 +502,15 @@ def main() -> None:
     parser.add_argument("--pre-active-sha", required=True)
     parser.add_argument("--volition-sha", required=True)
     parser.add_argument("--activate", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--allow-local-no-paid-compute", action="store_true")
     args = parser.parse_args()
     result = install(
         runtime_root=args.runtime_root,
         spec=_spec_from_args(args),
         activate=args.activate,
+        dry_run=args.dry_run,
+        allow_local_no_paid_compute=args.allow_local_no_paid_compute,
     )
     print(json.dumps(result, sort_keys=True, indent=2))
 

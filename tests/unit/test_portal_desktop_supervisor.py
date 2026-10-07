@@ -281,3 +281,30 @@ def test_windows_process_check_uses_pointer_sized_handle(monkeypatch) -> None:
     assert _windows_process_alive(77)
     assert kernel.OpenProcess.restype is ctypes.wintypes.HANDLE
     assert closed == [handle]
+
+def test_default_launcher_recovers_installed_module_and_retains_logs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from portal.desktop_supervisor import _default_launcher
+    python = tmp_path / '.venv/Scripts/python.exe'
+    python.parent.mkdir(parents=True)
+    python.touch()
+    seen = {}
+    def launch(args, **kwargs):
+        seen.update(args=args, **kwargs)
+        kwargs['stderr'].write(b'actionable launch failure\n')
+        return SimpleNamespace(pid=1234)
+    monkeypatch.setattr(subprocess, 'Popen', launch)
+    assert _default_launcher(python, tmp_path / 'host/vera_unified_host.py') == 1234
+    assert seen['args'] == [str(python), '-m', 'portal.desktop_host', '--runtime-root', str(tmp_path)]
+    assert seen['env']['VERA_RUNTIME_ROOT'] == str(tmp_path)
+    assert (tmp_path / 'logs/runtime.stderr.log').read_text() == 'actionable launch failure\n'
+    assert seen['stderr'].closed
+
+
+def test_supervisor_cli_reports_starting_without_claiming_healthy(tmp_path, monkeypatch, capsys):
+    import portal.desktop_supervisor as module
+    monkeypatch.setattr(module.RuntimeSupervisor, 'ensure_started', lambda self: module.RuntimeStatus(module.RuntimeState.STARTING, 'runtime_launch_requested', pid=99))
+    assert module.main(['--runtime-root', str(tmp_path)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['state'] == 'STARTING'
+    assert report['pid'] == 99

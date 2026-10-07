@@ -125,23 +125,26 @@ def _launch_guard(path: Path) -> Iterator[bool]:
 def _default_launcher(python: Path, script: Path) -> int:
     if not python.is_file():
         raise FileNotFoundError(f"runtime python not found: {python}")
-    if not script.is_file():
-        raise FileNotFoundError(f"runtime host not found: {script}")
+    runtime_root = script.parent.parent.resolve()
+    args = [str(python), str(script)] if script.is_file() else [
+        str(python), "-m", "portal.desktop_host", "--runtime-root", str(runtime_root)
+    ]
     creationflags = 0
     if os.name == "nt":
         creationflags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             | getattr(subprocess, "DETACHED_PROCESS", 0)
         )
-    process = subprocess.Popen(
-        [str(python), str(script)],
-        cwd=str(script.parent),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        creationflags=creationflags,
-    )
+    logs = runtime_root / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, VERA_RUNTIME_ROOT=str(runtime_root))
+    with (logs / "runtime.stdout.log").open("ab", buffering=0) as stdout, \
+            (logs / "runtime.stderr.log").open("ab", buffering=0) as stderr:
+        process = subprocess.Popen(
+            args, cwd=str(runtime_root), env=env,
+            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+            close_fds=True, creationflags=creationflags,
+        )
     return int(process.pid)
 
 
@@ -325,3 +328,21 @@ class RuntimeSupervisor:
             )
             pending.replace(bridge / "launch.json")
             return RuntimeStatus(RuntimeState.STARTING, "runtime_launch_requested", pid=pid)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Thin logon entry point; the OS owns process activation and lifetime."""
+    import argparse
+    from dataclasses import asdict
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runtime-root", type=Path, default=os.environ.get("VERA_RUNTIME_ROOT"))
+    args = parser.parse_args(argv)
+    if args.runtime_root is None:
+        parser.error("--runtime-root or VERA_RUNTIME_ROOT is required")
+    status = RuntimeSupervisor(RuntimeSupervisorConfig(args.runtime_root)).ensure_started()
+    print(json.dumps(asdict(status), sort_keys=True))
+    return 1 if status.state in (RuntimeState.BLOCKED, RuntimeState.DEGRADED) and status.components_loaded is not True else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
