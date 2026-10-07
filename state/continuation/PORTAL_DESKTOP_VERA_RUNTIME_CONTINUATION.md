@@ -54,3 +54,16 @@ Build the idempotent Windows bootstrap/runtime package, install exact source rev
 
 ## Claim ceiling
 SOURCE_IMPLEMENTATION_WITH_FUNCTIONAL_THIN_DESKTOP_SHELL_NOT_INSTALLED_NOT_DEPLOYED_NOT_BOUND_INTO_THE_CURRENT_INSTALLED_RESIDENT_HOST
+
+## Fresh continuation — 2026-10-07
+- Implementation baseline freshly fetched: `99aaf8cd066f0bb3a8ed564c8f84479e2d135ab6`.
+- Remote main: `fa125a74bd42bc2bdabf3f8f9ef677b225db6f76`; coordinator: `a4cf02d34c2f8c4ac2b1e60161cc53e9845616f0`.
+- Exact checkpoint head: the Git commit containing this continuation revision (`git log -1 --format=%H -- state/continuation/PORTAL_DESKTOP_VERA_RUNTIME_CONTINUATION.md`). A commit cannot embed its own SHA without a circular hash; this Git binding is authoritative.
+- Fresh component pins: Vera Mono `e5af8cb740267bb5674864571e915842bf5e6677`, Pre-Active `1f23a809d7274df506e03e2d9052525538c3bcf6`, Volition `dbc628d376515a0a523b1eecdf62129cca5d6b08`.
+- New coherent slice: cognition completion now follows an injected resident acceptance callback; the durable ledger records the receipt, rejection stays retryable, and a reused request ID cannot substitute a different task.
+- TDD: two new acceptance tests failed for the missing callback; implementation then passed all 7 desktop runtime tests.
+- Command: `python -m pytest -q tests/unit/test_portal_desktop_runtime.py --basetemp ../test-tmp-engine-green` -> 7 passed (Python 3.12.10, Windows).
+- Sandbox default temporary directory is unusable for pytest; use a unique workspace `--basetemp`.
+- Next: compose real QualifiedVeraRuntime + Pre-Active Daemon/Engine/observers/scheduler + existing VolitionBridge; add process singleton and responsive heartbeat/IPC; bind explicit local policy. UI and installer work in progress is not yet qualified.
+- Strongest objection accepted: isolated source tests do not prove a composed resident host. Current engine without a Vera acceptance callback explicitly records UNQUALIFIED_LEDGER_ONLY.
+- Claim ceiling remains source-only; no installation or resident end-to-end proof freshly established in this session. Existing live runtimes untouched. Push commits use [skip ci] to avoid initiating paid CI compute.

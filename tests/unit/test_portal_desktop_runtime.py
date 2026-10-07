@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 from portal.desktop_cognition import CognitionRoute
 from portal.desktop_runtime import (
@@ -23,6 +24,39 @@ LOCAL = CognitionRoute(
     effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
     preference=10,
 )
+
+
+def test_acceptance_precedes_completion_and_persists_receipt(tmp_path):
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda route, task: "observed answer",
+            accept_result=lambda request, route, text: {"status": "ACCEPTED_OBSERVATION", "receipt": "intake-1"},
+        )
+        request = CognitionRequestEnvelope("accepted", "HUMAN", "test", "hello", 100)
+        assert engine.process(request).state == "COMPLETED"
+        assert 'intake-1' in ledger.get("accepted")["acceptance_json"]
+        with pytest.raises(ValueError, match="different"):
+            engine.process(CognitionRequestEnvelope("accepted", "HUMAN", "test", "changed", 100))
+    finally:
+        ledger.close()
+
+
+def test_rejected_intake_keeps_request_retryable(tmp_path):
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda route, task: "answer",
+            accept_result=lambda *args: (_ for _ in ()).throw(ValueError("intake rejected")),
+        )
+        result = engine.process(CognitionRequestEnvelope("rejected", "HUMAN", "test", "hi", 100))
+        assert result.state == "FAILED"
+        assert result.retryable
+        assert "intake rejected" in result.error
+    finally:
+        ledger.close()
 
 
 def test_human_request_uses_selected_route_and_persists_provenance(tmp_path: Path) -> None:

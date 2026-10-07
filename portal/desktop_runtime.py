@@ -73,6 +73,9 @@ class CognitionLedger:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(_SCHEMA)
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(desktop_cognition_runs)")}
+        if "acceptance_json" not in columns:
+            self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN acceptance_json TEXT")
 
     def close(self) -> None:
         self.connection.close()
@@ -216,11 +219,13 @@ class ResidentCognitionEngine:
         discover_routes: RouteDiscovery = discover_cognition_routes,
         invoke_route: RouteInvoker = invoke_ollama_text,
         authorized_route_ids: frozenset[str] = frozenset(),
+        accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.discover_routes = discover_routes
         self.invoke_route = invoke_route
         self.authorized_route_ids = authorized_route_ids
+        self.accept_result = accept_result
 
     @staticmethod
     def _result_from_stored(row: dict[str, object]) -> CognitionResult:
@@ -246,6 +251,8 @@ class ResidentCognitionEngine:
     ) -> CognitionResult:
         observed_now = float(time.time() if now is None else now)
         stored = self.ledger.get(request.request_id)
+        if stored is not None and any(stored[key] != getattr(request, key) for key in ("source", "reason", "task")):
+            raise ValueError("request_id already binds a different cognition request")
         if stored is not None and stored["state"] == "COMPLETED":
             return self._result_from_stored(stored)
 
@@ -287,7 +294,18 @@ class ResidentCognitionEngine:
         )
         try:
             response_text = self.invoke_route(route, request.task)
+            if not isinstance(response_text, str) or not response_text.strip():
+                raise ValueError("cognition response must be nonempty text")
+            acceptance = (
+                self.accept_result(request, route, response_text)
+                if self.accept_result else {"status": "UNQUALIFIED_LEDGER_ONLY"}
+            )
+            self.ledger.connection.execute(
+                "UPDATE desktop_cognition_runs SET acceptance_json=? WHERE request_id=?",
+                (json.dumps(acceptance, sort_keys=True), request.request_id),
+            )
         except Exception as exc:
+            observed_now = float(time.time() if now is None else now)
             error = f"{type(exc).__name__}: {exc}"
             evidence_id = self.ledger.store(
                 request,
@@ -309,6 +327,7 @@ class ResidentCognitionEngine:
                 error=error,
             )
 
+        observed_now = float(time.time() if now is None else now)
         evidence_id = self.ledger.store(
             request,
             state="COMPLETED",
