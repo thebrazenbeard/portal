@@ -4,18 +4,18 @@
 
 **Portfolio Orchestration & Repository Tracking Access Layer**
 
-P.O.R.T.A.L. exists so a **single P.O.R.T.A.L. chat** can coordinate and advance the **whole portfolio** in maximal safe parallelism.
+P.O.R.T.A.L. is Vera's **whole-portfolio orchestration and host interface layer**. It coordinates bounded work across repositories, exposes a durable CLI/host bridge, and provides P.O.R.T.A.L. Desktop as a local human interface to the resident Vera runtime.
 
-The intended operating model is not one chat manually working repositories in sequence. Vera acts as the cross-project coordinator; P.O.R.T.A.L. discovers and schedules executable frontiers across all active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane is refilled with the next eligible frontier.
+ChatGPT can be one interaction surface, but it is not a runtime dependency and is no longer the architectural center of P.O.R.T.A.L. Vera acts as the cross-project coordinator; P.O.R.T.A.L. discovers and schedules executable frontiers across active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane can be refilled with the next eligible frontier.
 
-See [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
+The original single-chat design remains a supported interaction pattern and historical architecture input; see [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
 
 ## Architecture
 
 - `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
 - `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
 - Vera owns cross-project coordination and collision/ownership arbitration.
-- Durable state lives outside chat context so a fresh P.O.R.T.A.L. chat can reconstruct and resume the portfolio.
+- Durable state lives outside any one UI or chat context so CLI, Desktop, chat, or another qualified host can reconstruct and resume the portfolio.
 - Node placement and schedulability do not create protected-effect authority.
 
 P.O.R.T.A.L. was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
@@ -24,7 +24,7 @@ P.O.R.T.A.L. was seeded from Project Runner because the required execution loops
 
 The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
 
-The preferred human-facing source surface is now the durable command session. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+The durable command session is the preferred operator/control surface for portfolio orchestration. P.O.R.T.A.L. Desktop is the preferred local human interface to the resident Vera runtime. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
 
 This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
@@ -42,7 +42,7 @@ The resident-host source composes:
 - durable cognition provenance and Vera host-acceptance receipts;
 - the same IPC path for human and autonomous cognition.
 
-Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models—including a trained Vera model when one is actually present and admissible—can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
+Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
 
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
