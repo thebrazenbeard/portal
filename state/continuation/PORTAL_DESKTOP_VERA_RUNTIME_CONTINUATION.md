@@ -173,11 +173,43 @@ Verification after fixes:
 
 These are source-level fixes only. The already-qualified installed runtime remains frozen at Portal `7b4b5b4...`; no new install/cutover is claimed from this review.
 
+## Trained Vera local cognition route — source-only
+
+Patrick proposed using the locally trained Vera model for automation. Fresh host inspection established:
+
+- live Pre-Active Qwen endpoint: `http://127.0.0.1:18081/v1`;
+- currently installed endpoint is base-only and predates adapter provenance metadata;
+- current served base revision: `d61dd146c8fd44c9a49cdb7f59f34e17b61902d8`;
+- latest complete compatible development adapter inspected: `v10r3-lane-b-staged-sequential-step20-20261004`;
+- adapter SHA-256: `b2d6eec7befca3e18cf1fa793a7830197e27bab33bea8e4f42b5a318ee91d116`;
+- its training receipt's two base-shard hashes and tokenizer hash exactly match the base currently served by Pre-Active;
+- current training protocol still classifies development model work as not deployed / not promoted and does not authorize deployment activation.
+
+P.O.R.T.A.L. source now:
+- probes the fixed loopback Pre-Active `/v1/models` endpoint;
+- ignores endpoints that do not explicitly report `effect_authority=false`;
+- treats base-only/unproven Pre-Active models as lower priority than `ollama:vera-local:latest`;
+- promotes an active `vera-*` Pre-Active route to preference 5 only when both adapter SHA-256 (64 lowercase hex) and base revision (40 lowercase hex) are present;
+- invokes that route through the existing OpenAI-compatible loopback `/v1/chat/completions` endpoint;
+- retains Ollama invocation and fail-closed unknown-provider behavior.
+
+Live discovery against the currently installed base-only endpoint leaves the selected route unchanged:
+`ollama:vera-local:latest`.
+
+Verification at the current desktop source head before checkpoint:
+- trained-route focused tests: 10 passed;
+- complete desktop source surface: 55 passed;
+- `git diff --check` clean.
+
+This is source capability only. No trained adapter was installed, bound, restarted, activated, or claimed as behaviorally promoted.
+
 ## Next
 
 - Keep Draft PR #2 unmerged.
 - Preserve the Achilles review as exact-head security evidence.
+- Keep the trained Vera adapter route source-ready while training/promotion evidence matures.
 - Re-stage/requalify the newer hardened Portal source only under a separately authorized runtime cutover.
+- Activate a trained Vera adapter only after explicit deployment authority plus model behavioral qualification and exact host readback.
 - Continue non-colliding source-only portfolio advancement through targeted P.O.R.T.A.L. sessions.
 
 ## Claim ceiling

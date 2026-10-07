@@ -186,29 +186,64 @@ RouteDiscovery = Callable[[], tuple[CognitionRoute, ...]]
 RouteInvoker = Callable[[CognitionRoute, str], str]
 
 
-def invoke_ollama_text(route: CognitionRoute, task: str) -> str:
-    if route.provider != "ollama":
-        raise RuntimeError(f"no resident adapter for provider: {route.provider}")
-    payload = json.dumps(
-        {
-            "model": route.model_or_agent,
-            "prompt": task,
-            "stream": False,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=120.0) as response:
-        body = json.load(response)
-    if not isinstance(body, dict) or body.get("done") is not True:
-        raise RuntimeError("Ollama response did not complete")
-    text = body.get("response")
-    if not isinstance(text, str) or not text.strip():
-        raise RuntimeError("Ollama response was empty")
-    return text.strip()
+def invoke_local_text(route: CognitionRoute, task: str) -> str:
+    if route.provider == "ollama":
+        payload = json.dumps(
+            {
+                "model": route.model_or_agent,
+                "prompt": task,
+                "stream": False,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=120.0) as response:
+            body = json.load(response)
+        if not isinstance(body, dict) or body.get("done") is not True:
+            raise RuntimeError("Ollama response did not complete")
+        text = body.get("response")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Ollama response was empty")
+        return text.strip()
+
+    if route.provider == "pre_active_local":
+        payload = json.dumps(
+            {
+                "model": route.model_or_agent,
+                "messages": [{"role": "user", "content": task}],
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            "http://127.0.0.1:18081/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=180.0) as response:
+            body = json.load(response)
+        if not isinstance(body, dict):
+            raise RuntimeError("Pre-Active model response is not an object")
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("Pre-Active model response has no choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise RuntimeError("Pre-Active model choice is not an object")
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError("Pre-Active model choice has no message")
+        text = message.get("content")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Pre-Active model response was empty")
+        return text.strip()
+
+    raise RuntimeError(f"no resident adapter for provider: {route.provider}")
+
+
+# Compatibility alias for callers that explicitly import the old helper.
+invoke_ollama_text = invoke_local_text
 
 
 class ResidentCognitionEngine:
@@ -217,7 +252,7 @@ class ResidentCognitionEngine:
         *,
         ledger: CognitionLedger,
         discover_routes: RouteDiscovery = discover_cognition_routes,
-        invoke_route: RouteInvoker = invoke_ollama_text,
+        invoke_route: RouteInvoker = invoke_local_text,
         authorized_route_ids: frozenset[str] = frozenset(),
         accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
     ) -> None:

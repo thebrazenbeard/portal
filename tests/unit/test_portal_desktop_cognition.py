@@ -36,10 +36,73 @@ def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes()
     assert codex.auto_admissible is False
 
 
-def test_missing_ollama_and_codex_produce_no_available_routes() -> None:
+def test_trained_pre_active_adapter_is_discovered_and_preferred_over_ollama_vera() -> None:
+    routes = discover_cognition_routes(
+        command_probe=lambda _name, _args: None,
+        ollama_tags=lambda: {
+            "models": [
+                {"name": "vera-local:latest", "modified_at": "2026-08-01T00:00:00Z"},
+            ]
+        },
+        pre_active_models=lambda: {
+            "object": "list",
+            "data": [
+                {
+                    "id": "vera-v10r3-step20",
+                    "object": "model",
+                    "adapter_active": True,
+                    "adapter_model_sha256": "b2d6eec7" + "0" * 56,
+                    "base_model_revision": "d61dd146c8fd44c9a49cdb7f59f34e17b61902d8",
+                    "effect_authority": False,
+                }
+            ],
+        },
+    )
+    by_id = {route.route_id: route for route in routes}
+    trained = by_id["preactive:vera-v10r3-step20"]
+    assert trained.provider == "pre_active_local"
+    assert trained.local is True
+    assert trained.incremental_paid_compute is False
+    assert trained.auto_admissible is True
+    assert trained.preference == 5
+    assert trained.observed_version == "b2d6eec7" + "0" * 56
+
+    selected = select_cognition_route(CognitionRequest(), routes)
+    assert selected is not None
+    assert selected.route_id == "preactive:vera-v10r3-step20"
+
+
+def test_base_only_pre_active_model_is_discovered_but_ollama_vera_remains_preferred() -> None:
+    routes = discover_cognition_routes(
+        command_probe=lambda _name, _args: None,
+        ollama_tags=lambda: {
+            "models": [
+                {"name": "vera-local:latest", "modified_at": "2026-08-01T00:00:00Z"},
+            ]
+        },
+        pre_active_models=lambda: {
+            "object": "list",
+            "data": [
+                {
+                    "id": "qwen3.5-4b-local",
+                    "object": "model",
+                    "adapter_active": False,
+                    "effect_authority": False,
+                }
+            ],
+        },
+    )
+
+    selected = select_cognition_route(CognitionRequest(), routes)
+    assert selected is not None
+    assert selected.route_id == "ollama:vera-local:latest"
+
+
+def test_missing_local_models_and_codex_produce_no_available_routes() -> None:
     routes = discover_cognition_routes(
         command_probe=lambda _name, _args: None,
         ollama_tags=lambda: None,
+        pre_active_models=lambda: None,
     )
     assert routes == ()
 

@@ -31,6 +31,7 @@ class CognitionRoute:
 
 CommandProbe = Callable[[str, tuple[str, ...]], str | None]
 OllamaTagsProbe = Callable[[], Mapping[str, object] | None]
+PreActiveModelsProbe = Callable[[], Mapping[str, object] | None]
 
 
 def _default_command_probe(name: str, args: tuple[str, ...]) -> str | None:
@@ -65,10 +66,23 @@ def _default_ollama_tags() -> Mapping[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
+def _default_pre_active_models() -> Mapping[str, object] | None:
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:18081/v1/models",
+            timeout=2.0,
+        ) as response:
+            value = json.load(response)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def discover_cognition_routes(
     *,
     command_probe: CommandProbe = _default_command_probe,
     ollama_tags: OllamaTagsProbe = _default_ollama_tags,
+    pre_active_models: PreActiveModelsProbe = _default_pre_active_models,
 ) -> tuple[CognitionRoute, ...]:
     routes: list[CognitionRoute] = []
 
@@ -102,6 +116,69 @@ def discover_cognition_routes(
                         observed_version=(
                             str(item["modified_at"])
                             if item.get("modified_at")
+                            else None
+                        ),
+                    )
+                )
+
+    pre_active = pre_active_models()
+    if isinstance(pre_active, Mapping):
+        models = pre_active.get("data")
+        if isinstance(models, list):
+            for item in models:
+                if not isinstance(item, Mapping):
+                    continue
+                raw_id = item.get("id")
+                if not isinstance(raw_id, str) or not raw_id.strip():
+                    continue
+                model_id = raw_id.strip()
+                adapter_active = item.get("adapter_active") is True
+                effect_authority = item.get("effect_authority")
+                if effect_authority is not False:
+                    continue
+                adapter_sha = item.get("adapter_model_sha256")
+                base_revision = item.get("base_model_revision")
+                valid_adapter_sha = (
+                    isinstance(adapter_sha, str)
+                    and len(adapter_sha) == 64
+                    and all(ch in "0123456789abcdef" for ch in adapter_sha)
+                )
+                valid_base_revision = (
+                    isinstance(base_revision, str)
+                    and len(base_revision) == 40
+                    and all(ch in "0123456789abcdef" for ch in base_revision)
+                )
+                trained_vera = (
+                    adapter_active
+                    and model_id.lower().startswith("vera")
+                    and valid_adapter_sha
+                    and valid_base_revision
+                )
+                observed_version = (
+                    adapter_sha
+                    if valid_adapter_sha
+                    else base_revision
+                    if valid_base_revision
+                    else None
+                )
+                routes.append(
+                    CognitionRoute(
+                        route_id=f"preactive:{model_id}",
+                        provider="pre_active_local",
+                        model_or_agent=model_id,
+                        local=True,
+                        available=True,
+                        current=True,
+                        capabilities=("text",),
+                        incremental_paid_compute=False,
+                        auto_admissible=True,
+                        effect_authority_ceiling=(
+                            "COGNITION_ONLY_NO_PROTECTED_EFFECT"
+                        ),
+                        preference=5 if trained_vera else 30,
+                        observed_version=(
+                            str(observed_version)
+                            if observed_version is not None
                             else None
                         ),
                     )
