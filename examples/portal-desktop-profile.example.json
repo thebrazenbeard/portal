@@ -1,0 +1,8 @@
+{
+  "wave": "../portfolio/advancement_wave.public.json",
+  "corpus": "../portfolio/corpus.public.json",
+  "projects": "../registry/projects.yaml",
+  "nodes": "../tests/fixtures/portal-nodes-valid.yaml",
+  "max_parallel": 2,
+  "holder": "vera-desktop"
+}

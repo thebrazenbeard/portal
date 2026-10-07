@@ -276,3 +276,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Five focused failures observed before fix. Portfolio controller suite -> 7 passed using real PortalCommandSession stores. Execution remains ADMISSION_ONLY; no attached worker or protected effect is fabricated.
 - Fresh remote main still 7d00d8bf3b48c0676b2278359838ee563c66c67f. Fresh local probe found Codex CLI 0.153.4 (not admissible), Ollama ministral-3:14b/qwen3:4b-instruct/qwen3:8b/vera-local:latest; policy-enabled deterministic selection prefers vera-local. Discovery probe invoked no model.
 - Exact head: commit containing this continuation. Next: responsive portfolio status during inference, real local-model clean stage, native window lifecycle.
+
+## Operator documentation checkpoint — 2026-10-07
+- README and desktop runbook document portfolio controls, historical example profile artifacts, admitted work awaiting an attached authorized worker, exact-source bootstrap, explicit local cognition policy, optional OS logon activation, recovery/logs and staged upgrades.
+- Example profile uses only supported local-artifact fields; JSON parses and diff check clean. No runtime source change in this checkpoint.
+- Full regression run is in progress with writable TEMP/TMP and approved loopback/read-only discovery access. Next: qualifier checkpoint and staged proof. Lou-Pole invoked by Patrick: current engine fresh-read at 9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2; deterministic and semantic evidence will remain distinct.
+- Exact head: commit containing this record.
