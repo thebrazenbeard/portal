@@ -10,6 +10,7 @@ import uuid
 
 from .desktop_authority import DesktopAuthorityService
 from .desktop_ipc import FileBridgeClient
+from .desktop_keyring import DesktopAuthorityKeyStore
 from .desktop_state import (
     DesktopStateStore,
     load_pending_authority_requests,
@@ -312,7 +313,16 @@ class PortalDesktopApp:
         self.state_store = DesktopStateStore(
             self.runtime_root / "state" / "desktop" / "desktop-ui.sqlite3"
         )
-        self.authority_service = DesktopAuthorityService(self.runtime_root)
+        self.authority_key_store = DesktopAuthorityKeyStore(
+            self.runtime_root
+            / "state"
+            / "portal"
+            / "authority-keyring"
+        )
+        self.authority_service = DesktopAuthorityService(
+            self.runtime_root,
+            key_store=self.authority_key_store,
+        )
         self.view_model = DesktopViewModel(
             self.client,
             state_store=self.state_store,

@@ -32,6 +32,7 @@ from .ecosystem_runtime import (
     PortalEcosystemStore,
     run_ecosystem_proposal_generations,
 )
+from .desktop_keyring import DesktopAuthorityKeyStore
 from .diagnostics import build_host_diagnostics
 from .discovery import (
     GitHubRepositoryCatalog,
@@ -881,6 +882,15 @@ def _parser() -> argparse.ArgumentParser:
     wave_promote.add_argument("--review", type=Path, required=True)
     wave_promote.add_argument("--execution-grant", type=Path, required=True)
     wave_promote.add_argument("--effect-grant", type=Path)
+    wave_promote.add_argument(
+        "--runtime-root",
+        type=Path,
+        help=(
+            "optional qualified Vera Desktop runtime root used to load "
+            "current-user encrypted execution/effect authority keys when "
+            "the corresponding environment keys are absent"
+        ),
+    )
 
     wave_authority_request = wave_subcommands.add_parser(
         "authority-request",
@@ -2199,6 +2209,32 @@ def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
         if args.effect_grant is not None
         else None
     )
+
+    key_store = None
+    if args.runtime_root is not None:
+        key_store = DesktopAuthorityKeyStore(
+            Path(args.runtime_root).resolve()
+            / "state"
+            / "portal"
+            / "authority-keyring"
+        )
+
+    if os.environ.get("PROJECT_RUNNER_EXECUTION_AUTHORITY_KEY"):
+        execution_authority_key = execution_authority_key_from_environment()
+    elif key_store is not None:
+        execution_authority_key = key_store.load("execution")
+        if not execution_authority_key:
+            raise ValueError(
+                "execution authority key is unavailable in environment or "
+                "desktop key store"
+            )
+    else:
+        execution_authority_key = execution_authority_key_from_environment()
+
+    effect_authority_key = effect_authority_key_from_environment()
+    if effect_authority_key is None and key_store is not None:
+        effect_authority_key = key_store.load("protected_effect")
+
     receipt = promote_portal_wave_packet(
         state_db=Path(args.state_db),
         run_id=args.run_id,
@@ -2207,8 +2243,8 @@ def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
         execution_grant_document=execution_document,
         effect_grant_document=effect_document,
         review_key=review_key_from_environment(),
-        execution_authority_key=execution_authority_key_from_environment(),
-        effect_authority_key=effect_authority_key_from_environment(),
+        execution_authority_key=execution_authority_key,
+        effect_authority_key=effect_authority_key,
         token=_github_token(),
     )
     protected = receipt.effect_class != "NO_PROTECTED_EFFECT"

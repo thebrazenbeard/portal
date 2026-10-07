@@ -102,6 +102,7 @@ class DesktopAuthorityService:
         *,
         execution_key: bytes | None = None,
         effect_key: bytes | None = None,
+        key_store: object | None = None,
     ) -> None:
         self.runtime_root = Path(runtime_root).resolve()
         self.inbox = (
@@ -115,6 +116,7 @@ class DesktopAuthorityService:
         )
         self._execution_key = execution_key
         self._effect_key = effect_key
+        self._key_store = key_store
 
     def _request_path(self, request_id: str) -> Path:
         if not _REQUEST_ID_RE.fullmatch(request_id):
@@ -327,12 +329,32 @@ class DesktopAuthorityService:
             if not self._execution_key:
                 raise ValueError("execution authority key is required")
             return self._execution_key
-        return execution_authority_key_from_environment()
+        if os.environ.get("PROJECT_RUNNER_EXECUTION_AUTHORITY_KEY"):
+            return execution_authority_key_from_environment()
+        if self._key_store is not None:
+            loader = getattr(self._key_store, "load", None)
+            if callable(loader):
+                value = loader("execution")
+                if value:
+                    return value
+        raise ValueError(
+            "execution authority key is unavailable in environment or "
+            "desktop key store"
+        )
 
     def _effect_key_value(self) -> bytes | None:
         if self._effect_key is not None:
             return self._effect_key or None
-        return effect_authority_key_from_environment()
+        environment_value = effect_authority_key_from_environment()
+        if environment_value:
+            return environment_value
+        if self._key_store is not None:
+            loader = getattr(self._key_store, "load", None)
+            if callable(loader):
+                value = loader("protected_effect")
+                if value:
+                    return value
+        return None
 
     def create_request(
         self,

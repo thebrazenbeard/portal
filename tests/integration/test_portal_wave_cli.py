@@ -483,3 +483,118 @@ def test_portal_wave_promote_resolves_durable_packet_without_manual_lineage(
     assert payload["protected_effects_authorized"] is False
     assert captured["run_id"] == "wave-cli"
     assert captured["subject_id"] == "project-runner"
+
+
+def test_portal_wave_promote_uses_desktop_key_store_when_env_keys_absent(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from runner.execution_promotion import ExecutionPromotionReceipt
+
+    review = tmp_path / "review.json"
+    execution = tmp_path / "execution.json"
+    effect = tmp_path / "effect.json"
+    for path in (review, execution, effect):
+        path.write_text("{}", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+    runtime_root = tmp_path / "runtime"
+
+    def fake_promote(**kwargs):
+        captured.update(kwargs)
+        return ExecutionPromotionReceipt(
+            lineage_id="lineage",
+            work_fingerprint="c" * 64,
+            fencing_token=1,
+            holder="vera",
+            repository="thebrazenbeard/project-runner",
+            ref="main",
+            exact_head="a" * 40,
+            operation="EXECUTE_FRONTIER",
+            effect_class="SOURCE_WRITE",
+            review_sha256="d" * 64,
+            review_valid_until=999.0,
+            execution_grant_sha256="e" * 64,
+            execution_valid_until=999.0,
+            execution_request_sha256="1" * 64,
+            effect_grant_sha256="2" * 64,
+            effect_valid_until=999.0,
+            promoted_at=2.0,
+            attempt_work_generation=2,
+            promoted_work_generation=3,
+            promotion_sha256="f" * 64,
+        )
+
+    class FakeStore:
+        def __init__(self, root: Path) -> None:
+            captured["key_store_root"] = Path(root)
+
+        def load(self, kind: str) -> bytes | None:
+            return {
+                "execution": b"desktop-execution",
+                "protected_effect": b"desktop-effect",
+            }.get(kind)
+
+    monkeypatch.setattr(
+        portal_cli,
+        "promote_portal_wave_packet",
+        fake_promote,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "load_json_document",
+        lambda path: {"path": str(path)},
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "review_key_from_environment",
+        lambda: b"review",
+    )
+    monkeypatch.delenv(
+        "PROJECT_RUNNER_EXECUTION_AUTHORITY_KEY",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "PROJECT_RUNNER_PROTECTED_EFFECT_AUTHORITY_KEY",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        portal_cli,
+        "DesktopAuthorityKeyStore",
+        FakeStore,
+        raising=False,
+    )
+
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "promote",
+            "--state-db",
+            str(tmp_path / "portal.sqlite3"),
+            "--run-id",
+            "wave-cli",
+            "--subject-id",
+            "project-runner",
+            "--review",
+            str(review),
+            "--execution-grant",
+            str(execution),
+            "--effect-grant",
+            str(effect),
+            "--runtime-root",
+            str(runtime_root),
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["effect_class"] == "SOURCE_WRITE"
+    assert captured["execution_authority_key"] == b"desktop-execution"
+    assert captured["effect_authority_key"] == b"desktop-effect"
+    assert captured["key_store_root"] == (
+        runtime_root.resolve()
+        / "state"
+        / "portal"
+        / "authority-keyring"
+    )

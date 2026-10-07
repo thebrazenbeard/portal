@@ -275,6 +275,52 @@ def test_approve_no_effect_requires_only_execution_key(tmp_path: Path) -> None:
     assert result["effect_grant"] is None
 
 
+def test_approval_uses_user_bound_key_store_when_environment_is_absent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    db = runtime_root / "state" / "portal" / "operator.sqlite3"
+    db.parent.mkdir(parents=True)
+    _write_claim_db(db)
+    execution_request = {
+        "schema": "PROJECT_RUNNER_GITHUB_SOURCE_WRITE_V1",
+        "operation": "PUT_FILE",
+    }
+    _write_request(
+        runtime_root,
+        effect_class="SOURCE_WRITE",
+        execution_request=execution_request,
+    )
+
+    class FakeKeyStore:
+        def load(self, kind: str) -> bytes | None:
+            return {
+                "execution": EXECUTION_KEY,
+                "protected_effect": EFFECT_KEY,
+            }.get(kind)
+
+    monkeypatch.delenv(
+        "PROJECT_RUNNER_EXECUTION_AUTHORITY_KEY",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "PROJECT_RUNNER_PROTECTED_EFFECT_AUTHORITY_KEY",
+        raising=False,
+    )
+    service = DesktopAuthorityService(
+        runtime_root,
+        key_store=FakeKeyStore(),
+    )
+
+    result = service.approve("request-1", now=100.0)
+
+    execution = json.loads(Path(result["execution_grant"]).read_text("utf-8"))
+    effect = json.loads(Path(result["effect_grant"]).read_text("utf-8"))
+    assert parse_execution_grant(execution, key=EXECUTION_KEY).issuer
+    assert parse_effect_grant(effect, key=EFFECT_KEY).issuer
+
+
 def test_protected_approval_fails_closed_without_effect_key(tmp_path: Path) -> None:
     runtime_root = tmp_path / "runtime"
     db = runtime_root / "state" / "portal" / "operator.sqlite3"
