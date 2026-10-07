@@ -3,13 +3,14 @@ import io
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+import time
 import urllib.request
 
 import pytest
 
 import portal.desktop_cognition as cognition
 import portal.desktop_runtime as runtime
-from portal.desktop_cognition import CognitionRequest, CognitionRoute, discover_cognition_routes, select_cognition_route
+from portal.desktop_cognition import CognitionRequest, CognitionRoute, discover_cognition_routes, discover_pre_active_target_routes, select_cognition_route
 from portal.desktop_runtime import CognitionLedger, CognitionRequestEnvelope, ResidentCognitionEngine
 
 
@@ -40,6 +41,38 @@ def test_expired_or_future_route_is_not_selected():
 def test_route_authority_does_not_grant_paid_compute():
     paid = route(local=False, incremental_paid_compute=True, auto_admissible=False)
     assert cognition.select_cognition_route(CognitionRequest(), (paid,), authorized_route_ids=frozenset({paid.route_id})) is None
+
+
+def test_engine_evaluates_fresh_discovery_at_the_selection_time(tmp_path):
+    ledger = CognitionLedger(tmp_path / "clock.db")
+    calls = []
+    def discover():
+        # A real host probe advances the clock beyond process() entry; force
+        # that ordering even on platforms with a coarse wall-clock resolution.
+        time.sleep(.02)
+        discovered_at = time.time()
+        return (route(observed_at=discovered_at, expires_at=discovered_at + 30),)
+    try:
+        engine = ResidentCognitionEngine(ledger=ledger, discover_routes=discover,
+                                        invoke_route=lambda *_: calls.append("model") or "answer")
+        result = engine.process(CognitionRequestEnvelope("clock", "HUMAN", "test", "hello", time.time()))
+        assert result.state == "COMPLETED"
+        assert calls == ["model"]
+    finally:
+        ledger.close()
+
+
+def test_engine_preserves_explicit_selection_clock(tmp_path):
+    ledger = CognitionLedger(tmp_path / "explicit-clock.db")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (route(observed_at=101, expires_at=131),),
+            invoke_route=lambda *_: pytest.fail("future route must not be invoked"),
+        )
+        result = engine.process(CognitionRequestEnvelope("clock", "HUMAN", "test", "hello", 100), now=100)
+        assert result.state == "UNRESOLVED"
+    finally:
+        ledger.close()
 
 
 def test_ollama_remapped_to_remote_is_not_invoked(monkeypatch):
@@ -118,6 +151,54 @@ def test_real_local_transport_disables_proxies_and_redirects(monkeypatch):
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+UNPROVEN_LOCAL_MODELS = [
+    {},
+    {"effect_authority": False},
+    {"local": True, "effect_authority": False},
+    {"local": True, "incremental_paid_compute": False, "effect_authority": False, "remote_host": "https://paid.invalid"},
+    {"local": True, "incremental_paid_compute": False, "effect_authority": False, "remote_model": "paid-model"},
+    {"local": True, "incremental_paid_compute": False, "effect_authority": False, "cloud": True},
+    {"local": True, "incremental_paid_compute": False, "effect_authority": False, "details": {"remote_url": "https://paid.invalid"}},
+    {"local": 1, "incremental_paid_compute": False, "effect_authority": False},
+    {"local": True, "incremental_paid_compute": True, "effect_authority": False},
+]
+
+
+@pytest.mark.parametrize("metadata", UNPROVEN_LOCAL_MODELS)
+@pytest.mark.parametrize("provider", ["pre_active_local", "pre_active_target"])
+def test_loopback_openai_inventory_does_not_prove_model_locality_or_cost(metadata, provider):
+    entry = {"id": "vera-test", "adapter_active": True,
+             "adapter_model_sha256": "a" * 64, "base_model_revision": "b" * 40, **metadata}
+    if provider == "pre_active_local":
+        routes = cognition.discover_cognition_routes(
+            command_probe=lambda *_: None, ollama_tags=lambda: None,
+            pre_active_models=lambda: {"data": [entry]}, allow_local_no_paid_compute=True,
+        )
+    else:
+        routes = cognition.discover_pre_active_target_routes(
+            active_target_probe=lambda: {"name": "bound", "provider": "openai-compatible", "active": True,
+                                         "base_url": "http://127.0.0.1:1234/v1", "model": "vera-test"},
+            models_probe=lambda *_: {"data": [entry]}, allow_local_no_paid_compute=True,
+        )
+    assert cognition.select_cognition_route(CognitionRequest(), routes) is None
+    assert all(not candidate.local and candidate.incremental_paid_compute is None
+               and not candidate.auto_admissible for candidate in routes)
+
+
+@pytest.mark.parametrize("metadata", UNPROVEN_LOCAL_MODELS)
+@pytest.mark.parametrize("provider", ["pre_active_local", "pre_active_target"])
+def test_loopback_openai_invocation_rechecks_locality_and_cost_before_cognition(monkeypatch, metadata, provider):
+    calls = []
+    def transport(request, *, timeout):
+        calls.append(request.full_url)
+        return {"data": [{"id": "vera-test", **metadata}]}
+    monkeypatch.setattr(runtime, "loopback_json", transport)
+    candidate = route(provider=provider, model_or_agent="vera-test", base_url="http://127.0.0.1:1234/v1")
+    with pytest.raises(RuntimeError, match="local|paid|metadata"):
+        runtime.invoke_local_text(candidate, "hello")
+    assert calls == ["http://127.0.0.1:1234/v1/models"]
 
 
 def test_discovery_does_not_grant_local_cognition_authority_without_policy() -> None:

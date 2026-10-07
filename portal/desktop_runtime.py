@@ -18,6 +18,7 @@ from .desktop_cognition import (
     loopback_base_url,
     loopback_json,
     ollama_model_is_remote,
+    openai_model_is_local_no_paid,
     route_is_current,
 )
 
@@ -266,6 +267,8 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
         entries = [item for item in models if isinstance(item, dict) and item.get("id") == route.model_or_agent] if isinstance(models, list) else []
         if len(entries) != 1:
             raise RuntimeError("Pre-Active model binding is no longer available")
+        if not openai_model_is_local_no_paid(entries[0], route.model_or_agent):
+            raise RuntimeError("Pre-Active model metadata does not prove local no-paid cognition")
         version = entries[0].get("adapter_model_sha256") or entries[0].get("base_model_revision")
         if route.observed_version and version != route.observed_version:
             raise RuntimeError("Pre-Active model binding drifted since discovery")
@@ -363,14 +366,15 @@ class ResidentCognitionEngine:
         route = CognitionRoute(**json.loads(str(saved_route))) if saved_route and response_text else None
         if route is None:
             routes = self.discover_routes()
+            # Discovery publishes evidence after process() entry. Assess it at
+            # selection time, while preserving explicit clocks for replay/tests.
+            observed_now = float(time.time() if now is None else now)
             route = select_cognition_route(
-            CognitionRequest(
-                required_capabilities=request.required_capabilities,
-            ),
-            routes,
-            authorized_route_ids=self.authorized_route_ids,
-            authorized_paid_route_ids=self.authorized_paid_route_ids,
-            now=observed_now,
+                CognitionRequest(required_capabilities=request.required_capabilities),
+                routes,
+                authorized_route_ids=self.authorized_route_ids,
+                authorized_paid_route_ids=self.authorized_paid_route_ids,
+                now=observed_now,
             )
         if route is None:
             evidence_id = self.ledger.store(

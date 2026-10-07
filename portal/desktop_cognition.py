@@ -103,6 +103,28 @@ def ollama_model_is_remote(item: Mapping[str, object], name: str) -> bool:
     )
 
 
+def openai_model_is_local_no_paid(item: Mapping[str, object], model_id: str) -> bool:
+    """Loopback transport cannot attest to the model's execution location/cost."""
+    def remote_metadata(value: object) -> bool:
+        if isinstance(value, Mapping):
+            for key, entry in value.items():
+                normalized = str(key).lower()
+                if (normalized in {"remote", "cloud"} or normalized.startswith(("remote_", "cloud_"))) and entry:
+                    return True
+                if remote_metadata(entry):
+                    return True
+        elif isinstance(value, list):
+            return any(remote_metadata(entry) for entry in value)
+        return False
+    return (
+        item.get("local") is True
+        and item.get("incremental_paid_compute") is False
+        and item.get("effect_authority") is False
+        and not ollama_model_is_remote(item, model_id)
+        and not remote_metadata(item)
+    )
+
+
 def _deduplicate(routes: list[CognitionRoute]) -> tuple[CognitionRoute, ...]:
     grouped: dict[str, list[CognitionRoute]] = {}
     for route in routes:
@@ -236,6 +258,7 @@ def discover_cognition_routes(
                 if not isinstance(raw_id, str) or not raw_id.strip():
                     continue
                 model_id = raw_id.strip()
+                proven_local = openai_model_is_local_no_paid(item, model_id)
                 adapter_active = item.get("adapter_active") is True
                 effect_authority = item.get("effect_authority")
                 if effect_authority is not False:
@@ -270,18 +293,18 @@ def discover_cognition_routes(
                         route_id=f"preactive:{model_id}",
                         provider="pre_active_local",
                         model_or_agent=model_id,
-                        local=True,
+                        local=proven_local,
                         available=True,
                         current=True,
                         capabilities=("text",),
-                        incremental_paid_compute=False,
-                        auto_admissible=allow_local_no_paid_compute is True,
+                        incremental_paid_compute=False if proven_local else None,
+                        auto_admissible=allow_local_no_paid_compute is True and proven_local,
                         effect_authority_ceiling=(
                             "COGNITION_ONLY_NO_PROTECTED_EFFECT"
                         ),
                         base_url="http://127.0.0.1:18081/v1",
                         observed_at=observed, expires_at=observed + ttl_seconds,
-                        preference=5 if trained_vera else 30,
+                        preference=5 if trained_vera and proven_local else 30,
                         observed_version=(
                             str(observed_version)
                             if observed_version is not None
@@ -358,11 +381,12 @@ def discover_pre_active_target_routes(
         raise ValueError("route ttl_seconds must be finite and positive")
     observed = time.time() if now is None else now
     entry = entries[0]
+    proven_local = openai_model_is_local_no_paid(entry, model.strip())
     return (CognitionRoute(
         route_id=f"preactive-target:{name.strip()}", provider="pre_active_target",
-        model_or_agent=model.strip(), local=True, available=True, current=True,
-        capabilities=("text",), incremental_paid_compute=False,
-        auto_admissible=allow_local_no_paid_compute is True,
+        model_or_agent=model.strip(), local=proven_local, available=True, current=True,
+        capabilities=("text",), incremental_paid_compute=False if proven_local else None,
+        auto_admissible=allow_local_no_paid_compute is True and proven_local,
         effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT", preference=1,
         base_url=base_url, api_key_env=api_key_env,
         observed_version=str(entry.get("adapter_model_sha256") or entry.get("base_model_revision") or "") or None,

@@ -29,7 +29,8 @@ def test_pre_active_local_invocation_uses_openai_compatible_loopback(monkeypatch
 
     def fake_urlopen(request: urllib.request.Request, *, timeout: float):
         if request.full_url.endswith("/models"):
-            return {"data": [{"id": "vera-v10r3-step20"}]}
+            return {"data": [{"id": "vera-v10r3-step20", "local": True,
+                              "incremental_paid_compute": False, "effect_authority": False}]}
         observed["url"] = request.full_url
         observed["timeout"] = timeout
         observed["payload"] = json.loads(request.data.decode("utf-8"))

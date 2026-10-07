@@ -57,6 +57,8 @@ def test_trained_pre_active_adapter_is_discovered_and_preferred_over_ollama_vera
                     "adapter_model_sha256": "b2d6eec7" + "0" * 56,
                     "base_model_revision": "d61dd146c8fd44c9a49cdb7f59f34e17b61902d8",
                     "effect_authority": False,
+                    "local": True,
+                    "incremental_paid_compute": False,
                 }
             ],
         },
@@ -92,6 +94,8 @@ def test_base_only_pre_active_model_is_discovered_but_ollama_vera_remains_prefer
                     "object": "model",
                     "adapter_active": False,
                     "effect_authority": False,
+                    "local": True,
+                    "incremental_paid_compute": False,
                 }
             ],
         },

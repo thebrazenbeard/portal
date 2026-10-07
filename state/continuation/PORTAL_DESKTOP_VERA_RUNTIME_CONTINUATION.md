@@ -300,3 +300,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Four focused failures proved the interrupted-publication/conflicting-evidence cases before fix. Complete IPC suite -> 15 passed. This closes the demonstrated source-level recovery candidate; it does not convert unknown host claims into permission to repeat an operation.
 - Deterministic canonical Lou-Pole engine 9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2 independently passed 17 tests + 9 subtests; eight exact source files at 060e71f produced 30 heuristic candidates, not 30 established loopholes. Model semantic findings remain separately labelled.
 - Exact head: commit containing this record. Next: local-gateway cost/locality closure and staged release qualification.
+
+## Lou-Pole local-gateway authority closure — 2026-10-07
+- Model review proved loopback OpenAI-compatible inventory could advertise a paid remote backend yet be mislabelled local/no-paid. Discovery now requires exact positive local=true, incremental_paid_compute=false, effect_authority=false metadata and rejects remote/cloud hints recursively. Unknown gateways remain available inventory with unknown cost, never auto-admitted. Invocation rechecks the same proof before sending cognition.
+- Adapter SHA establishes identity, not execution locality/cost. Existing Ollama path remains independently checked through tags/show; no installed endpoint upgraded or changed.
+- 35 new authority-boundary tests failed before repair. A separate real-clock discovery test exposed selection using the earlier pre-discovery clock; production selection now timestamps after discovery while explicit test clocks remain deterministic.
+- Final focused cognition/runtime surface -> 74 passed. Exact head: commit containing this continuation. Next: freeze this runtime source for real Ollama staged installation, full regression and native desktop lifecycle proof.
