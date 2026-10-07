@@ -391,6 +391,11 @@ class DesktopPortfolioController:
             )
 
         token = self.token_provider()
+        if profile.get("mode") == "LIVE_AUTO_V1" and not token:
+            raise ValueError(
+                "live-auto portfolio requires authenticated GitHub access; "
+                "public-only discovery cannot stand in for the owned inventory"
+            )
         repositories = GitHubRepositoryCatalog(token=token).list_owned_repositories(
             str(owner)
         )
