@@ -236,3 +236,42 @@ def test_auto_bootstrap_reports_missing_worker_without_faking_attachment(
         assert status["dispatch_mode"] == "ADMISSION_ONLY"
     finally:
         session.close()
+
+
+
+def test_live_auto_refuses_silent_public_only_inventory_downgrade(
+    tmp_path,
+    monkeypatch,
+):
+    _desktop_runtime_sources(tmp_path)
+    session = PortalCommandSession(
+        tmp_path / "state" / "portal" / "session.sqlite3"
+    )
+    try:
+        controller = DesktopPortfolioController(
+            tmp_path,
+            session=session,
+            executable_resolver=lambda name: None,
+            token_provider=lambda: None,
+        )
+
+        class UnexpectedPublicCatalog:
+            def __init__(self, *, token):
+                raise AssertionError(
+                    "unauthenticated public listing must not be attempted"
+                )
+
+        monkeypatch.setattr(
+            "portal.desktop_portfolio.GitHubRepositoryCatalog",
+            UnexpectedPublicCatalog,
+        )
+        with pytest.raises(ValueError, match="authenticated GitHub"):
+            controller.handle(
+                {"action": "run", "session_id": "portfolio"}
+            )
+
+        assert session.connection.execute(
+            "SELECT COUNT(*) FROM portal_command_sessions"
+        ).fetchone()[0] == 0
+    finally:
+        session.close()
