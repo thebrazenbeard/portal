@@ -51,7 +51,7 @@ class DesktopViewModel:
                     "BLOCKED", None, None, None, (), (),
                     health_reason=f"{type(exc).__name__}: {exc}",
                 )
-            if health.state is not RuntimeState.ACTIVE:
+            if health.state is not RuntimeState.ACTIVE and health.components_loaded is not True:
                 return DesktopSnapshot(
                     health.state.value, health.runtime_id, None, None, (), (),
                     health_reason=health.reason,
@@ -119,6 +119,9 @@ class DesktopViewModel:
             required_capabilities=["text"],
         )
 
+    def portfolio(self, action: str = "status", *, session_id: str = "portfolio", **payload) -> dict[str, object]:
+        return self.client.request("desktop_portfolio", action=action, session_id=session_id, **payload)
+
 
 class PortalDesktopApp:
     def __init__(self, *, runtime_root: Path) -> None:
@@ -158,10 +161,34 @@ class PortalDesktopApp:
         body = ttk.Panedwindow(shell, orient="horizontal")
         body.pack(fill="both", expand=True, pady=(10, 8))
 
-        conversation_frame = ttk.Labelframe(body, text="Conversation", padding=8)
+        workspace = ttk.Notebook(body)
+        portfolio_frame = ttk.Frame(workspace, padding=8)
+        conversation_frame = ttk.Frame(workspace, padding=8)
+        workspace.add(portfolio_frame, text="Portfolio")
+        workspace.add(conversation_frame, text="Conversation")
         operations_frame = ttk.Labelframe(body, text="Runtime", padding=8)
-        body.add(conversation_frame, weight=3)
+        body.add(workspace, weight=3)
         body.add(operations_frame, weight=2)
+
+        controls = ttk.Frame(portfolio_frame)
+        controls.pack(fill="x")
+        self.session_var = tk.StringVar(value="portfolio")
+        ttk.Label(controls, text="Session").pack(side="left")
+        ttk.Entry(controls, textvariable=self.session_var, width=20).pack(side="left", padx=6)
+        ttk.Button(controls, text="Choose profile…", command=self.choose_profile).pack(side="left")
+        self.portfolio_var = tk.StringVar(value="Choose a portfolio profile to connect your repositories.")
+        ttk.Label(portfolio_frame, textvariable=self.portfolio_var, wraplength=620).pack(fill="x", pady=8)
+        actions = ttk.Frame(portfolio_frame)
+        actions.pack(fill="x")
+        for label, action in (("Refresh", "status"), ("Run", "run"), ("Continue", "continue"), ("Hold selected", "hold"), ("Stop", "stop")):
+            ttk.Button(actions, text=label, command=lambda value=action: self.portfolio_action(value)).pack(side="left", padx=(0, 6))
+        self.portfolio_tree = ttk.Treeview(portfolio_frame, columns=("subject", "state", "route", "verification"), show="headings")
+        for key, label in (("subject", "Repository / work"), ("state", "State"), ("route", "Worker route"), ("verification", "Verified")):
+            self.portfolio_tree.heading(key, text=label)
+            self.portfolio_tree.column(key, width=220 if key == "subject" else 115)
+        self.portfolio_tree.pack(fill="both", expand=True, pady=8)
+        self._portfolio_subjects = {}
+        self._portfolio_in_flight = False
 
         self.conversation = tk.Text(
             conversation_frame,
@@ -223,6 +250,7 @@ class PortalDesktopApp:
         ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
 
         self.root.after(100, self.refresh_async)
+        self.root.after(1200, lambda: self.portfolio_action("status"))
         self.root.after(50, self._drain_events)
         self.root.after(3000, self._scheduled_refresh)
 
@@ -323,6 +351,12 @@ class PortalDesktopApp:
             elif kind == "response":
                 self._send_in_flight = False
                 self._render_response(payload)
+            elif kind == "portfolio":
+                self._portfolio_in_flight = False
+                self._render_portfolio(payload)
+            elif kind == "portfolio_error":
+                self._portfolio_in_flight = False
+                self.portfolio_var.set(str(payload))
         self.root.after(50, self._drain_events)
 
     def _render_response(self, result: dict[str, object]) -> None:
@@ -367,6 +401,47 @@ class PortalDesktopApp:
         self._closed = True
         self.root.destroy()
 
+    def choose_profile(self) -> None:
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(title="Choose portfolio profile", filetypes=(("Portfolio profile", "*.json"),))
+        if path:
+            self.portfolio_action("configure", profile_path=path)
+
+    def portfolio_action(self, action: str, **payload) -> None:
+        if self._closed or self._portfolio_in_flight:
+            return
+        if action == "hold":
+            selected = self.portfolio_tree.selection()
+            if not selected:
+                self.portfolio_var.set("Select a repository or work item to hold.")
+                return
+            payload.update(self._portfolio_subjects[selected[0]])
+        session_id = self.session_var.get().strip() or "portfolio"
+        self._portfolio_in_flight = True
+        self.portfolio_var.set("Updating portfolio…")
+        def work():
+            try:
+                result = self.view_model.portfolio(action, session_id=session_id, **payload)
+                self._events.put(("portfolio", result))
+            except Exception as exc:
+                self._events.put(("portfolio_error", f"{type(exc).__name__}: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_portfolio(self, result: dict) -> None:
+        session = result.get("session")
+        self.portfolio_tree.delete(*self.portfolio_tree.get_children())
+        self._portfolio_subjects.clear()
+        if not isinstance(session, dict):
+            self.portfolio_var.set("Ready to run a new session." if result.get("configured") else "Choose a portfolio profile to connect your repositories.")
+            return
+        summary = session.get("summary", {})
+        self.portfolio_var.set(f"{session.get('control_state')} · generation {session.get('generation')} · "
+                               f"{summary.get('active', 0)} active · {summary.get('held', 0)} held · {summary.get('terminal', 0)} complete\n"
+                               + str(result.get("message", "")))
+        for item in session.get("subjects", []):
+            key = self.portfolio_tree.insert("", "end", values=(item.get("subject_id"), item.get("state"), item.get("route_id") or "Awaiting worker", item.get("verification_state") or "Pending"))
+            self._portfolio_subjects[key] = {"subject_id": item["subject_id"], "subject_kind": item["subject_kind"]}
+
     def run(self) -> None:
         self.message_entry.focus_set()
         self.root.mainloop()
@@ -377,6 +452,24 @@ def default_runtime_root() -> Path:
     if configured:
         return Path(configured)
     local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    candidates = []
+    for base in (local_app_data / "VeraDesktopRuntime", local_app_data / "PortalVera"):
+        if not base.is_dir():
+            continue
+        for runtime_root in base.iterdir():
+            try:
+                spec = json.loads((runtime_root / "RUNTIME_INSTALL_SPEC.json").read_text(encoding="utf-8-sig"))
+                qualification = json.loads((runtime_root / "QUALIFICATION.json").read_text(encoding="utf-8-sig"))
+                if (spec.get("activation", {}).get("active") is True
+                        and spec.get("activation", {}).get("qualified") is True
+                        and qualification.get("qualified") is True):
+                    candidates.append((float(qualification.get("qualified_at", 0)), str(runtime_root), runtime_root))
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+    if candidates:
+        # This chooses an installed control target, not proof it is running.
+        # The supervisor separately verifies fresh heartbeat and live process.
+        return max(candidates, key=lambda item: item[:2])[2]
     return local_app_data / "PortalVera" / "runtime"
 
 

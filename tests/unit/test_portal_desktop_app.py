@@ -228,3 +228,25 @@ def test_view_model_rejects_empty_message_without_ipc_call() -> None:
     else:
         raise AssertionError("expected ValueError")
     assert client.calls == []
+
+
+def test_portfolio_controls_go_through_resident_ipc():
+    calls = []
+    class Client:
+        def request(self, command, **payload):
+            calls.append((command, payload))
+            return {"session": {"control_state": "RUNNING"}}
+    assert DesktopViewModel(Client()).portfolio("run", session_id="work")["session"]["control_state"] == "RUNNING"
+    assert calls == [("desktop_portfolio", {"action": "run", "session_id": "work"})]
+
+
+def test_default_selects_existing_explicitly_activated_install(monkeypatch, tmp_path):
+    import json
+    import portal.desktop_app as module
+    monkeypatch.delenv("VERA_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    installed = tmp_path / "VeraDesktopRuntime" / "qualified"
+    installed.mkdir(parents=True)
+    (installed / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps({"activation": {"active": True, "qualified": True}}))
+    (installed / "QUALIFICATION.json").write_text(json.dumps({"qualified": True, "qualified_at": 10}))
+    assert module.default_runtime_root() == installed

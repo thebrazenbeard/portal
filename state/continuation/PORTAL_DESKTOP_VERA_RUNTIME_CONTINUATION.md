@@ -234,3 +234,12 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Full preliminary suite: 782 passed / 6 failed. Five failures are sandbox default TEMP permission errors; one pre-existing resume-envelope fixture expectation needs investigation. Rerun with workspace TEMP and TMP after integration.
 - Next: real Pre-Active resident Engine composition, explicit route policy/currentness, portfolio-first native UI, staged installer, then integrated qualification.
 - Patrick clarified product priority: producing the desktop app and its portfolio runner controls comes first; autonomous cognition remains required secondary functionality. No credential provisioning or live-runtime cutover was authorized.
+
+## Portfolio desktop controls checkpoint — 2026-10-07
+- Portfolio is now the primary native tab: profile selection, session Run/Continue/Refresh, Hold selected work, Stop, active/held/complete counts, repository work table with route and verification evidence.
+- New resident control adapter reuses PortalCommandSession and its Project Runner admission/fencing; it does not introduce another scheduler. Run/Continue is bounded to one admission generation. No effect driver is installed through this profile; queued work awaits an attached worker.
+- Profiles bind local wave/corpus/projects/nodes files and bounded parallelism; arbitrary worker commands/authority fields rejected. Profile values are local runtime state, not published source.
+- Default desktop selection reuses an explicitly activated/qualified install when present; process liveness remains a separate supervisor check.
+- Tests: `python -m pytest -q tests/unit/test_portal_desktop_app.py tests/unit/test_portal_desktop_portfolio.py --basetemp ../test-tmp-portfolio-ui-final` -> 17 passed. Real SQLite session controls tested with the external wave-preparation boundary substituted; no interactive GUI proof yet.
+- Next: host worker will expose desktop_portfolio; end-to-end qualifier will verify commands through IPC and actual Pre-Active Engine cognition. Installer, policy, and resident changes are separate in-progress slices.
+- Exact head is the commit containing this record. Existing credentials, logon tasks and active runtimes untouched.
