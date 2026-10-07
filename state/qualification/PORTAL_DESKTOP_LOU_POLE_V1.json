@@ -1,0 +1,1394 @@
+{
+  "schema": "PORTAL_LOU_POLE_DESKTOP_REVIEW_V1",
+  "before_engine": {
+    "schema": "PORTAL_LOU_POLE_ENGINE_AUDIT_V1",
+    "engine_revision": "9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2",
+    "input_revision": "060e71f0579566df0405567cd4ef8e1898e5cc97",
+    "profile": "code",
+    "evidence_kind": "DETERMINISTIC_HEURISTIC_CANDIDATES",
+    "bounds": "Canonical V1 regex/rule graph; no Python AST execution, temporal state, upstream locality, OS liveness or identity proof. Open PR3 Stage-2 is not canonical and was not used.",
+    "items": [
+      {
+        "path": "portal/desktop_cognition.py",
+        "sha256": "b81a426ddad7bb1f87119a7cc2e034978e0d65522b8ff9b811b154a2a2e59b39",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 100,
+          "finding_count": 17,
+          "findings": [
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                },
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 69,
+                  "line_end": 69,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 92,
+                  "line_end": 92,
+                  "text": "raise ValueError(\"local cognition response must be an object\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 176,
+                  "line_end": 176,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 358,
+                  "line_end": 358,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 69,
+                  "line_end": 69,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 92,
+                  "line_end": 92,
+                  "text": "raise ValueError(\"local cognition response must be an object\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 176,
+                  "line_end": 176,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 358,
+                  "line_end": 358,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_runtime.py",
+        "sha256": "f588aaf15dcca00580c9520afee1212bbca5aedeb8c60e09b6286649a69ce4b5",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 425,
+                  "line_end": 425,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_ipc.py",
+        "sha256": "c0fd94469f53e06900675afb90dd1891729c2fae2de3fd25ac00e353709bb4f7",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-INDIRECT-001",
+              "category": "indirect_effect_gap",
+              "severity": "medium",
+              "title": "Direct prohibition does not explicitly cover causing the same effect indirectly",
+              "evidence": [
+                {
+                  "line_start": 256,
+                  "line_end": 256,
+                  "text": "a request removed by its host is never called"
+                }
+              ],
+              "why_it_matters": "A rule can forbid an actor from performing an effect while remaining silent about delegating, routing, requesting, or otherwise causing that same effect.",
+              "literalist_path": "Avoid performing the prohibited action directly and instead cause another actor, tool, or service to produce the same outcome.",
+              "hardening": "State whether the prohibition covers direct and indirect action, delegation, requests, authorization, attempted circumvention, and equivalent downstream effects.",
+              "confidence": 0.72
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_host.py",
+        "sha256": "b256161cca4462e55a9e31cae18fd8969e72040f8210abaebe9f66c3ffb9a009",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 84,
+          "finding_count": 7,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 245,
+                  "line_end": 245,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 267,
+                  "line_end": 267,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 273,
+                  "line_end": 273,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 391,
+                  "line_end": 391,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 401,
+                  "line_end": 401,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 493,
+                  "line_end": 493,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 520,
+                  "line_end": 520,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_installer.py",
+        "sha256": "2fbe6f3a1891416d514941795e7dc30553e1837ec0cd28fa29f0f7120c270e12",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 441,
+                  "line_end": 441,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_supervisor.py",
+        "sha256": "1cb872b99adf47a826ab063c953883a0ed4e9967e6d3842d8eb5f83bd1229c94",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 0,
+          "finding_count": 0,
+          "findings": []
+        }
+      },
+      {
+        "path": "portal/desktop_app.py",
+        "sha256": "0257c70a611207b0cc7f4d37f58ab6bce29ccdb4aef317cdfc562d2f530b1792",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 36,
+          "finding_count": 3,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 325,
+                  "line_end": 325,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 396,
+                  "line_end": 396,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 428,
+                  "line_end": 428,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_portfolio.py",
+        "sha256": "7541b1dacbb4680dd989e7ef2a1663d2324bed76c177ea8f09ea2147f4cd7350",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 0,
+          "finding_count": 0,
+          "findings": []
+        }
+      }
+    ]
+  },
+  "after_engine": {
+    "schema": "PORTAL_LOU_POLE_ENGINE_AUDIT_V1",
+    "engine_revision": "9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2",
+    "input_revision": "2d691af4704515aa7993406b7cb56fceef6409f7",
+    "profile": "code",
+    "evidence_kind": "DETERMINISTIC_HEURISTIC_CANDIDATES",
+    "bounds": "Canonical V1 regex/rule graph; no Python AST execution, temporal state, upstream locality, OS liveness or identity proof. Open PR3 Stage-2 is not canonical and was not used.",
+    "items": [
+      {
+        "path": "portal/desktop_cognition.py",
+        "sha256": "f71d8b39c6c727e1da9fa1db7939516f59233da83dbec9c1cc82fb6918806453",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 100,
+          "finding_count": 17,
+          "findings": [
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-FAIL-001",
+              "category": "failure_mode_gap",
+              "severity": "high",
+              "title": "Required dependency has no nearby stated failure behavior",
+              "evidence": [
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                }
+              ],
+              "why_it_matters": "The rule requires an external dependency but its local rule context does not say what happens when that dependency cannot be used.",
+              "literalist_path": "Treat dependency failure as releasing the obligation, or substitute an unapproved source because the failure path is undefined.",
+              "hardening": "Specify fail-closed or fail-open behavior, permitted substitutes, retry bounds, and the exact status to report when the dependency is unavailable.",
+              "confidence": 0.86
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 55,
+                  "line_end": 55,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                },
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 58,
+                  "line_end": 58,
+                  "text": "raise ValueError(\"cognition URL must use an http(s) loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 69,
+                  "line_end": 69,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 92,
+                  "line_end": 92,
+                  "text": "raise ValueError(\"local cognition response must be an object\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 198,
+                  "line_end": 198,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 60,
+                  "line_end": 60,
+                  "text": "raise ValueError(\"cognition URL must not include credentials, query or fragment\")"
+                },
+                {
+                  "line_start": 381,
+                  "line_end": 381,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 67,
+                  "line_end": 67,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\") from exc"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 69,
+                  "line_end": 69,
+                  "text": "raise ValueError(\"cognition URL must use a loopback endpoint\")"
+                },
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 92,
+                  "line_end": 92,
+                  "text": "raise ValueError(\"local cognition response must be an object\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 198,
+                  "line_end": 198,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            },
+            {
+              "rule_id": "FRC-PREC-001",
+              "category": "precedence_collision",
+              "severity": "high",
+              "title": "Overlapping rules point in different directions",
+              "evidence": [
+                {
+                  "line_start": 78,
+                  "line_end": 78,
+                  "text": "raise RuntimeError(\"local cognition redirects are prohibited\")"
+                },
+                {
+                  "line_start": 381,
+                  "line_end": 381,
+                  "text": "raise ValueError(\"route ttl_seconds must be finite and positive\")"
+                }
+              ],
+              "why_it_matters": "A literal actor can select the more permissive rule unless precedence is explicit.",
+              "literalist_path": "Cite the rule that permits the desired behavior and treat the conflicting restriction as lower-priority or inapplicable.",
+              "hardening": "State explicit precedence, narrow each rule's scope, and add a conflict rule for unresolved overlaps.",
+              "confidence": 0.96
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_runtime.py",
+        "sha256": "3154869f13474476eacb4826db6c92d88f06b7c0080841a8ed39fd135bfc0caf",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 429,
+                  "line_end": 429,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_ipc.py",
+        "sha256": "121f1a882aa8ba183158153b4a526caf1bbd264134a7cb8cf87254ccae45da8a",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-INDIRECT-001",
+              "category": "indirect_effect_gap",
+              "severity": "medium",
+              "title": "Direct prohibition does not explicitly cover causing the same effect indirectly",
+              "evidence": [
+                {
+                  "line_start": 270,
+                  "line_end": 270,
+                  "text": "a request removed by its host is never called"
+                }
+              ],
+              "why_it_matters": "A rule can forbid an actor from performing an effect while remaining silent about delegating, routing, requesting, or otherwise causing that same effect.",
+              "literalist_path": "Avoid performing the prohibited action directly and instead cause another actor, tool, or service to produce the same outcome.",
+              "hardening": "State whether the prohibition covers direct and indirect action, delegation, requests, authorization, attempted circumvention, and equivalent downstream effects.",
+              "confidence": 0.72
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_host.py",
+        "sha256": "b256161cca4462e55a9e31cae18fd8969e72040f8210abaebe9f66c3ffb9a009",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 84,
+          "finding_count": 7,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 245,
+                  "line_end": 245,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 267,
+                  "line_end": 267,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 273,
+                  "line_end": 273,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 391,
+                  "line_end": 391,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 401,
+                  "line_end": 401,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 493,
+                  "line_end": 493,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 520,
+                  "line_end": 520,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_installer.py",
+        "sha256": "2fbe6f3a1891416d514941795e7dc30553e1837ec0cd28fa29f0f7120c270e12",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 12,
+          "finding_count": 1,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 441,
+                  "line_end": 441,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_supervisor.py",
+        "sha256": "1cb872b99adf47a826ab063c953883a0ed4e9967e6d3842d8eb5f83bd1229c94",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 0,
+          "finding_count": 0,
+          "findings": []
+        }
+      },
+      {
+        "path": "portal/desktop_app.py",
+        "sha256": "0257c70a611207b0cc7f4d37f58ab6bce29ccdb4aef317cdfc562d2f530b1792",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 36,
+          "finding_count": 3,
+          "findings": [
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 325,
+                  "line_end": 325,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 396,
+                  "line_end": 396,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            },
+            {
+              "rule_id": "FRC-CODE-003",
+              "category": "overbroad_error_boundary",
+              "severity": "medium",
+              "title": "Broad exception boundary may erase distinctions between failure modes",
+              "evidence": [
+                {
+                  "line_start": 428,
+                  "line_end": 428,
+                  "text": "except Exception as exc:"
+                }
+              ],
+              "why_it_matters": "Security, validation, availability, and programmer errors can become one generic path.",
+              "literalist_path": "Cause an unexpected exception that is handled as if it were an expected recoverable case.",
+              "hardening": "Catch only expected exception types and keep authorization and validation failures distinct from availability failures.",
+              "confidence": 0.82
+            }
+          ]
+        }
+      },
+      {
+        "path": "portal/desktop_portfolio.py",
+        "sha256": "7541b1dacbb4680dd989e7ef2a1663d2324bed76c177ea8f09ea2147f4cd7350",
+        "report": {
+          "profile": "code",
+          "intent": "Discovery must not grant paid compute or protected-effect authority; runtime and portfolio evidence must remain truthful and retryable.",
+          "risk_score": 0,
+          "finding_count": 0,
+          "findings": []
+        }
+      }
+    ]
+  },
+  "engine_verification": "17 passed +9 subtests passed on canonical9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2",
+  "semantic_findings": [
+    {
+      "kind": "MODEL_REASONING_WITH_REGRESSION_CLOSURE",
+      "candidate": "Loopback gateway can conceal paid remote inference",
+      "before": "060e71f0579566df0405567cd4ef8e1898e5cc97",
+      "after": "2d691af4704515aa7993406b7cb56fceef6409f7",
+      "closure": "Exact positive locality/cost/no-effect metadata and recursive remote/cloud exclusion at discovery and invocation. Adapter digest does not grant cost authority. 35 newly failing boundary cases now pass."
+    },
+    {
+      "kind": "MODEL_REASONING_WITH_REGRESSION_CLOSURE",
+      "candidate": "Client interruption after submission marker strands never-claimed request",
+      "before": "060e71f0579566df0405567cd4ef8e1898e5cc97",
+      "after": "11c74c1",
+      "closure": "Under per-ID OS lock recover only exact original marker with no request/claim/cancellation/response. Four failing crash/conflict tests now pass."
+    }
+  ],
+  "surviving_objections": [
+    "Local servers and bridge files remain within trusted logged-in-user boundary; hostile same-user processes can forge server metadata/state.",
+    "Ollama tag check and generation cannot be made atomic with current API.",
+    "Portfolio snapshot is cached and labelled; mutations wait for the state-owner operation. No attached portfolio driver execution is proven."
+  ],
+  "claim_ceiling": "DETERMINISTIC_HEURISTIC_CANDIDATES_PLUS_SEPARATE_MODEL_REASONING_AND_FOCUSED_RUNTIME_CLOSURE_NOT_GLOBAL_SECURITY_PROOF"
+}

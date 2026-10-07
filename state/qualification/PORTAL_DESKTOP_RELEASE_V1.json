@@ -1,0 +1,223 @@
+{
+  "schema": "PORTAL_DESKTOP_RELEASE_EVIDENCE_V1",
+  "implementation_head_before_receipt": "6c34714d5314ea7a9c19a4438481bd9ea6f08b85",
+  "checkpoint_head_resolver": "git log -1 --format=%H -- state/qualification/PORTAL_DESKTOP_RELEASE_V1.json",
+  "installed_portal_sha": "2d691af4704515aa7993406b7cb56fceef6409f7",
+  "qualification": {
+    "autonomous_cognition": {
+      "event_id": "37b211d2-6159-4f63-b1eb-0b48d4e302eb",
+      "event_status": "DONE",
+      "evidence_id": "cognition:256bd27c48fa6a3620ddb214ab2e936fbe7629309a1f954a4521d0bff0205271",
+      "request_id": "pre-active:fd7151a6-6f5f-4394-9026-c66640840a20",
+      "route_id": "ollama:vera-local:latest"
+    },
+    "claim_ceiling": "STAGED_RESIDENT_RUNTIME_QUALIFIED_FOR_LOCAL_COGNITION_AND_DESKTOP_IPC_NOT_NATIVE_CHATGPT_ROUTER_NOT_PROTECTED_EFFECT_AUTHORITY",
+    "components_loaded": true,
+    "human_cognition": {
+      "evidence_id": "cognition:660632a92ea97330bcccd260f45d39af795329e14bea0cd3e68e251faaba303a",
+      "request_id": "qualification-human-9e6ed875397b4969acacf363197da29e",
+      "route_id": "ollama:vera-local:latest",
+      "state": "COMPLETED"
+    },
+    "local_route_count": 4,
+    "native_openai_router_replaced": false,
+    "portfolio_ipc": {
+      "configured": false,
+      "dispatch_mode": "ADMISSION_ONLY",
+      "observed_session_count": 0,
+      "protected_effect_authority": false,
+      "status_only": true,
+      "worker_execution_verified": false
+    },
+    "protected_effect_authority": false,
+    "qualified": true,
+    "qualified_at": 1791408971.1844904,
+    "runtime_id": "bb1696fd08557c1bf88c2f3e56db62379325330638700381ae8dcbd618f8cd62",
+    "schema": "VERA_DESKTOP_RUNTIME_QUALIFICATION_V1",
+    "source_manifest": {
+      "activation": {
+        "active": false,
+        "qualified": false,
+        "requested": false
+      },
+      "claim_ceiling": "FROZEN_SOURCE_INSTALL_SPEC_ONLY_NOT_INSTALLED_NOT_QUALIFIED_NOT_ACTIVE",
+      "cognition_policy": {
+        "allow_local_no_paid_compute": true
+      },
+      "install_id": "portal-desktop-20261007-2d691af",
+      "schema": "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+      "sources": [
+        {
+          "component": "vera-mono",
+          "ref": "main",
+          "repository": "thebrazenbeard/vera-mono",
+          "sha": "e5af8cb740267bb5674864571e915842bf5e6677"
+        },
+        {
+          "component": "portal",
+          "ref": "work/portal-desktop-vera-runtime-v1",
+          "repository": "thebrazenbeard/portal",
+          "sha": "2d691af4704515aa7993406b7cb56fceef6409f7"
+        },
+        {
+          "component": "pre-active",
+          "ref": "main",
+          "repository": "thebrazenbeard/pre-active",
+          "sha": "1f23a809d7274df506e03e2d9052525538c3bcf6"
+        },
+        {
+          "component": "volition",
+          "ref": "main",
+          "repository": "thebrazenbeard/volition",
+          "sha": "dbc628d376515a0a523b1eecdf62129cca5d6b08"
+        }
+      ]
+    },
+    "volition_chain": {
+      "acceptance_status": "ACCEPTED_HOST_OBSERVATION",
+      "autonomous_event_id": "40c6e58d-f7ed-40e4-ae02-4cf12b4a88a6",
+      "autonomous_event_status": "DONE",
+      "choice_class": "POLICY_DERIVED",
+      "effect_authority": false,
+      "evidence_id": "cognition:3987bbb0553a6d14360b351d9cd23563618d8c3f532c66c9da3299bb4187059d",
+      "goal_id": "goal-0001",
+      "request_id": "pre-active:3ce1f2ae-1633-4e89-acd0-b1bac073d2a7",
+      "route_id": "ollama:vera-local:latest",
+      "signal_event_id": "facddd1f-8018-4767-9ffc-de0cabc35bcf",
+      "state_revision": 2
+    }
+  },
+  "cognition_evidence": [
+    {
+      "request_id": "qualification-human-9e6ed875397b4969acacf363197da29e",
+      "source": "HUMAN",
+      "reason": "staged runtime qualification",
+      "state": "COMPLETED",
+      "provider": "ollama",
+      "model_or_agent": "vera-local:latest",
+      "route_id": "ollama:vera-local:latest",
+      "created_at": 1791408928.960811,
+      "started_at": 1791408931.5137224,
+      "completed_at": 1791408950.4145257,
+      "evidence_id": "cognition:660632a92ea97330bcccd260f45d39af795329e14bea0cd3e68e251faaba303a",
+      "acceptance": {
+        "acceptance_digest": "7e02a81ebc3aa10c26765568cf783f7587cd7080abd6437c457f36596a61cb5f",
+        "canonical_memory_write": false,
+        "context_digest": "1288f12dd95787ca0665d729de672f56d84c114783383007617f4815445806e5",
+        "model_or_agent": "vera-local:latest",
+        "protected_effect_authority": false,
+        "provider": "ollama",
+        "reason": "staged runtime qualification",
+        "request_id": "qualification-human-9e6ed875397b4969acacf363197da29e",
+        "response_sha256": "56085ca650b52e33d258e6473cc6f77a3e68187ba60bf6400356f8aca948b233",
+        "route_id": "ollama:vera-local:latest",
+        "runtime_id": "bb1696fd08557c1bf88c2f3e56db62379325330638700381ae8dcbd618f8cd62",
+        "schema": "VERA_RUNTIME_COGNITION_ACCEPTANCE_V1",
+        "source": "HUMAN",
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "task": "Reply only with PORTAL_DESKTOP_HUMAN_OK"
+      }
+    },
+    {
+      "request_id": "pre-active:fd7151a6-6f5f-4394-9026-c66640840a20",
+      "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+      "reason": "staged resident autonomous cognition qualification",
+      "state": "COMPLETED",
+      "provider": "ollama",
+      "model_or_agent": "vera-local:latest",
+      "route_id": "ollama:vera-local:latest",
+      "created_at": 1791408953.3669102,
+      "started_at": 1791408956.2455592,
+      "completed_at": 1791408958.0410955,
+      "evidence_id": "cognition:256bd27c48fa6a3620ddb214ab2e936fbe7629309a1f954a4521d0bff0205271",
+      "acceptance": {
+        "acceptance_digest": "bf1654c7d8792ba10bbc6da0a7829beee3606cbcd6a69fc6ac19b830c3cbedfa",
+        "canonical_memory_write": false,
+        "context_digest": "1288f12dd95787ca0665d729de672f56d84c114783383007617f4815445806e5",
+        "model_or_agent": "vera-local:latest",
+        "protected_effect_authority": false,
+        "provider": "ollama",
+        "reason": "staged resident autonomous cognition qualification",
+        "request_id": "pre-active:fd7151a6-6f5f-4394-9026-c66640840a20",
+        "response_sha256": "bda115689ed1112d24a8a1b07b20a14b1207d4f072b5d1c15df92f807301c8cf",
+        "route_id": "ollama:vera-local:latest",
+        "runtime_id": "bb1696fd08557c1bf88c2f3e56db62379325330638700381ae8dcbd618f8cd62",
+        "schema": "VERA_RUNTIME_COGNITION_ACCEPTANCE_V1",
+        "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "task": "You are Vera. Produce bounded cognition. No external effects are authorized.\n\nAutonomous model turn. No human prompt caused this turn.\nSource: ENDOGENOUS\nReason: staged resident autonomous cognition qualification\n\nTask:\nReply only with PORTAL_DESKTOP_AUTONOMOUS_OK"
+      }
+    },
+    {
+      "request_id": "pre-active:3ce1f2ae-1633-4e89-acd0-b1bac073d2a7",
+      "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+      "reason": "Volition requested cognition for goal-0001: qualify-resident-volition-chain",
+      "state": "COMPLETED",
+      "provider": "ollama",
+      "model_or_agent": "vera-local:latest",
+      "route_id": "ollama:vera-local:latest",
+      "created_at": 1791408958.7647877,
+      "started_at": 1791408961.798009,
+      "completed_at": 1791408969.9830115,
+      "evidence_id": "cognition:3987bbb0553a6d14360b351d9cd23563618d8c3f532c66c9da3299bb4187059d",
+      "acceptance": {
+        "acceptance_digest": "c72761e0a83595454a102dd45561d23e7e529311da5670dce3e6fb5d7f9b72de",
+        "canonical_memory_write": false,
+        "context_digest": "1288f12dd95787ca0665d729de672f56d84c114783383007617f4815445806e5",
+        "model_or_agent": "vera-local:latest",
+        "protected_effect_authority": false,
+        "provider": "ollama",
+        "reason": "Volition requested cognition for goal-0001: qualify-resident-volition-chain",
+        "request_id": "pre-active:3ce1f2ae-1633-4e89-acd0-b1bac073d2a7",
+        "response_sha256": "ab7976d9478f4838c303b763da0d70e8f1d8a93ae63c0ea009a44022c25b0291",
+        "route_id": "ollama:vera-local:latest",
+        "runtime_id": "bb1696fd08557c1bf88c2f3e56db62379325330638700381ae8dcbd618f8cd62",
+        "schema": "VERA_RUNTIME_COGNITION_ACCEPTANCE_V1",
+        "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "task": "You are Vera. Produce bounded cognition. No external effects are authorized.\n\nAutonomous model turn. No human prompt caused this turn.\nSource: ENDOGENOUS\nReason: Volition requested cognition for goal-0001: qualify-resident-volition-chain\n\nTask:\nContinue bounded cognition on the active Volition goal. Do not assume external effect authority.\n\nGoal: qualify-resident-volition-chain"
+      }
+    }
+  ],
+  "desktop_window": {
+    "schema": "PORTAL_DESKTOP_WINDOW_LIFECYCLE_PROOF_V1",
+    "window_created_and_closed": true,
+    "ui_health_rendered_active": true,
+    "portfolio_status_rendered": true,
+    "resident_survived_ui_close": true,
+    "pid": 31740,
+    "runtime_id": "bb1696fd08557c1bf88c2f3e56db62379325330638700381ae8dcbd618f8cd62",
+    "route_id": "ollama:vera-local:latest",
+    "heartbeat_age_seconds": 0.09560179710388184,
+    "protected_effect_authority": false,
+    "observed_at": 1791409031.3232133
+  },
+  "installer_idempotency": {
+    "schema": "PORTAL_DESKTOP_INSTALL_IDEMPOTENCY_PROOF_V1",
+    "reused_installation": true,
+    "qualification_rechecked": false,
+    "manifest_and_qualification_unchanged": true,
+    "resident_pid_unchanged": true,
+    "evidence_sha256": {
+      "RUNTIME_INSTALL_SPEC.json": "1967841c1c3f440df2896cd17dee6e65449fd8bca60967bc1254236dd258a28c",
+      "QUALIFICATION.json": "9933599ec4003c20c37bc8555d2506d9351593b0a3087dcddffa455875c5d6aa"
+    },
+    "protected_effect_authority": false
+  },
+  "verification": {
+    "complete_suite": {
+      "source_sha": "2d691af4704515aa7993406b7cb56fceef6409f7",
+      "command": "python -m pytest -q --basetemp ../test-tmp-release-frozen (workspace TEMP/TMP)",
+      "result": "892 passed in151.37s",
+      "log_sha256": "10b15fb06aaaa2189092374f612d4d8abb756674932ab20c5baf4cce79946703"
+    },
+    "subsequent_windows_bootstrap_fix": {
+      "source_sha": "6c34714d5314ea7a9c19a4438481bd9ea6f08b85",
+      "result": "17 installer tests passed; two focused regressions failed before repair"
+    },
+    "lou_pole": "canonical engine17 tests+9subtests; heuristic report plus distinct model reasoning and two regression closures"
+  },
+  "portfolio_ceiling": "Durable admission/monitoring/hold/stop; no attached worker execution or verified publication claimed",
+  "activation": "Staged manual launch only; no OS logon task registered; existing installed runtimes untouched",
+  "claim_ceiling": "QUALIFIED_STAGED_NATIVE_DESKTOP_AND_RESIDENT_LOCAL_COGNITION_WITH_DURABLE_PORTFOLIO_CONTROLS_NO_PROTECTED_EFFECT_AUTHORITY"
+}

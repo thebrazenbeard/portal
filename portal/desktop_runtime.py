@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -14,6 +15,11 @@ from .desktop_cognition import (
     CognitionRoute,
     discover_cognition_routes,
     select_cognition_route,
+    loopback_base_url,
+    loopback_json,
+    ollama_model_is_remote,
+    openai_model_is_local_no_paid,
+    route_is_current,
 )
 
 
@@ -36,6 +42,9 @@ class CognitionResult:
     retryable: bool
     evidence_id: str
     error: str | None = None
+    provider: str | None = None
+    model_or_agent: str | None = None
+    acceptance: dict[str, object] | None = None
 
 
 _SCHEMA = """
@@ -76,6 +85,9 @@ class CognitionLedger:
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(desktop_cognition_runs)")}
         if "acceptance_json" not in columns:
             self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN acceptance_json TEXT")
+        for column in ("route_json", "required_capabilities_json"):
+            if column not in columns:
+                self.connection.execute(f"ALTER TABLE desktop_cognition_runs ADD COLUMN {column} TEXT")
 
     def close(self) -> None:
         self.connection.close()
@@ -118,10 +130,14 @@ class CognitionLedger:
             "schema": "PORTAL_DESKTOP_COGNITION_EVIDENCE_V1",
             "request_id": request.request_id,
             "source": request.source,
+            "reason": request.reason,
+            "task": request.task,
+            "created_at": request.created_at,
             "state": state,
             "route_id": route.route_id if route else None,
             "provider": route.provider if route else None,
             "model_or_agent": route.model_or_agent if route else None,
+            "route": asdict(route) if route else None,
             "response_text": response_text,
             "error": error,
             "protected_effect_authority": False,
@@ -140,8 +156,9 @@ class CognitionLedger:
                 request_id, source, reason, task, created_at,
                 state, retryable, route_id, provider, model_or_agent,
                 response_text, error, protected_effect_authority,
-                started_at, completed_at, updated_at, evidence_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)
+                started_at, completed_at, updated_at, evidence_id,
+                route_json, required_capabilities_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?)
             ON CONFLICT(request_id) DO UPDATE SET
                 source=excluded.source,
                 reason=excluded.reason,
@@ -158,7 +175,9 @@ class CognitionLedger:
                 started_at=excluded.started_at,
                 completed_at=excluded.completed_at,
                 updated_at=excluded.updated_at,
-                evidence_id=excluded.evidence_id
+                evidence_id=excluded.evidence_id,
+                route_json=excluded.route_json,
+                required_capabilities_json=excluded.required_capabilities_json
             """,
             (
                 request.request_id,
@@ -177,6 +196,8 @@ class CognitionLedger:
                 completed_at,
                 now,
                 evidence_id,
+                json.dumps(asdict(route), sort_keys=True) if route else None,
+                json.dumps(list(request.required_capabilities)),
             ),
         )
         return evidence_id
@@ -187,7 +208,30 @@ RouteInvoker = Callable[[CognitionRoute, str], str]
 
 
 def invoke_local_text(route: CognitionRoute, task: str) -> str:
+    if (not route.available or not route_is_current(route) or not route.local
+            or route.incremental_paid_compute is not False
+            or route.effect_authority_ceiling != "COGNITION_ONLY_NO_PROTECTED_EFFECT"):
+        raise RuntimeError("resident adapter requires a current local no-paid cognition route")
     if route.provider == "ollama":
+        base_url = loopback_base_url(route.base_url or "http://127.0.0.1:11434")
+        inventory = loopback_json(urllib.request.Request(f"{base_url}/api/tags"), timeout=2.0)
+        models = inventory.get("models")
+        matches = [item for item in models if isinstance(item, dict)
+                   and item.get("name") == route.model_or_agent] if isinstance(models, list) else []
+        if len(matches) != 1 or ollama_model_is_remote(matches[0], route.model_or_agent):
+            raise RuntimeError("Ollama route is no longer a unique local model")
+        item = matches[0]
+        current_version = item.get("digest") or item.get("modified_at")
+        if route.observed_version and current_version != route.observed_version:
+            raise RuntimeError("Ollama model binding drifted since discovery")
+        show_request = urllib.request.Request(
+            f"{base_url}/api/show",
+            data=json.dumps({"model": route.model_or_agent}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        metadata = loopback_json(show_request, timeout=2.0)
+        if ollama_model_is_remote(metadata, route.model_or_agent):
+            raise RuntimeError("Ollama model metadata reports a remote model")
         payload = json.dumps(
             {
                 "model": route.model_or_agent,
@@ -196,12 +240,11 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             }
         ).encode("utf-8")
         request = urllib.request.Request(
-            "http://127.0.0.1:11434/api/generate",
+            f"{base_url}/api/generate",
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=120.0) as response:
-            body = json.load(response)
+        body = loopback_json(request, timeout=120.0)
         if not isinstance(body, dict) or body.get("done") is not True:
             raise RuntimeError("Ollama response did not complete")
         text = body.get("response")
@@ -209,7 +252,26 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             raise RuntimeError("Ollama response was empty")
         return text.strip()
 
-    if route.provider == "pre_active_local":
+    if route.provider in {"pre_active_local", "pre_active_target"}:
+        base_url = loopback_base_url(route.base_url or (
+            "http://127.0.0.1:18081/v1" if route.provider == "pre_active_local" else None
+        ))
+        headers = {"Content-Type": "application/json"}
+        if route.api_key_env:
+            token = os.environ.get(route.api_key_env)
+            if not token:
+                raise RuntimeError("Pre-Active target API key environment is not populated")
+            headers["Authorization"] = f"Bearer {token}"
+        advertised = loopback_json(urllib.request.Request(f"{base_url}/models", headers=headers), timeout=2.0)
+        models = advertised.get("data")
+        entries = [item for item in models if isinstance(item, dict) and item.get("id") == route.model_or_agent] if isinstance(models, list) else []
+        if len(entries) != 1:
+            raise RuntimeError("Pre-Active model binding is no longer available")
+        if not openai_model_is_local_no_paid(entries[0], route.model_or_agent):
+            raise RuntimeError("Pre-Active model metadata does not prove local no-paid cognition")
+        version = entries[0].get("adapter_model_sha256") or entries[0].get("base_model_revision")
+        if route.observed_version and version != route.observed_version:
+            raise RuntimeError("Pre-Active model binding drifted since discovery")
         payload = json.dumps(
             {
                 "model": route.model_or_agent,
@@ -217,12 +279,11 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             }
         ).encode("utf-8")
         request = urllib.request.Request(
-            "http://127.0.0.1:18081/v1/chat/completions",
+            f"{base_url}/chat/completions",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
-        with urllib.request.urlopen(request, timeout=180.0) as response:
-            body = json.load(response)
+        body = loopback_json(request, timeout=180.0)
         if not isinstance(body, dict):
             raise RuntimeError("Pre-Active model response is not an object")
         choices = body.get("choices")
@@ -254,12 +315,14 @@ class ResidentCognitionEngine:
         discover_routes: RouteDiscovery = discover_cognition_routes,
         invoke_route: RouteInvoker = invoke_local_text,
         authorized_route_ids: frozenset[str] = frozenset(),
+        authorized_paid_route_ids: frozenset[str] = frozenset(),
         accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.discover_routes = discover_routes
         self.invoke_route = invoke_route
         self.authorized_route_ids = authorized_route_ids
+        self.authorized_paid_route_ids = authorized_paid_route_ids
         self.accept_result = accept_result
 
     @staticmethod
@@ -276,6 +339,9 @@ class ResidentCognitionEngine:
             retryable=bool(row["retryable"]),
             evidence_id=str(row["evidence_id"]),
             error=str(row["error"]) if row["error"] is not None else None,
+            provider=str(row["provider"]) if row["provider"] is not None else None,
+            model_or_agent=str(row["model_or_agent"]) if row["model_or_agent"] is not None else None,
+            acceptance=json.loads(str(row["acceptance_json"])) if row.get("acceptance_json") else None,
         )
 
     def process(
@@ -288,17 +354,28 @@ class ResidentCognitionEngine:
         stored = self.ledger.get(request.request_id)
         if stored is not None and any(stored[key] != getattr(request, key) for key in ("source", "reason", "task")):
             raise ValueError("request_id already binds a different cognition request")
+        if stored is not None and stored.get("required_capabilities_json") is not None and json.loads(str(stored["required_capabilities_json"])) != list(request.required_capabilities):
+            raise ValueError("request_id already binds different cognition capabilities")
         if stored is not None and stored["state"] == "COMPLETED":
             return self._result_from_stored(stored)
 
-        routes = self.discover_routes()
-        route = select_cognition_route(
-            CognitionRequest(
-                required_capabilities=request.required_capabilities,
-            ),
-            routes,
-            authorized_route_ids=self.authorized_route_ids,
-        )
+        # Persisted output waiting on acceptance is retried at the intake
+        # boundary. Re-invoking the model would duplicate already observed work.
+        response_text = stored.get("response_text") if stored else None
+        saved_route = stored.get("route_json") if stored else None
+        route = CognitionRoute(**json.loads(str(saved_route))) if saved_route and response_text else None
+        if route is None:
+            routes = self.discover_routes()
+            # Discovery publishes evidence after process() entry. Assess it at
+            # selection time, while preserving explicit clocks for replay/tests.
+            observed_now = float(time.time() if now is None else now)
+            route = select_cognition_route(
+                CognitionRequest(required_capabilities=request.required_capabilities),
+                routes,
+                authorized_route_ids=self.authorized_route_ids,
+                authorized_paid_route_ids=self.authorized_paid_route_ids,
+                now=observed_now,
+            )
         if route is None:
             evidence_id = self.ledger.store(
                 request,
@@ -318,19 +395,24 @@ class ResidentCognitionEngine:
                 error="no_admissible_cognition_route",
             )
 
-        started_at = observed_now
+        started_at = float(stored["started_at"]) if stored and stored.get("started_at") is not None and response_text else observed_now
         self.ledger.store(
             request,
             state="RUNNING",
             retryable=True,
             now=observed_now,
             route=route,
+            response_text=response_text if isinstance(response_text, str) else None,
             started_at=started_at,
         )
         try:
-            response_text = self.invoke_route(route, request.task)
+            if response_text is None:
+                response_text = self.invoke_route(route, request.task)
             if not isinstance(response_text, str) or not response_text.strip():
                 raise ValueError("cognition response must be nonempty text")
+            self.ledger.store(request, state="RUNNING", retryable=True,
+                              now=observed_now, route=route,
+                              response_text=response_text, started_at=started_at)
             acceptance = (
                 self.accept_result(request, route, response_text)
                 if self.accept_result else {"status": "UNQUALIFIED_LEDGER_ONLY"}
@@ -339,6 +421,11 @@ class ResidentCognitionEngine:
                 "UPDATE desktop_cognition_runs SET acceptance_json=? WHERE request_id=?",
                 (json.dumps(acceptance, sort_keys=True), request.request_id),
             )
+            if (not isinstance(acceptance, dict)
+                    or (self.accept_result is not None and acceptance.get("status") not in {"ACCEPTED_OBSERVATION", "ACCEPTED_HOST_OBSERVATION"})
+                    or acceptance.get("protected_effect_authority", False) is not False
+                    or acceptance.get("canonical_memory_write", False) is not False):
+                raise RuntimeError("Vera intake rejected cognition result")
         except Exception as exc:
             observed_now = float(time.time() if now is None else now)
             error = f"{type(exc).__name__}: {exc}"
@@ -348,6 +435,7 @@ class ResidentCognitionEngine:
                 retryable=True,
                 now=observed_now,
                 route=route,
+                response_text=response_text if isinstance(response_text, str) else None,
                 error=error,
                 started_at=started_at,
                 completed_at=observed_now,
@@ -360,6 +448,8 @@ class ResidentCognitionEngine:
                 retryable=True,
                 evidence_id=evidence_id,
                 error=error,
+                provider=route.provider,
+                model_or_agent=route.model_or_agent,
             )
 
         observed_now = float(time.time() if now is None else now)
@@ -380,4 +470,7 @@ class ResidentCognitionEngine:
             response_text=response_text,
             retryable=False,
             evidence_id=evidence_id,
+            provider=route.provider,
+            model_or_agent=route.model_or_agent,
+            acceptance=acceptance,
         )

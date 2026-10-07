@@ -6,6 +6,7 @@ import urllib.request
 
 from portal.desktop_cognition import CognitionRoute
 from portal.desktop_runtime import invoke_local_text
+import portal.desktop_runtime as runtime
 
 
 def _route(provider: str, model: str) -> CognitionRoute:
@@ -26,12 +27,14 @@ def _route(provider: str, model: str) -> CognitionRoute:
 def test_pre_active_local_invocation_uses_openai_compatible_loopback(monkeypatch) -> None:
     observed: dict[str, object] = {}
 
-    def fake_urlopen(request: urllib.request.Request, timeout: float):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float):
+        if request.full_url.endswith("/models"):
+            return {"data": [{"id": "vera-v10r3-step20", "local": True,
+                              "incremental_paid_compute": False, "effect_authority": False}]}
         observed["url"] = request.full_url
         observed["timeout"] = timeout
         observed["payload"] = json.loads(request.data.decode("utf-8"))
-        return io.BytesIO(
-            json.dumps(
+        return (
                 {
                     "choices": [
                         {
@@ -42,10 +45,9 @@ def test_pre_active_local_invocation_uses_openai_compatible_loopback(monkeypatch
                         }
                     ]
                 }
-            ).encode("utf-8")
         )
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(runtime, "loopback_json", fake_urlopen)
 
     answer = invoke_local_text(
         _route("pre_active_local", "vera-v10r3-step20"),
@@ -61,13 +63,15 @@ def test_pre_active_local_invocation_uses_openai_compatible_loopback(monkeypatch
 
 
 def test_ollama_invocation_remains_supported(monkeypatch) -> None:
-    def fake_urlopen(request: urllib.request.Request, timeout: float):
+    def fake_urlopen(request: urllib.request.Request, *, timeout: float):
+        if request.full_url.endswith("/tags"):
+            return {"models": [{"name": "vera-local:latest"}]}
+        if request.full_url.endswith("/show"):
+            return {"details": {"family": "qwen3"}}
         assert request.full_url == "http://127.0.0.1:11434/api/generate"
-        return io.BytesIO(
-            json.dumps({"done": True, "response": "ollama answer"}).encode("utf-8")
-        )
+        return {"done": True, "response": "ollama answer"}
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(runtime, "loopback_json", fake_urlopen)
 
     assert invoke_local_text(
         _route("ollama", "vera-local:latest"),

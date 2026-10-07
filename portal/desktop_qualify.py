@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import time
 import uuid
@@ -9,7 +10,9 @@ import uuid
 from .desktop_ipc import FileBridgeClient
 
 
-def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1):
+def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1, label: str = "qualification condition"):
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("qualification timeout must be finite and positive")
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
@@ -17,7 +20,44 @@ def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1)
         if last:
             return last
         time.sleep(poll_seconds)
-    raise TimeoutError(f"qualification condition timed out; last={last!r}")
+    raise TimeoutError(f"{label} timed out; last={last!r}")
+
+
+def _qualified_acceptance(record: dict[str, object], *, label: str, runtime_id: str) -> dict[str, object]:
+    receipt = record.get("acceptance")
+    if (record.get("state") != "COMPLETED"
+            or record.get("protected_effect_authority") is not False
+            or not record.get("evidence_id")
+            or not isinstance(receipt, dict)
+            or receipt.get("status") != "ACCEPTED_HOST_OBSERVATION"
+            or receipt.get("canonical_memory_write") is not False
+            or receipt.get("protected_effect_authority") is not False
+            or receipt.get("request_id") != record.get("request_id")
+            or receipt.get("runtime_id") != runtime_id
+            or receipt.get("route_id") != record.get("route_id")):
+        raise RuntimeError(f"{label} lacks exact qualified Vera host acceptance")
+    return receipt
+
+
+def _wait_cognition(client, *, runtime_id: str, label: str, timeout_seconds: float,
+                    source_event_id: str | None = None, request_id: str | None = None,
+                    source: str = "PRE_ACTIVE_AUTONOMOUS_TURN") -> dict[str, object]:
+    if (source_event_id is None) == (request_id is None):
+        raise ValueError("qualification must correlate one exact source event or request")
+    def completed():
+        payload = client.request("desktop_recent_activity", limit=200)
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise RuntimeError("desktop activity did not return a list")
+        for record in items:
+            if (isinstance(record, dict)
+                    and ((record.get("source_event_id") == source_event_id) if source_event_id is not None else record.get("request_id") == request_id)
+                    and record.get("source") == source
+                    and record.get("state") == "COMPLETED"):
+                _qualified_acceptance(record, label=label, runtime_id=runtime_id)
+                return record
+        return None
+    return _wait_until(completed, timeout_seconds=timeout_seconds, label=label)
 
 
 def qualify_runtime(
@@ -37,6 +77,9 @@ def qualify_runtime(
         ),
         timeout_seconds=timeout_seconds,
     )
+    runtime_id = status.get("runtime_id")
+    if not isinstance(runtime_id, str) or not runtime_id:
+        raise RuntimeError("desktop status missing runtime identity")
     components = status.get("components")
     if not isinstance(components, dict):
         raise RuntimeError("desktop status missing components")
@@ -60,6 +103,7 @@ def qualify_runtime(
         and route.get("current") is True
         and route.get("incremental_paid_compute") is False
         and route.get("auto_admissible") is True
+        and route.get("effect_authority_ceiling") == "COGNITION_ONLY_NO_PROTECTED_EFFECT"
     ]
     if require_local_route and not local_routes:
         raise RuntimeError("no admissible local no-incremental-paid-compute route")
@@ -82,31 +126,17 @@ def qualify_runtime(
     if human.get("protected_effect_authority") is not False:
         raise RuntimeError("human cognition claimed protected effect authority")
 
-    human_activity = client.request("desktop_recent_activity", limit=100)
-    human_items = human_activity.get("items")
-    if not isinstance(human_items, list):
-        raise RuntimeError("desktop activity did not return a list")
-    human_record = next(
-        (
-            item
-            for item in human_items
-            if isinstance(item, dict)
-            and item.get("request_id") == human_request_id
-        ),
-        None,
+    # The response and cached activity publish separately; wait for the same
+    # completed request to become visible before assessing durable evidence.
+    human_record = _wait_cognition(
+        client, request_id=human_request_id, source="HUMAN", runtime_id=runtime_id,
+        label="human cognition", timeout_seconds=timeout_seconds,
     )
-    if human_record is None:
-        raise RuntimeError("human cognition evidence is missing")
-    human_acceptance = human_record.get("acceptance")
-    if (
-        not isinstance(human_acceptance, dict)
-        or human_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
-        or human_acceptance.get("canonical_memory_write") is not False
-        or human_acceptance.get("protected_effect_authority") is not False
-    ):
-        raise RuntimeError(
-            f"human cognition lacks qualified Vera host acceptance: {human_acceptance!r}"
-        )
+    _qualified_acceptance(human_record, label="human cognition", runtime_id=runtime_id)
+    if (human_record.get("source") != "HUMAN"
+            or human_record.get("evidence_id") != human.get("evidence_id")
+            or human_record.get("route_id") != human.get("route_id")):
+        raise RuntimeError("human response does not match its durable cognition provenance")
 
     from pre_active import Store
 
@@ -118,7 +148,7 @@ def qualify_runtime(
             source="ENDOGENOUS",
             reason="staged resident autonomous cognition qualification",
             now=time.time(),
-            dedup_key="portal-desktop-staged-qualification-v1",
+            dedup_key="portal-desktop-staged-qualification-" + uuid.uuid4().hex,
         )
     finally:
         store.close()
@@ -135,42 +165,22 @@ def qualify_runtime(
             check.close()
         if row is not None and row.get("status") == "DONE":
             return row
+        if row is not None and row.get("status") in {"DEAD", "CANCELLED"}:
+            raise RuntimeError("autonomous source event was not admitted")
         return None
 
     event_row = _wait_until(
         autonomous_done,
         timeout_seconds=timeout_seconds,
+        label="autonomous source admission",
     )
 
-    activity = client.request("desktop_recent_activity", limit=100)
-    items = activity.get("items")
-    if not isinstance(items, list):
-        raise RuntimeError("desktop activity did not return a list")
-    autonomous_record = next(
-        (
-            item
-            for item in items
-            if isinstance(item, dict)
-            and item.get("request_id") == autonomous_event_id
-        ),
-        None,
+    # Pre-Active ACKs the source when it admits a run. Model execution happens
+    # in its run.step event, whose cognition request has a different identifier.
+    autonomous_record = _wait_cognition(
+        client, source_event_id=autonomous_event_id, runtime_id=runtime_id,
+        label="autonomous cognition", timeout_seconds=timeout_seconds,
     )
-    if autonomous_record is None:
-        raise RuntimeError("autonomous cognition evidence is missing")
-    if autonomous_record.get("state") != "COMPLETED":
-        raise RuntimeError("autonomous cognition evidence is not complete")
-    if autonomous_record.get("protected_effect_authority") is not False:
-        raise RuntimeError("autonomous cognition claimed protected effect authority")
-    autonomous_acceptance = autonomous_record.get("acceptance")
-    if (
-        not isinstance(autonomous_acceptance, dict)
-        or autonomous_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
-        or autonomous_acceptance.get("canonical_memory_write") is not False
-        or autonomous_acceptance.get("protected_effect_authority") is not False
-    ):
-        raise RuntimeError(
-            "autonomous cognition lacks qualified Vera host acceptance"
-        )
 
     from pre_active.volition_bridge import VolitionBridge
 
@@ -226,44 +236,47 @@ def qualify_runtime(
             volition_receipt = dict(receipt)
             volition_turn = dict(turn)
             return turn
+        if turn is not None and turn.get("status") in {"DEAD", "CANCELLED"}:
+            raise RuntimeError("Volition source event was not admitted")
         return None
 
     _wait_until(
         volition_done,
         timeout_seconds=timeout_seconds,
+        label="Volition source admission",
     )
     if volition_receipt is None or volition_turn is None:
         raise RuntimeError("Volition qualification evidence is incomplete")
 
-    volition_activity = client.request("desktop_recent_activity", limit=200)
-    volition_items = volition_activity.get("items")
-    if not isinstance(volition_items, list):
-        raise RuntimeError("desktop activity did not return a list")
-    volition_record = next(
-        (
-            item
-            for item in volition_items
-            if isinstance(item, dict)
-            and item.get("request_id")
-            == volition_receipt.get("cognition_event_id")
-        ),
-        None,
+    volition_record = _wait_cognition(
+        client, source_event_id=str(volition_receipt["cognition_event_id"]),
+        runtime_id=runtime_id, label="Volition cognition", timeout_seconds=timeout_seconds,
     )
-    if volition_record is None:
-        raise RuntimeError("Volition cognition activity is missing")
-    volition_acceptance = volition_record.get("acceptance")
-    if (
-        volition_record.get("state") != "COMPLETED"
-        or not isinstance(volition_acceptance, dict)
-        or volition_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
-        or volition_acceptance.get("protected_effect_authority") is not False
-        or volition_record.get("protected_effect_authority") is not False
-    ):
-        raise RuntimeError(
-            "Volition cognition lacks qualified Vera host acceptance"
-        )
+    volition_acceptance = _qualified_acceptance(
+        volition_record, label="Volition cognition", runtime_id=runtime_id,
+    )
+
+    # Read-only control-plane proof: no run/continue or worker dispatch occurs.
+    portfolio = client.request(
+        "desktop_portfolio", action="status", session_id="qualification-" + uuid.uuid4().hex,
+    )
+    if (portfolio.get("schema") != "PORTAL_DESKTOP_PORTFOLIO_V1"
+            or portfolio.get("protected_effect_authority") is not False
+            or portfolio.get("dispatch_mode") != "ADMISSION_ONLY"
+            or not isinstance(portfolio.get("sessions"), list)):
+        raise RuntimeError("portfolio status IPC did not return governed admission-only telemetry")
 
     final_status = client.request("desktop_status")
+    if (final_status.get("runtime_id") != runtime_id
+            or final_status.get("source_manifest") != status.get("source_manifest")):
+        raise RuntimeError("runtime identity or bound sources changed during qualification")
+    if final_status.get("state") != "ACTIVE" or final_status.get("protected_effect_authority") is not False:
+        raise RuntimeError("runtime is not healthy at qualification completion")
+    if require_local_route:
+        admitted_route_ids = {route.get("route_id") for route in local_routes}
+        for label, record in (("human", human_record), ("autonomous", autonomous_record), ("Volition", volition_record)):
+            if record.get("route_id") not in admitted_route_ids:
+                raise RuntimeError(f"{label} cognition did not consume a discovered admissible local route")
     result = {
         "schema": "VERA_DESKTOP_RUNTIME_QUALIFICATION_V1",
         "qualified": True,
@@ -279,12 +292,14 @@ def qualify_runtime(
             "evidence_id": human.get("evidence_id"),
         },
         "autonomous_cognition": {
+            "request_id": autonomous_record.get("request_id"),
             "event_id": autonomous_event_id,
             "event_status": event_row.get("status"),
             "route_id": autonomous_record.get("route_id"),
             "evidence_id": autonomous_record.get("evidence_id"),
         },
         "volition_chain": {
+            "request_id": volition_record.get("request_id"),
             "signal_event_id": volition_signal_id,
             "state_revision": volition_receipt.get("state_revision"),
             "goal_id": volition_receipt.get("goal_id"),
@@ -296,6 +311,14 @@ def qualify_runtime(
             "acceptance_status": volition_acceptance.get("status"),
             "effect_authority": False,
         },
+        "portfolio_ipc": {
+            "status_only": True,
+            "dispatch_mode": portfolio["dispatch_mode"],
+            "configured": portfolio.get("configured"),
+            "observed_session_count": len(portfolio["sessions"]),
+            "worker_execution_verified": False,
+            "protected_effect_authority": False,
+        },
         "protected_effect_authority": False,
         "native_openai_router_replaced": False,
         "claim_ceiling": (
@@ -305,10 +328,12 @@ def qualify_runtime(
         "qualified_at": time.time(),
     }
     output = runtime_root / "QUALIFICATION.json"
-    output.write_text(
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(
         json.dumps(result, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    temporary.replace(output)
     return result
 
 

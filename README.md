@@ -31,28 +31,36 @@ This source implementation does not by itself prove that a resident P.O.R.T.A.L.
 
 ## P.O.R.T.A.L. Desktop and resident Vera runtime
 
-The repository also contains the source for **P.O.R.T.A.L. Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
+**P.O.R.T.A.L. Desktop** opens on the Portfolio tab, with durable session controls for Run, Continue, Hold selected, Stop, and Refresh. **Run is the normal zero-setup path:** when no profile is configured, Desktop bootstraps a runtime-local live profile from its exact frozen P.O.R.T.A.L. source, refreshes current GitHub owner membership into local runtime artifacts, and creates a conservative local execution-node definition. Repository/work rows show their state, worker route, and verification state. **Advanced profile?** remains available for deliberate custom/debug topology; the [example profile](examples/portal-desktop-profile.example.json) is demonstration data rather than required onboarding.
+
+When local `codex`, `gh`, and `git` executables are all available, Desktop auto-configures the existing `CODEX_GH_PROPOSAL_V1` worker and reports `PROCESS_PROPOSAL / CONFIGURED`. That worker executes bounded proposal generation against the exact admitted head and persists a hash-bound source-tree proposal; it cannot commit, push, merge, deploy, install, change credentials/permissions, or mutate the target ref. Proposal publication remains separately governed through Project Runner review/promotion/authority. If the required worker tools are unavailable, Desktop reports the exact missing capability and remains `ADMISSION_ONLY` rather than inventing a route. See the [desktop runbook](docs/operations/PORTAL_DESKTOP_RUNBOOK_V1.md) and [host bridge runbook](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the execution and external-host boundaries.
+
+Pending exact Project Runner authority requests are surfaced separately in the Runtime pane. An explicit **Approve** action is real authority: the resident host revalidates the durable claim/head/fence and mints the existing HMAC execution grant plus the separate protected-effect grant when required. The click does **not** execute the protected effect; Project Runner still owns promotion/currentness/review/backend verification. **Deny** resolves the request without minting authority. Desktop never auto-provisions authority credentials; optional execution/effect key custody is current-user DPAPI or existing environment configuration, while independent review-key custody remains outside the Desktop surface.
+
+The Conversation tab sends human cognition requests over local IPC to the resident Vera host. Runtime health, component source revisions, selected route, autonomous activity, durable evidence IDs, and pending effects remain visible alongside the portfolio. The resident host owns identity/state composition, routing, and acceptance evidence; closing the desktop window leaves that process running.
 
 The resident-host source composes:
 
 - `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;
-- Pre-Active scheduler/observer state and `autonomous.turn` admission;
+- Pre-Active's existing scheduler, observers, daemon/engine, and `autonomous.turn` admission;
 - the current Pre-Active `VolitionBridge`, where validated `volition.signal` events can produce endogenous cognition requests without effect authority;
 - P.O.R.T.A.L. cognition-route discovery and deterministic route selection;
 - durable cognition provenance and Vera host-acceptance receipts;
-- the same IPC path for human and autonomous cognition.
+- human cognition through IPC and internally admitted Pre-Active autonomous cognition through the resident adapter.
 
 Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
 
-The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
+The Windows bootstrap binds exact SHAs for all four components and creates an isolated user-local environment. Local no-incremental-paid-compute cognition is denied by default; `-AllowLocalNoPaidCompute` explicitly admits that class and enables full local cognition qualification. The default installation verifies component construction and health without claiming cognition was proved. Logon registration requires the separate `-Activate` operator choice and successful source/health checks. Matching qualified re-runs preserve installed sources and activation; source or policy changes require a separate staged root. The installer does not provision credentials.
 
 Run the desktop shell from an installed/source environment with:
 
-    portal-desktop
+    portal-desktop --runtime-root "PATH_TO_STAGED_RUNTIME"
 
 Or directly:
 
-    python -m portal.desktop_app
+    python -m portal.desktop_app --runtime-root "PATH_TO_STAGED_RUNTIME"
+
+An installed runtime also provides `PortalDesktop.cmd` and the thin supervisor launcher `StartVeraRuntime.cmd`. Follow [P.O.R.T.A.L. Desktop Runbook V1](docs/operations/PORTAL_DESKTOP_RUNBOOK_V1.md) for exact-revision bootstrap, dry-run, health checks, log paths, and staged upgrades. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
 The desktop/runtime path preserves the same evidence rules as the portfolio coordinator:
 
