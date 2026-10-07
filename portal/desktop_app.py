@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
+import os
 from pathlib import Path
+from queue import Empty, Queue
 import threading
 import time
 from typing import Protocol
 import uuid
 
 from .desktop_ipc import FileBridgeClient
+from .desktop_supervisor import RuntimeState, RuntimeSupervisor, RuntimeSupervisorConfig
 
 
 class RuntimeClient(Protocol):
@@ -23,50 +27,42 @@ class DesktopSnapshot:
     last_autonomous_activity: dict[str, object] | None
     recent_activity: tuple[dict[str, object], ...]
     pending_effects: tuple[dict[str, object], ...]
+    health_reason: str = ""
+    heartbeat_age_seconds: float | None = None
+    components: dict[str, object] = field(default_factory=dict)
 
 
 class DesktopViewModel:
-    def __init__(self, client: RuntimeClient) -> None:
+    def __init__(
+        self, client: RuntimeClient, *, supervisor: RuntimeSupervisor | None = None,
+        status_client: RuntimeClient | None = None,
+    ) -> None:
         self.client = client
-
-    @staticmethod
-    def _preferred_route(
-        route_payloads: list[dict[str, object]],
-    ) -> str | None:
-        candidates = [
-            route
-            for route in route_payloads
-            if route.get("available") is True
-            and route.get("current") is True
-            and route.get("auto_admissible") is True
-        ]
-        if not candidates:
-            return None
-        candidates.sort(
-            key=lambda route: (
-                0 if route.get("local") is True else 1,
-                0 if route.get("incremental_paid_compute") is False else 1,
-                int(route.get("preference", 100)),
-                str(route.get("route_id", "")),
-            )
-        )
-        route_id = candidates[0].get("route_id")
-        return str(route_id) if route_id is not None else None
+        self.status_client = status_client or client
+        self.supervisor = supervisor
 
     def refresh(self) -> DesktopSnapshot:
-        status = self.client.request("desktop_status")
-        route_payload = self.client.request("desktop_discover_routes")
-        activity_payload = self.client.request(
+        health = None
+        if self.supervisor is not None:
+            try:
+                health = self.supervisor.ensure_started()
+            except (OSError, ValueError) as exc:
+                return DesktopSnapshot(
+                    "BLOCKED", None, None, None, (), (),
+                    health_reason=f"{type(exc).__name__}: {exc}",
+                )
+            if health.state is not RuntimeState.ACTIVE:
+                return DesktopSnapshot(
+                    health.state.value, health.runtime_id, None, None, (), (),
+                    health_reason=health.reason,
+                    heartbeat_age_seconds=health.heartbeat_age_seconds,
+                )
+        status = self.status_client.request("desktop_status")
+        activity_payload = self.status_client.request(
             "desktop_recent_activity",
             limit=50,
         )
-        routes_raw = route_payload.get("routes", [])
         activities_raw = activity_payload.get("items", [])
-        routes = [
-            dict(route)
-            for route in routes_raw
-            if isinstance(route, dict)
-        ] if isinstance(routes_raw, list) else []
         activities = [
             dict(item)
             for item in activities_raw
@@ -80,17 +76,27 @@ class DesktopViewModel:
             ),
             None,
         )
+        state = str(status.get("state", "DEGRADED"))
+        if state not in {item.value for item in RuntimeState}:
+            state = "DEGRADED"
+        pending = status.get("pending_effects", [])
+        components = status.get("components", {})
+        selected_route = status.get("selected_route_id")
         return DesktopSnapshot(
-            runtime_state=str(status.get("state", "UNKNOWN")),
+            runtime_state=state,
             runtime_id=(
                 str(status["runtime_id"])
                 if status.get("runtime_id") is not None
                 else None
             ),
-            current_route=self._preferred_route(routes),
+            current_route=str(selected_route) if selected_route else None,
             last_autonomous_activity=last_autonomous,
             recent_activity=tuple(activities),
-            pending_effects=(),
+            pending_effects=tuple(item for item in pending if isinstance(item, dict))
+            if isinstance(pending, list) else (),
+            health_reason=str(status.get("failure") or status.get("reason") or ""),
+            heartbeat_age_seconds=health.heartbeat_age_seconds if health else None,
+            components=dict(components) if isinstance(components, dict) else {},
         )
 
     def send_message(
@@ -126,7 +132,16 @@ class PortalDesktopApp:
         self.root.minsize(900, 620)
 
         self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
-        self.view_model = DesktopViewModel(self.client)
+        self.view_model = DesktopViewModel(
+            self.client,
+            supervisor=RuntimeSupervisor(RuntimeSupervisorConfig(runtime_root)),
+            status_client=FileBridgeClient(runtime_root, timeout_seconds=5.0),
+        )
+        self._events: Queue[tuple[str, object]] = Queue()
+        self._closed = False
+        self._refresh_in_flight = False
+        self._send_in_flight = False
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
 
         shell = ttk.Frame(self.root, padding=10)
         shell.pack(fill="both", expand=True)
@@ -137,6 +152,8 @@ class PortalDesktopApp:
         self.route_var = tk.StringVar(value="Cognition route: unknown")
         ttk.Label(header, textvariable=self.health_var).pack(side="left")
         ttk.Label(header, textvariable=self.route_var).pack(side="right")
+        self.details_var = tk.StringVar(value="Waiting for runtime health and source versions.")
+        ttk.Label(shell, textvariable=self.details_var, wraplength=1050).pack(fill="x")
 
         body = ttk.Panedwindow(shell, orient="horizontal")
         body.pack(fill="both", expand=True, pady=(10, 8))
@@ -206,6 +223,7 @@ class PortalDesktopApp:
         ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
 
         self.root.after(100, self.refresh_async)
+        self.root.after(50, self._drain_events)
         self.root.after(3000, self._scheduled_refresh)
 
     @staticmethod
@@ -214,7 +232,8 @@ class PortalDesktopApp:
         state = item.get("state", "UNKNOWN")
         route = item.get("route_id") or "no-route"
         reason = item.get("reason") or ""
-        return f"{source} · {state} · {route} · {reason}"
+        evidence = item.get("evidence_id") or "no evidence"
+        return f"{source} · {state} · {route} · {reason} · {evidence}"
 
     def _set_text(self, widget: object, text: str) -> None:
         widget.configure(state="normal")
@@ -238,8 +257,16 @@ class PortalDesktopApp:
             f"Runtime: {snapshot.runtime_state} · {runtime_id}"
         )
         self.route_var.set(
-            f"Cognition route: {snapshot.current_route or 'none admissible'}"
+            f"Cognition route: {snapshot.current_route or 'none selected by runtime'}"
         )
+        details = [snapshot.health_reason] if snapshot.health_reason else []
+        if snapshot.heartbeat_age_seconds is not None:
+            details.append(f"Heartbeat age: {snapshot.heartbeat_age_seconds:.1f}s")
+        for name, component in snapshot.components.items():
+            if isinstance(component, dict):
+                revision = component.get("source_revision") or component.get("sha") or component.get("version") or "unverified version"
+                details.append(f"{name}: {revision} ({'loaded' if component.get('loaded') else 'unavailable'})")
+        self.details_var.set(" · ".join(details))
         if snapshot.last_autonomous_activity is None:
             autonomous = "No autonomous cognition recorded."
         else:
@@ -255,34 +282,69 @@ class PortalDesktopApp:
         self.effects_var.set(
             "None. Cognition carries no protected-effect authority."
             if not snapshot.pending_effects
-            else f"{len(snapshot.pending_effects)} pending exact effect request(s)."
+            else "\n".join(json.dumps(effect, sort_keys=True) for effect in snapshot.pending_effects)
         )
 
     def refresh_async(self) -> None:
+        if self._closed or self._refresh_in_flight:
+            return
+        self._refresh_in_flight = True
         def work() -> None:
             try:
                 snapshot = self.view_model.refresh()
             except Exception as exc:
-                self.root.after(
-                    0,
-                    lambda: self.health_var.set(
-                        f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
-                    ),
-                )
+                self._events.put(("refresh_error", f"{type(exc).__name__}: {exc}"))
                 return
-            self.root.after(0, lambda: self._render_snapshot(snapshot))
+            self._events.put(("snapshot", snapshot))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _scheduled_refresh(self) -> None:
+        if self._closed:
+            return
         self.refresh_async()
         self.root.after(3000, self._scheduled_refresh)
+
+    def _drain_events(self) -> None:
+        # Every Tk operation, including after(), runs on the GUI thread.
+        if self._closed:
+            return
+        while True:
+            try:
+                kind, payload = self._events.get_nowait()
+            except Empty:
+                break
+            if kind == "snapshot":
+                self._refresh_in_flight = False
+                self._render_snapshot(payload)
+            elif kind == "refresh_error":
+                self._refresh_in_flight = False
+                self.health_var.set(f"Runtime: DEGRADED · {payload}")
+            elif kind == "response":
+                self._send_in_flight = False
+                self._render_response(payload)
+        self.root.after(50, self._drain_events)
+
+    def _render_response(self, result: dict[str, object]) -> None:
+        response = str(result.get("response_text") or result.get("error") or result.get("state") or "No response text.")
+        self._append_conversation("Vera", response)
+        provenance = " · ".join(
+            f"{key}: {result[key]}"
+            for key in ("state", "request_id", "route_id", "provider", "model_or_agent", "evidence_id", "retryable")
+            if result.get(key) is not None
+        )
+        self._append_conversation("Provenance", provenance)
+        self.status_var.set(str(result.get("state", "UNKNOWN")))
+        self.send_button.configure(state="normal")
+        self.refresh_async()
 
     def _send_from_event(self, _event: object) -> str:
         self.send_message()
         return "break"
 
     def send_message(self) -> None:
+        if self._closed or self._send_in_flight:
+            return
         message = self.message_var.get().strip()
         if not message:
             return
@@ -290,54 +352,40 @@ class PortalDesktopApp:
         self._append_conversation("Patrick", message)
         self.status_var.set("Vera is thinking…")
         self.send_button.configure(state="disabled")
+        self._send_in_flight = True
 
         def work() -> None:
             try:
                 result = self.view_model.send_message(message)
-                response = str(
-                    result.get("response_text")
-                    or result.get("error")
-                    or result.get("state")
-                    or "No response text."
-                )
-                route = result.get("route_id")
-                state = result.get("state", "UNKNOWN")
             except Exception as exc:
-                response = f"{type(exc).__name__}: {exc}"
-                route = None
-                state = "FAILED"
-
-            def finish() -> None:
-                self._append_conversation("Vera", response)
-                self.status_var.set(
-                    f"{state}"
-                    + (f" via {route}" if route else "")
-                )
-                self.send_button.configure(state="normal")
-                self.refresh_async()
-
-            self.root.after(0, finish)
+                result = {"error": f"{type(exc).__name__}: {exc}", "state": "FAILED"}
+            self._events.put(("response", result))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def close(self) -> None:
+        self._closed = True
+        self.root.destroy()
 
     def run(self) -> None:
         self.message_entry.focus_set()
         self.root.mainloop()
 
 
-def main() -> None:
-    import os
-
+def default_runtime_root() -> Path:
     configured = os.environ.get("VERA_RUNTIME_ROOT")
-    runtime_root = Path(
-        configured
-        or Path.home()
-        / "AppData"
-        / "Local"
-        / "VeraUnifiedRuntime"
-        / "20261006"
-    )
-    PortalDesktopApp(runtime_root=runtime_root).run()
+    if configured:
+        return Path(configured)
+    local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    return local_app_data / "PortalVera" / "runtime"
+
+
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="P.O.R.T.A.L. Desktop — resident Vera interface")
+    parser.add_argument("--runtime-root", type=Path, default=default_runtime_root())
+    args = parser.parse_args(argv)
+    PortalDesktopApp(runtime_root=args.runtime_root).run()
 
 
 if __name__ == "__main__":
