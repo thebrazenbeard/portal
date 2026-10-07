@@ -80,15 +80,37 @@ For a process/heartbeat status snapshot outside the GUI, without requesting star
 
 Use `portal.desktop_host --runtime-root ROOT --check` for actual component construction only when that root is offline. A running resident correctly holds the root singleton; use live status/IPC instead of opening competing stores. Closing and reopening Desktop observes the same durable resident state.
 
-## Connect the portfolio inputs
+## Run the live portfolio
 
-Copy [the example profile](../../examples/portal-desktop-profile.example.json) into an operator-local directory and edit it. The only supported fields are `wave`, `corpus`, `projects`, `nodes`, `max_parallel`, and `holder`. The first four must point to actual existing files. Relative paths resolve against the profile file's directory. `max_parallel` is an integer from 1 to 64.
+The normal Desktop path does **not** require an operator to copy or edit the historical example profile.
 
-The example uses the repository's historical public corpus/wave, project registry, and a test node fixture to show file shapes. Those inputs are not a fresh whole-portfolio census, a discovered workstation inventory, or an authority grant. Replace them with a mutually consistent current wave/corpus, a governed project registry, and the operator's execution-node manifest. Node declarations use `PORTAL_EXECUTION_NODES_V1`; they must reflect real intended capacity and lanes. Do not infer a live worker from a declared node.
+Open the **Portfolio** tab and select **Run**. When no profile is configured, the resident Desktop controller bootstraps a runtime-local `LIVE_AUTO_V1` profile from the exact frozen P.O.R.T.A.L. source installed in that runtime. It:
 
-In Desktop, select **Choose profile…**, choose the edited profile, and enter the intended session ID. The resident runtime validates and persists the profile as `PORTFOLIO_PROFILE.json`. Use **Run** to admit a session, **Continue** for its next safe generation, **Refresh** to reconstruct status, **Hold selected** to record no-refill intent for that subject, and **Stop** to prevent new admission/refill. Hold and Stop preserve active or unresolved effects; they do not erase or automatically cancel dispatched work.
+- uses the installed public wave/corpus/project registry as the governed baseline;
+- infers the single portfolio owner from that baseline;
+- creates a conservative runtime-local `desktop-local` execution-node manifest;
+- refreshes the owner's current GitHub repository membership into runtime-local registry/corpus/wave artifacts;
+- keeps exact private membership in those local runtime artifacts rather than publishing it;
+- gives newly discovered repositories a `SOURCE_ONLY` **proposal** ceiling, which still grants no remote source mutation, target-ref mutation, merge, deployment, credential, or protected-effect authority;
+- detects existing local `codex`, `gh`, and `git` executables and, when all three are present, creates a runtime-local `CODEX_GH_PROPOSAL_V1` worker-backend manifest.
 
-The current Desktop portfolio path reports `dispatch_mode: ADMISSION_ONLY`. **Queued work awaits an attached worker.** It does not provision a worker backend or credentials. Attach live drivers and fresh exact-target routes through the existing [Host Bridge Runbook V1](PORTAL_HOST_BRIDGE_RUNBOOK_V1.md); carry the exact session/state database through that process. The desktop resident's Portal database is `state/portal/session.sqlite3` under the selected runtime root. Worker output counts as completed repository work only after owning-substrate verification and reconciliation.
+The built-in proposal worker is real bounded execution, not a decorative route. For each admitted packet it clones the exact repository/head, runs Codex in a detached proposal-only workspace, validates the resulting text-file changes, and persists a hash-bound `PORTAL_SOURCE_TREE_PROPOSAL_V1`. It is forbidden from committing, pushing, merging, deploying, installing, changing credentials/permissions, deleting/renaming files, or mutating the target ref. A generated proposal remains held behind P.O.R.T.A.L./Project Runner's separate review, promotion, and authority gates.
+
+If one of the required local worker tools is unavailable, the Desktop still connects the live portfolio and reports the exact missing tool(s), but remains in `ADMISSION_ONLY` mode. It does not advertise or display a fake worker route.
+
+The Portfolio banner distinguishes the portfolio source and worker state. In the automatic path the expected source is `LIVE_GITHUB`; an attached built-in proposal worker reports `PROCESS_PROPOSAL / CONFIGURED`. **Run** starts or restarts the durable session, **Continue** reconciles verified worker outcomes and admits the next collision-safe generation, **Refresh** reconstructs status, **Hold selected** records no-refill intent, and **Stop** prevents new admission/refill without erasing unresolved work.
+
+### Advanced/manual profile override
+
+**Advanced profile?** remains available for debugging, qualification, or a deliberately custom topology. The supported manual fields remain the baseline paths and bounded execution settings accepted by `DesktopPortfolioController`. The example profile is historical demonstration data and is no longer the normal onboarding path.
+
+Manual profile configuration does not silently inherit Desktop live-discovery semantics or manufacture credentials. Worker attachment and stronger effect authority must be explicit in the chosen profile/runtime route.
+
+### External host routes
+
+The local proposal worker is not the only possible execution route. ChatGPT/plugin/workstation hosts can still attach exact target-bound routes through the [Host Bridge Runbook V1](PORTAL_HOST_BRIDGE_RUNBOOK_V1.md), using the durable attempt-before-effect and owning-substrate verification protocol.
+
+A host route must be genuinely executable and current. Route discovery, connector presence, a declared node, or a UI label never establishes worker attachment or effect authority.
 
 ## Durable evidence, recovery, and upgrades
 

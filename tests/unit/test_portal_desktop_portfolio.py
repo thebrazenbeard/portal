@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -102,5 +103,136 @@ def test_durable_stop_survives_malformed_saved_profile(tmp_path, monkeypatch):
         assert result["session"]["control_state"] == "STOPPED"
         assert result["session"]["holder"] == "known-holder"
         assert "JSONDecodeError" in result["profile_error"]
+    finally:
+        session.close()
+
+
+def _desktop_runtime_sources(tmp_path):
+    source = tmp_path / "sources" / "portal"
+    (source / "portfolio").mkdir(parents=True)
+    (source / "registry").mkdir(parents=True)
+    (source / "portfolio" / "advancement_wave.public.json").write_text(
+        json.dumps(
+            {
+                "schema": "PORTFOLIO_ADVANCEMENT_WAVE_V1",
+                "corpus_binding": {"sha256": "0" * 64},
+                "items": [
+                    {
+                        "subject_kind": "repository",
+                        "subject_id": "portal",
+                        "repository": "thebrazenbeard/portal",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "portfolio" / "corpus.public.json").write_text(
+        json.dumps({"schema": "PORTFOLIO_CORPUS_V1", "records": []}),
+        encoding="utf-8",
+    )
+    (source / "registry" / "projects.yaml").write_text(
+        "projects: []\n",
+        encoding="utf-8",
+    )
+    return source
+
+
+def test_run_without_profile_bootstraps_live_runtime_profile(tmp_path, monkeypatch):
+    _desktop_runtime_sources(tmp_path)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    resolved = {}
+    for name in ("codex", "gh", "git"):
+        executable = tools / (name + ".exe")
+        executable.write_text("", encoding="utf-8")
+        resolved[name] = str(executable)
+
+    session = PortalCommandSession(tmp_path / "state" / "portal" / "session.sqlite3")
+    try:
+        controller = DesktopPortfolioController(
+            tmp_path,
+            session=session,
+            executable_resolver=lambda name: resolved.get(name),
+            token_provider=lambda: "existing-token",
+        )
+        captured = {}
+
+        def run(**kwargs):
+            captured.update(kwargs)
+            session._ensure_session(
+                session_id=kwargs["session_id"],
+                holder=kwargs["holder"],
+                now=0,
+            )
+            return SimpleNamespace(packets=())
+
+        monkeypatch.setattr(session, "run", run)
+        monkeypatch.setattr(
+            "portal.desktop_portfolio.load_execution_nodes",
+            lambda path: (),
+        )
+        monkeypatch.setattr(
+            controller,
+            "_refresh_live_inputs",
+            lambda profile: (
+                Path(profile["wave"]),
+                Path(profile["corpus"]),
+                Path(profile["projects"]),
+                {"public": 67, "private": 19, "archived": 5},
+            ),
+        )
+        monkeypatch.setattr(
+            controller,
+            "_execution_adapter",
+            lambda profile, nodes, token: "proposal-adapter",
+        )
+
+        result = controller.handle(
+            {"action": "run", "session_id": "portfolio"}
+        )
+
+        profile = result["profile"]
+        assert result["configured"] is True
+        assert profile["mode"] == "LIVE_AUTO_V1"
+        assert profile["discover_owner"] == "thebrazenbeard"
+        assert profile["discovered_effect_ceiling"] == "SOURCE_ONLY"
+        assert Path(profile["nodes"]).is_file()
+        assert Path(profile["worker_backends"]).is_file()
+        assert result["portfolio_source"] == "LIVE_GITHUB"
+        assert result["inventory"] == {
+            "public": 67,
+            "private": 19,
+            "archived": 5,
+        }
+        assert result["worker_state"] == "CONFIGURED"
+        assert captured["execution_adapter"] == "proposal-adapter"
+        assert captured["public_safe"] is False
+    finally:
+        session.close()
+
+
+def test_auto_bootstrap_reports_missing_worker_without_faking_attachment(
+    tmp_path,
+    monkeypatch,
+):
+    _desktop_runtime_sources(tmp_path)
+    session = PortalCommandSession(tmp_path / "state" / "portal" / "session.sqlite3")
+    try:
+        controller = DesktopPortfolioController(
+            tmp_path,
+            session=session,
+            executable_resolver=lambda name: None if name == "codex" else name,
+            token_provider=lambda: None,
+        )
+        profile = controller._bootstrap_live_profile()
+
+        assert profile["mode"] == "LIVE_AUTO_V1"
+        assert profile["worker_backends"] is None
+        status = controller.handle({"action": "status"})
+        assert status["configured"] is True
+        assert status["worker_state"] == "UNAVAILABLE"
+        assert status["missing_worker_tools"] == ["codex"]
+        assert status["dispatch_mode"] == "ADMISSION_ONLY"
     finally:
         session.close()

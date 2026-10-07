@@ -325,3 +325,28 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Strongest surviving objections accepted: same-user hostile processes can forge local server/bridge metadata; Ollama tag inspection and generation cannot be atomic; mutations wait for the sole state owner during inference. No global security/effect verification is inferred from engine heuristic or cognition success.
 - Current exact implementation checkpoint head is the commit containing this continuation (`git log -1 --format=%H -- state/continuation/PORTAL_DESKTOP_VERA_RUNTIME_CONTINUATION.md`); implementation branch work/portal-desktop-vera-runtime-v1. Fresh main observed7d00d8bf3b48c0676b2278359838ee563c66c67f and was not mutated by this session.
 - Next task (optional, not a blocker to this app): operator supplies current portfolio profile and explicitly attaches governed worker drivers; activate logon only under exact operator authorization. Reverify live state at resume; recorded PID/heartbeat observations are historical, never proof of current liveness.
+
+
+## Live-auto portfolio/worker alignment checkpoint — 2026-10-07
+
+Patrick identified a product-contract mismatch in the staged Desktop UI: the shipped flow required selecting a historical/manual profile and then stopped at `ADMISSION_ONLY`, even though the intended P.O.R.T.A.L. Desktop product is a live portfolio operator with bounded worker execution.
+
+The source correction on `work/portal-desktop-vera-runtime-v1` changes the normal Desktop flow without rewriting the earlier historical checkpoint:
+
+- **Run** with no configured profile bootstraps `LIVE_AUTO_V1` from the runtime's exact frozen P.O.R.T.A.L. source.
+- The controller generates a runtime-local conservative execution-node manifest.
+- It refreshes current GitHub owner membership into local project-registry/corpus/wave artifacts; exact private membership remains runtime-local.
+- Newly discovered repositories use a `SOURCE_ONLY` proposal ceiling. This does not authorize remote source mutation or target-ref mutation.
+- When existing local `codex`, `gh`, and `git` executables are available, the controller generates a `CODEX_GH_PROPOSAL_V1` backend manifest and uses the existing `PortalProposalProcessAdapter`.
+- That worker produces exact-head, hash-bound source-tree proposals only. Commit/push/merge/deploy/install/credential/permission/target-ref mutation remain outside its authority.
+- When a required worker executable is unavailable, Desktop reports the missing capability and remains `ADMISSION_ONLY`; it does not fabricate a worker route.
+- **Advanced profile…** remains as an explicit custom/debug override rather than normal onboarding.
+- The UI reports portfolio source, discovered public/private/archive counts, and actual worker state.
+
+A bounded Cricket review challenged any design that merely labels a detected executable as a worker. The surviving design requires the existing executable proposal-worker contract; executable discovery is configuration evidence, not semantic completion or protected-effect authority.
+
+Focused verification at this checkpoint:
+- Desktop portfolio/controller/UI/IPC/supervisor/worker/adapter cluster: **100 passed**.
+- `git diff --check`: clean apart from local Windows line-ending notices.
+
+Claim ceiling: source/branch behavior only until a new exact source head is committed, pushed, independently reviewed as appropriate, staged into a separate runtime, qualified, and explicitly selected/cut over. This checkpoint does not claim the currently running Desktop runtime consumed these changes.

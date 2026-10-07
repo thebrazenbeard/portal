@@ -177,8 +177,17 @@ class PortalDesktopApp:
         self.session_var = tk.StringVar(value="portfolio")
         ttk.Label(controls, text="Session").pack(side="left")
         ttk.Entry(controls, textvariable=self.session_var, width=20).pack(side="left", padx=6)
-        ttk.Button(controls, text="Choose profile…", command=self.choose_profile).pack(side="left")
-        self.portfolio_var = tk.StringVar(value="Choose a portfolio profile to connect your repositories.")
+        ttk.Button(
+            controls,
+            text="Advanced profile…",
+            command=self.choose_profile,
+        ).pack(side="left")
+        self.portfolio_var = tk.StringVar(
+            value=(
+                "Run connects the live portfolio automatically. "
+                "Advanced profile is an optional manual override."
+            )
+        )
         ttk.Label(portfolio_frame, textvariable=self.portfolio_var, wraplength=620).pack(fill="x", pady=8)
         actions = ttk.Frame(portfolio_frame)
         actions.pack(fill="x")
@@ -433,16 +442,61 @@ class PortalDesktopApp:
         session = result.get("session")
         self.portfolio_tree.delete(*self.portfolio_tree.get_children())
         self._portfolio_subjects.clear()
+
+        source = str(result.get("portfolio_source") or "UNCONFIGURED")
+        worker_state = str(result.get("worker_state") or "UNKNOWN")
+        inventory = result.get("inventory")
+        inventory_text = ""
+        if isinstance(inventory, dict):
+            inventory_text = (
+                f" ? {inventory.get('public', 0)} public"
+                f" ? {inventory.get('private', 0)} private"
+                f" ? {inventory.get('archived', 0)} archived"
+            )
+
         if not isinstance(session, dict):
-            self.portfolio_var.set("Ready to run a new session." if result.get("configured") else "Choose a portfolio profile to connect your repositories.")
+            if result.get("configured"):
+                self.portfolio_var.set(
+                    f"{source}{inventory_text} ? worker {worker_state}\n"
+                    + str(result.get("message", "Ready to run."))
+                )
+            else:
+                self.portfolio_var.set(
+                    "Ready. Run will connect the live portfolio automatically; "
+                    "Advanced profile is optional."
+                )
             return
+
         summary = session.get("summary", {})
-        self.portfolio_var.set(f"{session.get('control_state')} · generation {session.get('generation')} · "
-                               f"{summary.get('active', 0)} active · {summary.get('held', 0)} held · {summary.get('terminal', 0)} complete\n"
-                               + str(result.get("message", "")))
+        self.portfolio_var.set(
+            f"{session.get('control_state')} ? generation {session.get('generation')} ? "
+            f"{summary.get('active', 0)} active ? {summary.get('held', 0)} held ? "
+            f"{summary.get('terminal', 0)} complete ? {source}{inventory_text} ? "
+            f"worker {worker_state}\n"
+            + str(result.get("message", ""))
+        )
         for item in session.get("subjects", []):
-            key = self.portfolio_tree.insert("", "end", values=(item.get("subject_id"), item.get("state"), item.get("route_id") or "Awaiting worker", item.get("verification_state") or "Pending"))
-            self._portfolio_subjects[key] = {"subject_id": item["subject_id"], "subject_kind": item["subject_kind"]}
+            route = item.get("route_id")
+            if not route:
+                route = (
+                    "Worker unavailable"
+                    if worker_state == "UNAVAILABLE"
+                    else "Pending worker binding"
+                )
+            key = self.portfolio_tree.insert(
+                "",
+                "end",
+                values=(
+                    item.get("subject_id"),
+                    item.get("state"),
+                    route,
+                    item.get("verification_state") or "Pending",
+                ),
+            )
+            self._portfolio_subjects[key] = {
+                "subject_id": item["subject_id"],
+                "subject_kind": item["subject_kind"],
+            }
 
     def run(self) -> None:
         self.message_entry.focus_set()
