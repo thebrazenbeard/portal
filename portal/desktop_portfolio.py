@@ -53,7 +53,20 @@ class DesktopPortfolioController:
         session_id = str(payload.get("session_id") or "portfolio").strip()
         if not session_id or len(session_id) > 128:
             raise ValueError("session_id must contain 1 to 128 characters")
-        profile = self._profile(json.loads(self.profile_path.read_text(encoding="utf-8-sig")), self.profile_path.parent) if self.profile_path.is_file() else None
+        profile = None
+        profile_error = None
+        if self.profile_path.is_file():
+            try:
+                profile = self._profile(
+                    json.loads(self.profile_path.read_text(encoding="utf-8-sig")),
+                    self.profile_path.parent,
+                )
+            except (OSError, ValueError) as exc:
+                if action in {"configure", "run", "continue"}:
+                    raise
+                # The existing session remains the authority for monitoring and
+                # no-refill intent when an old admission input disappears.
+                profile_error = f"{type(exc).__name__}: {exc}"
         if action in {"run", "continue"}:
             if profile is None:
                 raise ValueError("Choose a portfolio profile before starting a session")
@@ -80,6 +93,8 @@ class DesktopPortfolioController:
             status = None
         rows = self.session.connection.execute("SELECT session_id FROM portal_command_sessions ORDER BY updated_at DESC LIMIT 50").fetchall()
         return {"schema": "PORTAL_DESKTOP_PORTFOLIO_V1", "configured": profile is not None,
-                "profile": profile, "session": status, "sessions": [str(row[0]) for row in rows],
+                "profile": profile, "profile_error": profile_error,
+                "session": status, "sessions": [str(row[0]) for row in rows],
                 "dispatch_mode": "ADMISSION_ONLY", "protected_effect_authority": False,
-                "message": "Queued work awaits an attached worker."}
+                "message": "Queued work awaits an attached worker." +
+                (f" Profile needs repair: {profile_error}" if profile_error else "")}

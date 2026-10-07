@@ -270,3 +270,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Installer's new user-local P.O.R.T.A.L./runtimes directory joins explicit activated-install selection; explicit runtime-root remains preferred for stages.
 - Focused app test observed wrong ACTIVE before fix; final app view-model suite 16 passed. Generated Python caches/packaging metadata ignored.
 - Exact head: commit containing this record. Next: qualification source-event completion proof and clean staged installation.
+
+## Portfolio control resilience checkpoint — 2026-10-07
+- Status/Hold/Stop now use durable session state even if profile JSON or input artifacts disappear. Profile errors are shown separately; Run/Continue still require valid admission inputs.
+- Five focused failures observed before fix. Portfolio controller suite -> 7 passed using real PortalCommandSession stores. Execution remains ADMISSION_ONLY; no attached worker or protected effect is fabricated.
+- Fresh remote main still 7d00d8bf3b48c0676b2278359838ee563c66c67f. Fresh local probe found Codex CLI 0.153.4 (not admissible), Ollama ministral-3:14b/qwen3:4b-instruct/qwen3:8b/vera-local:latest; policy-enabled deterministic selection prefers vera-local. Discovery probe invoked no model.
+- Exact head: commit containing this continuation. Next: responsive portfolio status during inference, real local-model clean stage, native window lifecycle.
