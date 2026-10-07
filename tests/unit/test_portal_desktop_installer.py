@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from portal.desktop_installer import (
+    _record_activation_state,
     build_logon_task_command,
     launcher_text,
 )
@@ -41,3 +42,32 @@ def test_logon_task_name_is_not_shell_interpolated(tmp_path: Path) -> None:
         assert "task_name" in str(exc)
     else:
         raise AssertionError("expected invalid task name rejection")
+
+
+def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:
+    path = tmp_path / "RUNTIME_INSTALL_SPEC.json"
+    original = {
+        "schema": "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        "install_id": "one",
+        "sources": [{"component": "portal", "sha": "a" * 40}],
+        "activation": {"requested": False, "qualified": False, "active": False},
+        "claim_ceiling": "OLD",
+    }
+    import json
+    path.write_text(json.dumps(original), encoding="utf-8")
+
+    _record_activation_state(
+        tmp_path,
+        requested=True,
+        qualified=True,
+        active=True,
+    )
+
+    updated = json.loads(path.read_text(encoding="utf-8"))
+    assert updated["sources"] == original["sources"]
+    assert updated["activation"] == {
+        "requested": True,
+        "qualified": True,
+        "active": True,
+    }
+    assert "ACTIVE_AT_LOGON" in updated["claim_ceiling"]

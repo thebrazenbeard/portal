@@ -144,7 +144,7 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
     return python
 
 
-def _verify_imports(python: Path) -> dict[str, str]:
+def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
     code = (
         "import json,portal,pre_active,volition,vera_core;"
         "print(json.dumps({"
@@ -154,7 +154,11 @@ def _verify_imports(python: Path) -> dict[str, str]:
         "'vera_core':vera_core.__file__"
         "}))"
     )
-    completed = _run([str(python), "-c", code], capture=True)
+    completed = _run(
+        [str(python), "-c", code],
+        cwd=runtime_root,
+        capture=True,
+    )
     value = json.loads(completed.stdout)
     if not isinstance(value, dict):
         raise RuntimeError("import verification did not return an object")
@@ -241,6 +245,38 @@ def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
     return payload
 
 
+def _record_activation_state(
+    runtime_root: Path,
+    *,
+    requested: bool,
+    qualified: bool,
+    active: bool,
+) -> None:
+    path = runtime_root / "RUNTIME_INSTALL_SPEC.json"
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("runtime install spec is not an object")
+    payload["activation"] = {
+        "requested": requested,
+        "qualified": qualified,
+        "active": active,
+    }
+    payload["claim_ceiling"] = (
+        "QUALIFIED_USER_LOCAL_RUNTIME_ACTIVE_AT_LOGON_"
+        "NOT_NATIVE_CHATGPT_ROUTER_NOT_PROTECTED_EFFECT_AUTHORITY"
+        if active
+        else
+        "QUALIFIED_STAGED_USER_LOCAL_RUNTIME_NOT_REGISTERED_FOR_LOGON_"
+        "NOT_NATIVE_CHATGPT_ROUTER_NOT_PROTECTED_EFFECT_AUTHORITY"
+    )
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temp.replace(path)
+
+
 def install(
     *,
     runtime_root: Path,
@@ -251,7 +287,7 @@ def install(
     spec.write(runtime_root / "RUNTIME_INSTALL_SPEC.json")
 
     python = _install_sources(runtime_root, spec)
-    imports = _verify_imports(python)
+    imports = _verify_imports(python, runtime_root)
     _start_host(runtime_root, python)
     qualification = _qualify(runtime_root, python)
 
@@ -293,6 +329,13 @@ def install(
         )
         if task_name not in query.stdout:
             raise RuntimeError("registered logon task could not be read back")
+
+    _record_activation_state(
+        runtime_root,
+        requested=activate,
+        qualified=True,
+        active=bool(activate),
+    )
 
     result = {
         "schema": "PORTAL_DESKTOP_INSTALLATION_RESULT_V1",
