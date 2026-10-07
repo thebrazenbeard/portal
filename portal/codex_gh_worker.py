@@ -317,6 +317,18 @@ def main() -> int:
                 "artifacts": [],
             },
         )
+    except subprocess.TimeoutExpired:
+        # A subprocess may have changed its detached checkout before timing out.
+        # Do not invite an automatic retry or expose a private prompt in a receipt.
+        _write_json(
+            args.portal_receipt,
+            {
+                "schema": "PORTAL_WORKER_RECEIPT_V1",
+                "receipt_class": "OUTCOME_UNKNOWN",
+                "reason": "subprocess timed out; outcome unknown; inspect before retry",
+                "artifacts": [],
+            },
+        )
     except Exception as exc:
         _write_json(
             args.portal_receipt,
