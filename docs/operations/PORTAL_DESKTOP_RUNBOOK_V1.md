@@ -70,6 +70,8 @@ Or launch that installation's Python explicitly:
 & (Join-Path $runtimeRoot '.venv\Scripts\python.exe') -m portal.desktop_app --runtime-root $runtimeRoot
 ```
 
+The installer qualification's read-only portfolio IPC check accepts governed `PORTAL_DESKTOP_PORTFOLIO_V1` admission-only telemetry and V2 admission-only or configured proposal-worker telemetry. It rejects inconsistent worker-state/dispatch-mode pairs and any protected-effect authority. A configured proposal worker is not evidence of successful worker execution; the qualification record retains `worker_execution_verified=false` until separate execution receipts are observed.
+
 The runtime panel distinguishes **OFFLINE**, **STARTING**, **ACTIVE**, **DEGRADED**, and **BLOCKED**. Assess the reported reason, heartbeat age, loaded components, exact source revisions, and selected cognition route together. A heartbeat file by itself is not proof of a running host. The desktop requests startup through the supervisor and sends conversation requests to the resident runtime; it does not call a fixed model endpoint.
 
 For a process/heartbeat status snapshot outside the GUI, without requesting startup:
