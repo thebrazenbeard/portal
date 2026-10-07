@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import json
 from pathlib import Path
 import re
 import subprocess
 from typing import Callable
+import urllib.parse
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -44,14 +46,86 @@ class RuntimeSource:
 
 
 @dataclass(frozen=True)
+class RuntimeCognitionTarget:
+    name: str
+    provider: str
+    base_url: str
+    model: str
+    api_key_env: str | None = None
+
+    def validate(self) -> None:
+        if not self.name.strip():
+            raise ValueError("cognition target name is required")
+        if self.provider != "openai-compatible":
+            raise ValueError("cognition target provider must be openai-compatible")
+        if not self.model.strip():
+            raise ValueError("cognition target model is required")
+        base_url = self.base_url.strip().rstrip("/")
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("cognition target base_url must be an http(s) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError(
+                "cognition target base_url must not contain credentials, query, or fragment"
+            )
+        try:
+            is_loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+        except ValueError:
+            is_loopback = parsed.hostname.lower() == "localhost"
+        if not is_loopback:
+            raise ValueError("cognition target base_url must use a loopback endpoint")
+        if self.api_key_env is not None and not self.api_key_env.strip():
+            raise ValueError("cognition target api_key_env must be nonempty when provided")
+
+    def to_mapping(self) -> dict[str, str | None]:
+        self.validate()
+        return {
+            "name": self.name.strip(),
+            "provider": self.provider,
+            "base_url": self.base_url.strip().rstrip("/"),
+            "model": self.model.strip(),
+            "api_key_env": (
+                self.api_key_env.strip() if self.api_key_env is not None else None
+            ),
+        }
+
+    @classmethod
+    def from_mapping(cls, payload: dict[str, object]) -> "RuntimeCognitionTarget":
+        target = cls(
+            name=str(payload.get("name", "")),
+            provider=str(payload.get("provider", "")),
+            base_url=str(payload.get("base_url", "")),
+            model=str(payload.get("model", "")),
+            api_key_env=(
+                None
+                if payload.get("api_key_env") is None
+                else str(payload.get("api_key_env"))
+            ),
+        )
+        target.validate()
+        return target
+
+
+@dataclass(frozen=True)
 class InstallSpec:
     schema: str
     install_id: str
     sources: tuple[RuntimeSource, ...]
+    cognition_target: RuntimeCognitionTarget | None = None
 
     def validate(self) -> None:
-        if self.schema != "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1":
+        if self.schema not in {
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2",
+        }:
             raise ValueError("unsupported install spec schema")
+        if self.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1":
+            if self.cognition_target is not None:
+                raise ValueError("V1 install spec cannot bind a cognition target")
+        elif self.cognition_target is None:
+            raise ValueError("V2 install spec requires a cognition target")
+        else:
+            self.cognition_target.validate()
         if not self.install_id.strip():
             raise ValueError("install_id is required")
         if len(self.sources) != 4:
@@ -72,7 +146,7 @@ class InstallSpec:
 
     def to_mapping(self) -> dict[str, object]:
         self.validate()
-        return {
+        payload: dict[str, object] = {
             "schema": self.schema,
             "install_id": self.install_id,
             "sources": [source.to_mapping() for source in self.sources],
@@ -85,6 +159,9 @@ class InstallSpec:
                 "FROZEN_SOURCE_INSTALL_SPEC_ONLY_NOT_INSTALLED_NOT_QUALIFIED_NOT_ACTIVE"
             ),
         }
+        if self.cognition_target is not None:
+            payload["cognition_target"] = self.cognition_target.to_mapping()
+        return payload
 
     def write(self, path: Path) -> None:
         path = Path(path)
@@ -117,10 +194,18 @@ class InstallSpec:
             for item in raw_sources
             if isinstance(item, dict)
         )
+        raw_target = payload.get("cognition_target")
+        if raw_target is None:
+            cognition_target = None
+        elif isinstance(raw_target, dict):
+            cognition_target = RuntimeCognitionTarget.from_mapping(raw_target)
+        else:
+            raise ValueError("install spec cognition_target must be an object")
         spec = cls(
             schema=str(payload.get("schema", "")),
             install_id=str(payload.get("install_id", "")),
             sources=sources,
+            cognition_target=cognition_target,
         )
         spec.validate()
         return spec
@@ -161,6 +246,7 @@ def freeze_install_spec(
     install_id: str,
     portal_ref: str,
     portal_sha: str,
+    cognition_target: RuntimeCognitionTarget | None = None,
     resolve_remote: RemoteResolver = resolve_remote_head,
 ) -> InstallSpec:
     sources = (
@@ -190,9 +276,14 @@ def freeze_install_spec(
         ),
     )
     spec = InstallSpec(
-        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        schema=(
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+            if cognition_target is not None
+            else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1"
+        ),
         install_id=install_id,
         sources=sources,
+        cognition_target=cognition_target,
     )
     spec.validate()
     return spec

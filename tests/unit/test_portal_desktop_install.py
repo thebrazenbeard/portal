@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import portal.desktop_install as desktop_install
 from portal.desktop_install import (
     InstallSpec,
     RuntimeSource,
@@ -136,4 +137,54 @@ def test_invalid_or_duplicate_sources_are_rejected() -> None:
                 RuntimeSource("pre-active", "x/p", "main", SHA_C),
                 RuntimeSource("volition", "x/v", "main", SHA_D),
             ),
+        ).validate()
+
+
+def test_v2_install_spec_binds_exact_pre_active_cognition_target(tmp_path: Path) -> None:
+    target_cls = getattr(desktop_install, "RuntimeCognitionTarget", None)
+    assert callable(target_cls)
+
+    target = target_cls(
+        name="vera-base",
+        provider="openai-compatible",
+        base_url="http://127.0.0.1:18081/v1",
+        model="qwen3.5-4b-local",
+        api_key_env=None,
+    )
+    spec = InstallSpec(
+        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2",
+        install_id="two",
+        sources=(
+            RuntimeSource("vera-mono", "thebrazenbeard/vera-mono", "main", SHA_A),
+            RuntimeSource("portal", "thebrazenbeard/portal", "work/x", SHA_B),
+            RuntimeSource("pre-active", "thebrazenbeard/pre-active", "main", SHA_C),
+            RuntimeSource("volition", "thebrazenbeard/volition", "main", SHA_D),
+        ),
+        cognition_target=target,
+    )
+    path = tmp_path / "spec.json"
+    spec.write(path)
+
+    loaded = InstallSpec.read(path)
+    assert loaded == spec
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["cognition_target"] == {
+        "name": "vera-base",
+        "provider": "openai-compatible",
+        "base_url": "http://127.0.0.1:18081/v1",
+        "model": "qwen3.5-4b-local",
+        "api_key_env": None,
+    }
+
+
+def test_v2_cognition_target_rejects_non_loopback_endpoint() -> None:
+    target_cls = getattr(desktop_install, "RuntimeCognitionTarget", None)
+    assert callable(target_cls)
+    with pytest.raises(ValueError, match="loopback"):
+        target_cls(
+            name="unsafe",
+            provider="openai-compatible",
+            base_url="https://example.com/v1",
+            model="remote",
+            api_key_env=None,
         ).validate()

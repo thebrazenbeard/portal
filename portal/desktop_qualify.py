@@ -20,6 +20,24 @@ def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1)
     raise TimeoutError(f"qualification condition timed out; last={last!r}")
 
 
+def _admissible_resident_routes(
+    routes: list[object],
+) -> list[dict[str, object]]:
+    return [
+        route
+        for route in routes
+        if isinstance(route, dict)
+        and route.get("provider") == "pre_active_target"
+        and isinstance(route.get("route_id"), str)
+        and str(route["route_id"]).startswith("preactive-target:")
+        and route.get("local") is True
+        and route.get("available") is True
+        and route.get("current") is True
+        and route.get("incremental_paid_compute") is False
+        and route.get("auto_admissible") is True
+    ]
+
+
 def qualify_runtime(
     runtime_root: Path,
     *,
@@ -51,16 +69,7 @@ def qualify_runtime(
     routes = route_payload.get("routes")
     if not isinstance(routes, list):
         raise RuntimeError("route discovery did not return a list")
-    local_routes = [
-        route
-        for route in routes
-        if isinstance(route, dict)
-        and route.get("local") is True
-        and route.get("available") is True
-        and route.get("current") is True
-        and route.get("incremental_paid_compute") is False
-        and route.get("auto_admissible") is True
-    ]
+    local_routes = _admissible_resident_routes(routes)
     if require_local_route and not local_routes:
         raise RuntimeError("no admissible local no-incremental-paid-compute route")
 

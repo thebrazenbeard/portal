@@ -10,7 +10,12 @@ import subprocess
 import sys
 import time
 
-from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .desktop_install import (
+    InstallSpec,
+    RuntimeCognitionTarget,
+    RuntimeSource,
+    prepare_stage_root,
+)
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
@@ -165,6 +170,68 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
     return {str(key): str(path) for key, path in value.items()}
 
 
+def _configure_cognition_target(
+    runtime_root: Path,
+    python: Path,
+    spec: InstallSpec,
+) -> dict[str, object]:
+    target = spec.cognition_target
+    if target is None:
+        raise RuntimeError(
+            "resident runtime install requires an explicit Pre-Active cognition target"
+        )
+    target.validate()
+    state_db = runtime_root / "state" / "pre-active" / "runtime.sqlite3"
+    state_db.parent.mkdir(parents=True, exist_ok=True)
+    target_json = json.dumps(target.to_mapping(), sort_keys=True)
+    code = """
+import json
+import sys
+import time
+from pre_active import Store
+
+target = json.loads(sys.argv[1])
+store = Store(sys.argv[2])
+try:
+    store.upsert_model_target(
+        name=target["name"],
+        provider=target["provider"],
+        base_url=target["base_url"],
+        model=target["model"],
+        api_key_env=target.get("api_key_env"),
+        activate=True,
+        now=time.time(),
+    )
+    observed = store.get_active_model_target()
+finally:
+    store.close()
+print(json.dumps(observed, sort_keys=True))
+"""
+    completed = _run(
+        [
+            str(python),
+            "-c",
+            code,
+            target_json,
+            str(state_db),
+        ],
+        cwd=runtime_root,
+        capture=True,
+    )
+    observed = json.loads(completed.stdout)
+    if not isinstance(observed, dict):
+        raise RuntimeError("Pre-Active cognition target readback is not an object")
+    expected = target.to_mapping()
+    for key, value in expected.items():
+        if observed.get(key) != value:
+            raise RuntimeError(
+                f"Pre-Active cognition target readback mismatch for {key}"
+            )
+    if observed.get("active") is not True:
+        raise RuntimeError("Pre-Active cognition target readback is not active")
+    return observed
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         completed = subprocess.run(
@@ -288,6 +355,7 @@ def install(
 
     python = _install_sources(runtime_root, spec)
     imports = _verify_imports(python, runtime_root)
+    cognition_target = _configure_cognition_target(runtime_root, python, spec)
     _start_host(runtime_root, python)
     qualification = _qualify(runtime_root, python)
 
@@ -350,6 +418,7 @@ def install(
             for item in spec.sources
         },
         "imports": imports,
+        "cognition_target": cognition_target,
         "qualification": qualification,
         "activation": {
             "requested": activate,
@@ -368,8 +437,15 @@ def install(
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
+    cognition_target = RuntimeCognitionTarget(
+        name=args.cognition_target_name,
+        provider="openai-compatible",
+        base_url=args.cognition_base_url,
+        model=args.cognition_model,
+        api_key_env=args.cognition_api_key_env,
+    )
     spec = InstallSpec(
-        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2",
         install_id=args.install_id,
         sources=(
             RuntimeSource(
@@ -397,6 +473,7 @@ def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
                 args.volition_sha,
             ),
         ),
+        cognition_target=cognition_target,
     )
     spec.validate()
     return spec
@@ -407,13 +484,14 @@ def main() -> None:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--install-id", required=True)
     parser.add_argument("--portal-sha", required=True)
-    parser.add_argument(
-        "--portal-ref",
-        default="work/portal-desktop-vera-runtime-v1",
-    )
+    parser.add_argument("--portal-ref", default="main")
     parser.add_argument("--vera-mono-sha", required=True)
     parser.add_argument("--pre-active-sha", required=True)
     parser.add_argument("--volition-sha", required=True)
+    parser.add_argument("--cognition-target-name", required=True)
+    parser.add_argument("--cognition-base-url", required=True)
+    parser.add_argument("--cognition-model", required=True)
+    parser.add_argument("--cognition-api-key-env")
     parser.add_argument("--activate", action="store_true")
     args = parser.parse_args()
     result = install(

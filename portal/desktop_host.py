@@ -9,7 +9,7 @@ import time
 import traceback
 from typing import Any
 
-from .desktop_cognition import discover_cognition_routes
+from .desktop_cognition import discover_pre_active_target_routes
 from .desktop_ipc import DesktopRuntimeCommandHandler
 from .desktop_pre_active import (
     process_one_autonomous_turn,
@@ -37,8 +37,17 @@ def _atomic_json(path: Path, payload: object) -> None:
 
 
 def _runtime_id(source_manifest: dict[str, object]) -> str:
+    sources = source_manifest.get("sources", [])
+    if "cognition_target" in source_manifest:
+        identity_payload: object = {
+            "sources": sources,
+            "cognition_target": source_manifest.get("cognition_target"),
+        }
+    else:
+        # Preserve the V1 runtime identity derivation for historical installs.
+        identity_payload = sources
     raw = json.dumps(
-        source_manifest.get("sources", []),
+        identity_payload,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -161,6 +170,20 @@ def claim_bridge_request(
     return claimed_path
 
 
+def discover_resident_cognition_routes(
+    pre_active: object,
+    *,
+    models_probe=None,
+):
+    active_target_probe = getattr(pre_active, "get_active_model_target", None)
+    if not callable(active_target_probe):
+        return ()
+    return discover_pre_active_target_routes(
+        active_target_probe=active_target_probe,
+        models_probe=models_probe,
+    )
+
+
 def run_host(runtime_root: Path) -> int:
     layout = prepare_runtime_layout(runtime_root)
     runtime_root = layout["runtime_root"]
@@ -214,8 +237,12 @@ def run_host(runtime_root: Path) -> int:
     cognition_ledger = CognitionLedger(
         state_root / "cognition" / "desktop-cognition.sqlite3"
     )
+    def resident_routes():
+        return discover_resident_cognition_routes(pre_active)
+
     cognition_engine = ResidentCognitionEngine(
         ledger=cognition_ledger,
+        discover_routes=resident_routes,
         accept_result=VeraRuntimeAcceptance(
             vera,
             runtime_id=runtime_id,
@@ -258,7 +285,7 @@ def run_host(runtime_root: Path) -> int:
 
     handler = DesktopRuntimeCommandHandler(
         engine=cognition_engine,
-        discover_routes=discover_cognition_routes,
+        discover_routes=resident_routes,
         runtime_status=status,
     )
 
