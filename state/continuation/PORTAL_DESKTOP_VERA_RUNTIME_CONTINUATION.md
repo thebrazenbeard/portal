@@ -22,8 +22,22 @@ Base at start: `a4cf02d34c2f8c4ac2b1e60161cc53e9845616f0`
 - `python -m pytest -q tests/unit/test_portal_desktop_cognition.py` -> 5 passed.
 - Live discovery probe selected `ollama:vera-local:latest` and left `codex:cli` non-auto-admissible.
 
+- Resident cognition engine implemented in `portal/desktop_runtime.py` with a durable SQLite cognition ledger.
+- Human and Pre-Active cognition requests use the same route-selection/invocation path.
+- Completed request IDs are idempotent and are not reinvoked.
+- No-admissible-route and adapter failures remain retryable rather than being falsely acknowledged.
+- Every cognition record persists provider/model/route provenance and hard-codes `protected_effect_authority = 0`.
+- Isolated live qualification created a real Pre-Active `autonomous.turn` event `89ec1d1c-f818-4428-aed6-f83cb75051a9`, claimed it, selected `ollama:vera-local:latest`, received exactly `LIVE_AUTONOMOUS_COGNITION_OK`, persisted evidence `cognition:0e8266416230f0ddec4d3122693f537f4fd4927775984924762efef226faf466`, and only then acknowledged the event to Pre-Active `DONE`. The proof used isolated temporary state and did not alter the installed resident runtime.
+
+## Verification
+- `python -m pytest -q tests/unit/test_portal_desktop_supervisor.py` -> 7 passed.
+- `python -m pytest -q tests/unit/test_portal_desktop_cognition.py` -> 5 passed.
+- `python -m pytest -q tests/unit/test_portal_desktop_runtime.py` -> 5 passed.
+- Live discovery probe selected `ollama:vera-local:latest` and left `codex:cli` non-auto-admissible.
+- Isolated real Pre-Active + live Ollama autonomous cognition proof completed and source event reached `DONE`.
+
 ## Next
-Wire human and Pre-Active cognition requests through the resident runtime, invoke the selected Ollama route, persist provenance, and keep unresolved requests retryable when no route is admissible.
+Add local IPC command handling and a thin desktop client/UI so conversation submission reaches the resident runtime boundary rather than invoking a model directly from the window process.
 
 ## Claim ceiling
-SOURCE_IMPLEMENTATION_CHECKPOINT_ONLY_NOT_INSTALLED_DESKTOP_NOT_DEPLOYED_COGNITION_DISCOVERY_AND_SELECTION_SOURCE_BEHAVIOR_ONLY
+SOURCE_IMPLEMENTATION_AND_ISOLATED_LIVE_COGNITION_PROOF_ONLY_NOT_INSTALLED_DESKTOP_NOT_DEPLOYED_NOT_BOUND_INTO_THE_INSTALLED_RESIDENT_HOST
