@@ -172,6 +172,97 @@ def qualify_runtime(
             "autonomous cognition lacks qualified Vera host acceptance"
         )
 
+    from pre_active.volition_bridge import VolitionBridge
+
+    volition_store = Store(
+        runtime_root / "state" / "pre-active" / "runtime.sqlite3"
+    )
+    try:
+        volition_signal_id = VolitionBridge(volition_store).enqueue_signal(
+            payload={
+                "target": "qualify-resident-volition-chain",
+                "kind": "open_loop",
+                "magnitude": 0.8,
+                "confidence": 1.0,
+                "provenance": "current_observation",
+                "source": "qualification:desktop-host",
+                "effect_authority": False,
+            },
+            now=time.time(),
+            dedup_key="portal-desktop-volition-qualification-" + uuid.uuid4().hex,
+        )
+    finally:
+        volition_store.close()
+
+    volition_receipt: dict[str, object] | None = None
+    volition_turn: dict[str, object] | None = None
+
+    def volition_done():
+        nonlocal volition_receipt, volition_turn
+        check = Store(
+            runtime_root / "state" / "pre-active" / "runtime.sqlite3"
+        )
+        try:
+            receipt = check.get_volition_signal_receipt(volition_signal_id)
+            if receipt is None:
+                return None
+            cognition_event_id = receipt.get("cognition_event_id")
+            if not cognition_event_id:
+                raise RuntimeError(
+                    "Volition signal produced no cognition event during qualification"
+                )
+            rows = check.list_events(kind="autonomous.turn")
+            turn = next(
+                (
+                    item
+                    for item in rows
+                    if item.get("id") == cognition_event_id
+                ),
+                None,
+            )
+        finally:
+            check.close()
+        if turn is not None and turn.get("status") == "DONE":
+            volition_receipt = dict(receipt)
+            volition_turn = dict(turn)
+            return turn
+        return None
+
+    _wait_until(
+        volition_done,
+        timeout_seconds=timeout_seconds,
+    )
+    if volition_receipt is None or volition_turn is None:
+        raise RuntimeError("Volition qualification evidence is incomplete")
+
+    volition_activity = client.request("desktop_recent_activity", limit=200)
+    volition_items = volition_activity.get("items")
+    if not isinstance(volition_items, list):
+        raise RuntimeError("desktop activity did not return a list")
+    volition_record = next(
+        (
+            item
+            for item in volition_items
+            if isinstance(item, dict)
+            and item.get("request_id")
+            == volition_receipt.get("cognition_event_id")
+        ),
+        None,
+    )
+    if volition_record is None:
+        raise RuntimeError("Volition cognition activity is missing")
+    volition_acceptance = volition_record.get("acceptance")
+    if (
+        volition_record.get("state") != "COMPLETED"
+        or not isinstance(volition_acceptance, dict)
+        or volition_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
+        or volition_acceptance.get("protected_effect_authority") is not False
+        or volition_record.get("protected_effect_authority") is not False
+    ):
+        raise RuntimeError(
+            "Volition cognition lacks qualified Vera host acceptance"
+        )
+
     final_status = client.request("desktop_status")
     result = {
         "schema": "VERA_DESKTOP_RUNTIME_QUALIFICATION_V1",
@@ -192,6 +283,18 @@ def qualify_runtime(
             "event_status": event_row.get("status"),
             "route_id": autonomous_record.get("route_id"),
             "evidence_id": autonomous_record.get("evidence_id"),
+        },
+        "volition_chain": {
+            "signal_event_id": volition_signal_id,
+            "state_revision": volition_receipt.get("state_revision"),
+            "goal_id": volition_receipt.get("goal_id"),
+            "choice_class": volition_receipt.get("choice_class"),
+            "autonomous_event_id": volition_receipt.get("cognition_event_id"),
+            "autonomous_event_status": volition_turn.get("status"),
+            "route_id": volition_record.get("route_id"),
+            "evidence_id": volition_record.get("evidence_id"),
+            "acceptance_status": volition_acceptance.get("status"),
+            "effect_authority": False,
         },
         "protected_effect_authority": False,
         "native_openai_router_replaced": False,
