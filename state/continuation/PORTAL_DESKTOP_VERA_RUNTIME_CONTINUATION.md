@@ -144,11 +144,40 @@ Not claimed:
 
 The older `VeraUnifiedRuntime\20261006` installation remains intact as rollback evidence; this work did not destroy it or disable its activation path.
 
+## Achilles hostile review — Draft PR #2
+
+Review source: Project Achilles current protocol at `99bc4e8cf7bd60d022fb25222d701a8cf42f80c0`.
+Reviewed P.O.R.T.A.L. subject: Draft PR #2 head `20939d548a90f36943969fd983265f99cb996164`.
+
+Accepted findings:
+- **IPC claim race:** request-file presence did not prove a request was unclaimed because the host parsed/executed before deleting the file. A timeout could therefore misclassify an already-processing request as safe to retry.
+- **Caller-controlled cognition provenance:** `desktop_cognize` accepted arbitrary `source` and caller timestamps, allowing a local client to forge `PRE_ACTIVE_AUTONOMOUS_TURN` activity.
+
+Source fixes after review:
+- bridge layout now includes `bridge/claimed`;
+- host atomically renames `requests/<id>.json` to `claimed/<id>.json` before parsing/execution;
+- pre-existing claimed requests are replayed on host restart;
+- client may report timeout-before-claim only when it successfully removes the still-unclaimed request file; otherwise outcome is unknown;
+- claimed filename and payload request ID must match;
+- `desktop_cognize` accepts only HUMAN source and host-stamps `created_at`;
+- autonomous cognition continues to enter through the internal Pre-Active path, not IPC metadata.
+
+Remaining explicit trust boundary:
+- local IPC trusts the logged-in OS-user boundary. It does not claim cryptographic peer authentication or isolation from a hostile same-user process.
+
+Verification after fixes:
+- focused IPC/host claim tests: 9 passed;
+- complete desktop source surface: 50 passed, 1 pytest-asyncio deprecation warning;
+- resident modules compile;
+- `git diff --check` clean.
+
+These are source-level fixes only. The already-qualified installed runtime remains frozen at Portal `7b4b5b4...`; no new install/cutover is claimed from this review.
+
 ## Next
 
-- Open Draft PR for the desktop branch; do not merge.
-- Add automated Volition-chain qualification to the installer harness so future stages prove the full signal -> cognition path without a separate manual probe.
-- Add a user-facing desktop shortcut for the qualified runtime.
+- Keep Draft PR #2 unmerged.
+- Preserve the Achilles review as exact-head security evidence.
+- Re-stage/requalify the newer hardened Portal source only under a separately authorized runtime cutover.
 - Continue non-colliding source-only portfolio advancement through targeted P.O.R.T.A.L. sessions.
 
 ## Claim ceiling

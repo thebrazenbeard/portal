@@ -91,10 +91,13 @@ class DesktopRuntimeCommandHandler:
             }
         if command == "desktop_cognize":
             request_id = self._required_text(payload, "request_id")
-            source = self._required_text(payload, "source")
+            supplied_source = payload.get("source")
+            if supplied_source not in (None, "HUMAN"):
+                raise ValueError("desktop_cognize source must be HUMAN")
+            source = "HUMAN"
             reason = self._required_text(payload, "reason")
             task = self._required_text(payload, "task")
-            created_at = float(payload.get("created_at", time.time()))
+            created_at = time.time()
             raw_capabilities = payload.get("required_capabilities", ["text"])
             if not isinstance(raw_capabilities, list) or not all(
                 isinstance(item, str) and item.strip()
@@ -135,6 +138,7 @@ class FileBridgeClient:
             raise ValueError("poll_seconds must be positive")
         self.runtime_root = Path(runtime_root)
         self.requests = self.runtime_root / "bridge" / "requests"
+        self.claimed = self.runtime_root / "bridge" / "claimed"
         self.responses = self.runtime_root / "bridge" / "responses"
         self.timeout_seconds = float(timeout_seconds)
         self.poll_seconds = float(poll_seconds)
@@ -156,10 +160,16 @@ class FileBridgeClient:
             request_id or uuid.uuid4().hex
         )
         self.requests.mkdir(parents=True, exist_ok=True)
+        self.claimed.mkdir(parents=True, exist_ok=True)
         self.responses.mkdir(parents=True, exist_ok=True)
         request_path = self.requests / f"{request_id}.json"
+        claimed_path = self.claimed / f"{request_id}.json"
         response_path = self.responses / f"{request_id}.json"
-        if request_path.exists() or response_path.exists():
+        if (
+            request_path.exists()
+            or claimed_path.exists()
+            or response_path.exists()
+        ):
             raise FileExistsError(f"bridge request_id already exists: {request_id}")
 
         body = {
@@ -195,11 +205,12 @@ class FileBridgeClient:
                 return result
             time.sleep(self.poll_seconds)
 
-        if request_path.exists():
-            request_path.unlink(missing_ok=True)
-            raise BridgeTimeoutError(
-                f"bridge request timed out before host claim: {request_id}"
+        try:
+            request_path.unlink()
+        except FileNotFoundError:
+            raise BridgeOutcomeUnknownError(
+                f"bridge request was claimed but no response arrived: {request_id}"
             )
-        raise BridgeOutcomeUnknownError(
-            f"bridge request was claimed but no response arrived: {request_id}"
+        raise BridgeTimeoutError(
+            f"bridge request timed out before host claim: {request_id}"
         )

@@ -8,7 +8,12 @@ import time
 import pytest
 
 from portal.desktop_cognition import CognitionRoute
-from portal.desktop_ipc import DesktopRuntimeCommandHandler, FileBridgeClient
+from portal.desktop_ipc import (
+    BridgeOutcomeUnknownError,
+    BridgeTimeoutError,
+    DesktopRuntimeCommandHandler,
+    FileBridgeClient,
+)
 from portal.desktop_runtime import CognitionLedger, ResidentCognitionEngine
 
 
@@ -81,7 +86,7 @@ def test_handler_recent_activity_returns_persisted_cognition(tmp_path: Path) -> 
             {
                 "command": "desktop_cognize",
                 "request_id": "recent-1",
-                "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+                "source": "HUMAN",
                 "reason": "test",
                 "task": "think",
                 "created_at": 100.0,
@@ -90,7 +95,38 @@ def test_handler_recent_activity_returns_persisted_cognition(tmp_path: Path) -> 
 
         activity = handler.handle({"command": "desktop_recent_activity", "limit": 5})
         assert activity["items"][0]["request_id"] == "recent-1"
-        assert activity["items"][0]["source"] == "PRE_ACTIVE_AUTONOMOUS_TURN"
+        assert activity["items"][0]["source"] == "HUMAN"
+    finally:
+        ledger.close()
+
+
+def test_handler_rejects_forged_autonomous_source(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger,
+            discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda _route, _task: "must not run",
+        )
+        handler = DesktopRuntimeCommandHandler(
+            engine=engine,
+            discover_routes=lambda: (LOCAL,),
+            runtime_status=lambda: {"state": "ACTIVE"},
+        )
+
+        with pytest.raises(ValueError, match="source must be HUMAN"):
+            handler.handle(
+                {
+                    "command": "desktop_cognize",
+                    "request_id": "forged-autonomous",
+                    "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
+                    "reason": "forge provenance",
+                    "task": "think",
+                    "created_at": 1.0,
+                }
+            )
+
+        assert ledger.get("forged-autonomous") is None
     finally:
         ledger.close()
 
@@ -130,6 +166,58 @@ def test_file_bridge_client_uses_existing_request_response_envelope(tmp_path: Pa
         result = client.request("desktop_status", request_id="fixed")
         assert result == {"state": "ACTIVE"}
         assert not (responses / "fixed.json").exists()
+    finally:
+        thread.join(timeout=2)
+
+
+def test_file_bridge_client_timeout_before_claim_removes_request(tmp_path: Path) -> None:
+    client = FileBridgeClient(
+        tmp_path,
+        timeout_seconds=0.05,
+        poll_seconds=0.005,
+    )
+
+    with pytest.raises(BridgeTimeoutError, match="before host claim"):
+        client.request("desktop_status", request_id="never-claimed")
+
+    assert not (
+        tmp_path / "bridge" / "requests" / "never-claimed.json"
+    ).exists()
+
+
+def test_file_bridge_client_claimed_request_timeout_is_outcome_unknown(
+    tmp_path: Path,
+) -> None:
+    requests = tmp_path / "bridge" / "requests"
+    claimed = tmp_path / "bridge" / "claimed"
+    responses = tmp_path / "bridge" / "responses"
+    requests.mkdir(parents=True)
+    claimed.mkdir(parents=True)
+    responses.mkdir(parents=True)
+
+    def server() -> None:
+        request_path = requests / "claimed-timeout.json"
+        deadline = time.time() + 2
+        while not request_path.exists() and time.time() < deadline:
+            time.sleep(0.005)
+        request_path.replace(claimed / request_path.name)
+
+    thread = threading.Thread(target=server)
+    thread.start()
+    try:
+        client = FileBridgeClient(
+            tmp_path,
+            timeout_seconds=0.08,
+            poll_seconds=0.005,
+        )
+        with pytest.raises(
+            BridgeOutcomeUnknownError,
+            match="claimed but no response",
+        ):
+            client.request(
+                "desktop_status",
+                request_id="claimed-timeout",
+            )
     finally:
         thread.join(timeout=2)
 

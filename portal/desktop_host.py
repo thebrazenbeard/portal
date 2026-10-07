@@ -122,6 +122,7 @@ def prepare_runtime_layout(runtime_root: Path) -> dict[str, Path]:
     state_root = runtime_root / "state"
     bridge_root = runtime_root / "bridge"
     requests = bridge_root / "requests"
+    claimed = bridge_root / "claimed"
     responses = bridge_root / "responses"
     for path in (
         state_root,
@@ -130,6 +131,7 @@ def prepare_runtime_layout(runtime_root: Path) -> dict[str, Path]:
         state_root / "pre-active",
         state_root / "cognition",
         requests,
+        claimed,
         responses,
     ):
         path.mkdir(parents=True, exist_ok=True)
@@ -138,8 +140,25 @@ def prepare_runtime_layout(runtime_root: Path) -> dict[str, Path]:
         "state_root": state_root,
         "bridge_root": bridge_root,
         "requests": requests,
+        "claimed": claimed,
         "responses": responses,
     }
+
+
+def claim_bridge_request(
+    request_path: Path,
+    claimed_dir: Path,
+) -> Path | None:
+    claimed_path = claimed_dir / request_path.name
+    if claimed_path.exists():
+        raise FileExistsError(
+            f"bridge request already has a durable claim: {request_path.stem}"
+        )
+    try:
+        request_path.rename(claimed_path)
+    except FileNotFoundError:
+        return None
+    return claimed_path
 
 
 def run_host(runtime_root: Path) -> int:
@@ -148,6 +167,7 @@ def run_host(runtime_root: Path) -> int:
     state_root = layout["state_root"]
     bridge_root = layout["bridge_root"]
     requests = layout["requests"]
+    claimed = layout["claimed"]
     responses = layout["responses"]
     heartbeat = bridge_root / "heartbeat.json"
     pid_file = bridge_root / "pid.txt"
@@ -308,17 +328,34 @@ def run_host(runtime_root: Path) -> int:
                 write_heartbeat()
                 last_heartbeat = now
 
+            claimed_paths = list(sorted(claimed.glob("*.json")))
             for request_path in sorted(requests.glob("*.json")):
-                request_id = request_path.stem
+                try:
+                    claimed_path = claim_bridge_request(
+                        request_path,
+                        claimed,
+                    )
+                except FileExistsError:
+                    request_path.unlink(missing_ok=True)
+                    continue
+                if claimed_path is not None:
+                    claimed_paths.append(claimed_path)
+
+            for claimed_path in claimed_paths:
+                request_id = claimed_path.stem
                 try:
                     payload = json.loads(
-                        request_path.read_text(
+                        claimed_path.read_text(
                             encoding="utf-8-sig"
                         ).lstrip("\ufeff")
                     )
                     if not isinstance(payload, dict):
                         raise ValueError("request payload must be an object")
-                    request_id = str(payload["request_id"])
+                    payload_request_id = str(payload["request_id"])
+                    if payload_request_id != request_id:
+                        raise ValueError(
+                            "bridge payload request_id does not match claimed filename"
+                        )
                     result = handle(payload)
                     response = {
                         "schema": "VERA_UNIFIED_BRIDGE_RESPONSE_V1",
@@ -339,7 +376,7 @@ def run_host(runtime_root: Path) -> int:
                         "observed_at": time.time(),
                     }
                 _atomic_json(responses / f"{request_id}.json", response)
-                request_path.unlink(missing_ok=True)
+                claimed_path.unlink(missing_ok=True)
             time.sleep(0.1)
     finally:
         try:

@@ -32,6 +32,10 @@ Each coherent passing slice is committed and pushed before the next begins.
 
 Discovery is not authorization. Model availability is not paid-compute authority. Cognition is not protected-effect authority. Source proposal is not publication authority. The UI may request exact approvals but cannot silently broaden them.
 
+The local file bridge trusts the logged-in OS-user boundary. It does not claim cryptographic peer authentication or isolation from a hostile process already running as the same user. Within that boundary, desktop cognition provenance is host-owned: `desktop_cognize` is always recorded as `HUMAN`, its timestamp is host-stamped, and autonomous cognition enters through the internal Pre-Active path rather than caller-controlled IPC metadata.
+
+Bridge claim state is a filesystem state transition: `requests/<id>.json` is atomically renamed to `claimed/<id>.json` before parsing/execution. A client timeout may call a request unclaimed only when it successfully removes the still-unclaimed request file; otherwise the outcome is unknown and must not be blindly retried.
+
 ## Hostile review
 
 > **HOSTILE REVIEWER:** A GUI-owned supervisor can become a competing runtime authority if it interprets stale files as proof of life or launches a second process when the first is degraded.
