@@ -69,8 +69,10 @@ V1 uses HMAC-SHA256 to authenticate three evidence classes:
 The execution and protected-effect keys are deliberately separate. Possession of
 one cannot produce a valid grant for the other authority class.
 
-No key is created, installed, rotated, or configured by this package. Missing key
-custody fails closed.
+The promotion gate itself never creates, rotates, or installs authority keys.
+Missing key custody fails closed. P.O.R.T.A.L. Desktop has a separate optional
+current-user DPAPI custody tool for execution and protected-effect keys only;
+review-evidence key custody remains outside the Desktop surface.
 
 A digest alone is not treated as authority; the HMAC verification must succeed.
 
@@ -186,9 +188,9 @@ The command performs promotion only. It reports
 
 ## Explicit non-claims
 
-This package does not:
+The promotion gate itself does not:
 
-- create or grant authority keys;
+- auto-create or silently grant authority keys as part of promotion;
 - assert that any current user/person has execution authority;
 - create a real execution grant for a live project;
 - merge or deploy;

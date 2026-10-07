@@ -32,6 +32,7 @@ from .ecosystem_runtime import (
     PortalEcosystemStore,
     run_ecosystem_proposal_generations,
 )
+from .desktop_keyring import DesktopAuthorityKeyStore
 from .diagnostics import build_host_diagnostics
 from .discovery import (
     GitHubRepositoryCatalog,
@@ -76,6 +77,7 @@ from .wave_runtime import (
     PortalWaveStore,
     execute_portal_source_proposal,
     prepare_portal_wave,
+    request_portal_wave_authority,
     promote_portal_source_proposal,
     promote_portal_wave_packet,
     reconcile_portal_source_proposal,
@@ -880,6 +882,53 @@ def _parser() -> argparse.ArgumentParser:
     wave_promote.add_argument("--review", type=Path, required=True)
     wave_promote.add_argument("--execution-grant", type=Path, required=True)
     wave_promote.add_argument("--effect-grant", type=Path)
+    wave_promote.add_argument(
+        "--runtime-root",
+        type=Path,
+        help=(
+            "optional qualified Vera Desktop runtime root used to load "
+            "current-user encrypted execution/effect authority keys when "
+            "the corresponding environment keys are absent"
+        ),
+    )
+
+    wave_authority_request = wave_subcommands.add_parser(
+        "authority-request",
+        help=(
+            "surface one exact CLAIMED wave packet in the active Desktop "
+            "authority inbox"
+        ),
+    )
+    wave_authority_request.add_argument(
+        "--state-db",
+        type=Path,
+        default=Path(".portal/portal.sqlite3"),
+    )
+    wave_authority_request.add_argument(
+        "--run-id",
+        default="portal-wave-default",
+    )
+    wave_authority_request.add_argument("--subject-id", required=True)
+    wave_authority_request.add_argument(
+        "--runtime-root",
+        type=Path,
+        required=True,
+    )
+    wave_authority_request.add_argument(
+        "--effect-class",
+        choices=("NO_PROTECTED_EFFECT", "SOURCE_WRITE"),
+        required=True,
+    )
+    wave_authority_request.add_argument(
+        "--execution-request",
+        type=Path,
+    )
+    wave_authority_request.add_argument("--target")
+    wave_authority_request.add_argument("--summary")
+    wave_authority_request.add_argument(
+        "--source",
+        default="project-runner",
+    )
 
     wave_claim = wave_subcommands.add_parser(
         "claim",
@@ -2160,6 +2209,32 @@ def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
         if args.effect_grant is not None
         else None
     )
+
+    key_store = None
+    if args.runtime_root is not None:
+        key_store = DesktopAuthorityKeyStore(
+            Path(args.runtime_root).resolve()
+            / "state"
+            / "portal"
+            / "authority-keyring"
+        )
+
+    if os.environ.get("PROJECT_RUNNER_EXECUTION_AUTHORITY_KEY"):
+        execution_authority_key = execution_authority_key_from_environment()
+    elif key_store is not None:
+        execution_authority_key = key_store.load("execution")
+        if not execution_authority_key:
+            raise ValueError(
+                "execution authority key is unavailable in environment or "
+                "desktop key store"
+            )
+    else:
+        execution_authority_key = execution_authority_key_from_environment()
+
+    effect_authority_key = effect_authority_key_from_environment()
+    if effect_authority_key is None and key_store is not None:
+        effect_authority_key = key_store.load("protected_effect")
+
     receipt = promote_portal_wave_packet(
         state_db=Path(args.state_db),
         run_id=args.run_id,
@@ -2168,8 +2243,8 @@ def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
         execution_grant_document=execution_document,
         effect_grant_document=effect_document,
         review_key=review_key_from_environment(),
-        execution_authority_key=execution_authority_key_from_environment(),
-        effect_authority_key=effect_authority_key_from_environment(),
+        execution_authority_key=execution_authority_key,
+        effect_authority_key=effect_authority_key,
         token=_github_token(),
     )
     protected = receipt.effect_class != "NO_PROTECTED_EFFECT"
@@ -2180,6 +2255,36 @@ def _wave_promote_payload(args: argparse.Namespace) -> dict[str, object]:
         "promotion_sha256": receipt.promotion_sha256,
         "protected_effects_authorized": protected,
         "source_mutation_authorized": receipt.effect_class == "SOURCE_WRITE",
+    }
+
+
+def _wave_authority_request_payload(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    execution_request = (
+        load_json_document(Path(args.execution_request))
+        if args.execution_request is not None
+        else None
+    )
+    result = request_portal_wave_authority(
+        state_db=Path(args.state_db),
+        run_id=args.run_id,
+        subject_id=args.subject_id,
+        runtime_root=Path(args.runtime_root),
+        effect_class=args.effect_class,
+        execution_request=execution_request,
+        target=args.target,
+        summary=args.summary,
+        source=args.source,
+    )
+    return {
+        "mode": "PORTAL_WAVE_AUTHORITY_REQUEST_V1",
+        "request_id": result["request_id"],
+        "request_path": result["request_path"],
+        "created": result["created"],
+        "execution_authority_granted": False,
+        "protected_effect_authority_granted": False,
+        "backend_execution_performed": False,
     }
 
 
@@ -2966,6 +3071,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
                 payload = _wave_prepare_payload(args)
             elif args.wave_command == "promote":
                 payload = _wave_promote_payload(args)
+            elif args.wave_command == "authority-request":
+                payload = _wave_authority_request_payload(args)
             elif args.wave_command == "claim":
                 payload = _wave_claim_payload(args)
             elif args.wave_command == "receipt":

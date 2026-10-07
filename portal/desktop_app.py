@@ -124,6 +124,26 @@ class DesktopViewModel:
     def portfolio(self, action: str = "status", *, session_id: str = "portfolio", **payload) -> dict[str, object]:
         return self.client.request("desktop_portfolio", action=action, session_id=session_id, **payload)
 
+    def approve_authority(
+        self,
+        request_id: str,
+        *,
+        valid_for_seconds: float = 300.0,
+    ) -> dict[str, object]:
+        return self.client.request(
+            "desktop_authority",
+            action="approve",
+            request_id=request_id,
+            valid_for_seconds=valid_for_seconds,
+        )
+
+    def deny_authority(self, request_id: str) -> dict[str, object]:
+        return self.client.request(
+            "desktop_authority",
+            action="deny",
+            request_id=request_id,
+        )
+
 
 class PortalDesktopApp:
     def __init__(self, *, runtime_root: Path) -> None:
@@ -255,7 +275,29 @@ class PortalDesktopApp:
             operations_frame,
             textvariable=self.effects_var,
             wraplength=360,
-        ).pack(fill="x", pady=(2, 0))
+        ).pack(fill="x", pady=(2, 2))
+        self.effects_list = tk.Listbox(
+            operations_frame,
+            height=6,
+            exportselection=False,
+        )
+        self.effects_list.pack(fill="x", pady=(2, 4))
+        self._pending_effects: tuple[dict[str, object], ...] = ()
+
+        effect_buttons = ttk.Frame(operations_frame)
+        effect_buttons.pack(fill="x")
+        self.approve_button = ttk.Button(
+            effect_buttons,
+            text="Approve",
+            command=self.approve_selected_authority,
+        )
+        self.approve_button.pack(side="left")
+        self.deny_button = ttk.Button(
+            effect_buttons,
+            text="Deny",
+            command=self.deny_selected_authority,
+        )
+        self.deny_button.pack(side="left", padx=(8, 0))
 
         self.status_var = tk.StringVar(value="")
         ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
@@ -318,11 +360,108 @@ class PortalDesktopApp:
             for item in snapshot.recent_activity[:30]
         ) or "No cognition activity recorded."
         self._set_text(self.activity_text, activity)
+        self._pending_effects = snapshot.pending_effects
+        self.effects_list.delete(0, "end")
+        for effect in snapshot.pending_effects:
+            self.effects_list.insert(
+                "end",
+                (
+                    f"{effect.get('effect_class', 'UNKNOWN')} · "
+                    f"{effect.get('target', 'unknown target')} · "
+                    f"{effect.get('summary', '')}"
+                ),
+            )
         self.effects_var.set(
             "None. Cognition carries no protected-effect authority."
             if not snapshot.pending_effects
-            else "\n".join(json.dumps(effect, sort_keys=True) for effect in snapshot.pending_effects)
+            else (
+                f"{len(snapshot.pending_effects)} exact authority request(s). "
+                "Approve mints Project Runner grant(s); it does not itself "
+                "perform the protected effect."
+            )
         )
+
+    def _selected_authority_request(self) -> dict[str, object]:
+        selection = self.effects_list.curselection()
+        if not selection:
+            raise ValueError("select a pending authority request first")
+        index = int(selection[0])
+        if index < 0 or index >= len(self._pending_effects):
+            raise ValueError("selected authority request is stale")
+        return self._pending_effects[index]
+
+    def approve_selected_authority(self) -> None:
+        from tkinter import messagebox
+
+        try:
+            effect = self._selected_authority_request()
+            request_id = str(effect.get("request_id") or "").strip()
+            if not request_id:
+                raise ValueError("selected authority request has no request id")
+        except Exception as exc:
+            self.status_var.set(f"Authority: {type(exc).__name__}: {exc}")
+            return
+
+        if not messagebox.askyesno(
+            "Approve exact authority",
+            (
+                f"{effect.get('effect_class', 'UNKNOWN')}\n"
+                f"{effect.get('target', 'unknown target')}\n\n"
+                f"{effect.get('summary', '')}\n\n"
+                "Approve will mint fresh Project Runner authority for this "
+                "exact request. It will not bypass review, currentness, "
+                "fencing, or backend verification."
+            ),
+            parent=self.root,
+        ):
+            return
+
+        self.status_var.set("Minting exact authority grant(s)…")
+        self.approve_button.configure(state="disabled")
+        self.deny_button.configure(state="disabled")
+
+        def work() -> None:
+            try:
+                result = self.view_model.approve_authority(request_id)
+                message = (
+                    f"APPROVED {request_id}; "
+                    f"execution_performed={result.get('execution_performed')}"
+                )
+            except Exception as exc:
+                message = (
+                    f"Authority approval failed: {type(exc).__name__}: {exc}"
+                )
+            self._events.put(("authority_result", message))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def deny_selected_authority(self) -> None:
+        try:
+            effect = self._selected_authority_request()
+            request_id = str(effect.get("request_id") or "").strip()
+            if not request_id:
+                raise ValueError("selected authority request has no request id")
+        except Exception as exc:
+            self.status_var.set(f"Authority: {type(exc).__name__}: {exc}")
+            return
+
+        self.approve_button.configure(state="disabled")
+        self.deny_button.configure(state="disabled")
+
+        def work() -> None:
+            try:
+                result = self.view_model.deny_authority(request_id)
+                message = (
+                    f"DENIED {request_id}; "
+                    f"execution_performed={result.get('execution_performed')}"
+                )
+            except Exception as exc:
+                message = (
+                    f"Authority denial failed: {type(exc).__name__}: {exc}"
+                )
+            self._events.put(("authority_result", message))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def refresh_async(self) -> None:
         if self._closed or self._refresh_in_flight:
@@ -368,6 +507,11 @@ class PortalDesktopApp:
             elif kind == "portfolio_error":
                 self._portfolio_in_flight = False
                 self.portfolio_var.set(str(payload))
+            elif kind == "authority_result":
+                self.approve_button.configure(state="normal")
+                self.deny_button.configure(state="normal")
+                self.status_var.set(str(payload))
+                self.refresh_async()
         self.root.after(50, self._drain_events)
 
     def _render_response(self, result: dict[str, object]) -> None:

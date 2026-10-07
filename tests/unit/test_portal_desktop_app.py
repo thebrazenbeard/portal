@@ -71,7 +71,42 @@ class FakeClient:
                 "evidence_id": "cognition:x",
                 "protected_effect_authority": False,
             }
+        if command == "desktop_authority":
+            return {
+                "decision": str(payload["action"]).upper(),
+                "request_id": payload["request_id"],
+                "execution_performed": False,
+            }
         raise AssertionError(command)
+
+
+def test_view_model_authority_actions_use_resident_ipc_without_executing_effect() -> None:
+    client = FakeClient([])
+    vm = DesktopViewModel(client)
+
+    approved = vm.approve_authority("authority-1", valid_for_seconds=120.0)
+    denied = vm.deny_authority("authority-2")
+
+    assert approved["decision"] == "APPROVE"
+    assert approved["execution_performed"] is False
+    assert denied["decision"] == "DENY"
+    assert client.calls[-2:] == [
+        (
+            "desktop_authority",
+            {
+                "action": "approve",
+                "request_id": "authority-1",
+                "valid_for_seconds": 120.0,
+            },
+        ),
+        (
+            "desktop_authority",
+            {
+                "action": "deny",
+                "request_id": "authority-2",
+            },
+        ),
+    ]
 
 
 def test_view_model_refresh_reports_runtime_route_and_last_autonomous_activity() -> None:

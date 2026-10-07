@@ -16,9 +16,12 @@ import time
 from typing import Callable
 import uuid
 
+from .desktop_authority import DesktopAuthorityService
 from .desktop_cognition import CognitionRequest, discover_cognition_routes, select_cognition_route
 from .desktop_install import InstallSpec
 from .desktop_ipc import DesktopRuntimeCommandHandler
+from .desktop_keyring import DesktopAuthorityKeyStore
+from .desktop_state import load_pending_authority_requests
 from .desktop_pre_active import process_one_volition_signal
 from .desktop_runtime import CognitionLedger, CognitionRequestEnvelope, ResidentCognitionEngine
 from .desktop_vera_acceptance import VeraRuntimeAcceptance
@@ -192,6 +195,13 @@ class ResidentHost:
         self.vera_state = VeraStateDirectory(state / "vera", **identity)
         self.vera = QualifiedVeraRuntime.from_state_directory(self.vera_state)
         self.portal = PortalCommandSession(state / "portal" / "session.sqlite3")
+        self.authority_key_store = DesktopAuthorityKeyStore(
+            state / "portal" / "authority-keyring"
+        )
+        self.authority = DesktopAuthorityService(
+            self.root,
+            key_store=self.authority_key_store,
+        )
         self.pre_active = Store(state / "pre-active" / "runtime.sqlite3")
         self.volition = VolitionBridge(self.pre_active)
         if self.pre_active.get_volition_state() is None:
@@ -296,7 +306,11 @@ class ResidentHost:
                 "selected_route_id": self.selected_route.route_id if self.selected_route else None,
                 "components": components, "source_manifest": self.manifest,
                 "vera_currentness": vera_context, "last_cognition": activity[0] if activity else None,
-                "last_progress_at": self.last_progress, "pending_effects": [],
+                "last_progress_at": self.last_progress,
+                "pending_effects": list(
+                    load_pending_authority_requests(self.authority.inbox)
+                ),
+                "authority_key_custody": self.authority_key_store.status(),
                 "portfolio_cache": self.portfolio_snapshot(),
                 "protected_effect_authority": False, "native_openai_router_replaced": False}
 
@@ -323,6 +337,30 @@ class ResidentHost:
             if not hasattr(self, "portfolio"):
                 self.portfolio = DesktopPortfolioController(self.root, session=self.portal)
             return self.portfolio.handle(request)
+        if command == "desktop_authority":
+            action = str(request.get("action") or "").strip().lower()
+            request_id = str(request.get("request_id") or "").strip()
+            if not request_id:
+                raise ValueError("desktop authority request_id is required")
+            if action == "approve":
+                valid_for_seconds = request.get("valid_for_seconds", 300.0)
+                if isinstance(valid_for_seconds, bool) or not isinstance(
+                    valid_for_seconds, (int, float)
+                ):
+                    raise ValueError(
+                        "desktop authority valid_for_seconds must be numeric"
+                    )
+                return self.authority.approve(
+                    request_id,
+                    now=time.time(),
+                    valid_for_seconds=float(valid_for_seconds),
+                )
+            if action == "deny":
+                return self.authority.deny(
+                    request_id,
+                    now=time.time(),
+                )
+            raise ValueError("desktop authority action must be approve or deny")
         if command == "desktop_recent_activity":
             return self.activity(limit=int(request.get("limit", 20)))
         result = self.handler.handle(request)

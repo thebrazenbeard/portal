@@ -43,6 +43,7 @@ from runner.registry import load_project_snapshot
 from runner.work_units import WorkUnitStatus
 
 from .coordinator import plan_portal_wave
+from .desktop_authority import DesktopAuthorityService
 from .models import ExecutionNode
 from .source_proposal import (
     PortalSourceTreeProposal,
@@ -2059,6 +2060,58 @@ def prepare_portal_wave(
         claimed=len(packets),
         held=held,
         packets=tuple(sorted(packets, key=lambda item: item.subject_id)),
+    )
+
+
+def request_portal_wave_authority(
+    *,
+    state_db: Path,
+    run_id: str,
+    subject_id: str,
+    runtime_root: Path,
+    effect_class: str,
+    execution_request: Mapping[str, object] | None,
+    target: str | None = None,
+    summary: str | None = None,
+    source: str = "project-runner",
+    authority_service: DesktopAuthorityService | None = None,
+    clock: Callable[[], float] = time.time,
+) -> dict[str, object]:
+    """Surface one exact CLAIMED packet for explicit Desktop authority."""
+
+    packet, claim_holder = _portal_packet_execution_identity(
+        state_db=Path(state_db),
+        run_id=run_id,
+        subject_id=subject_id,
+    )
+    if packet.state != "CLAIMED":
+        raise ValueError("Portal wave packet is not authority-requestable")
+    if effect_class == SOURCE_WRITE and execution_request is None:
+        raise ValueError("SOURCE_WRITE authority request requires execution_request")
+    if effect_class not in {NO_PROTECTED_EFFECT, SOURCE_WRITE}:
+        raise ValueError(
+            "current Portal wave authority request supports only "
+            "NO_PROTECTED_EFFECT or SOURCE_WRITE"
+        )
+
+    service = authority_service or DesktopAuthorityService(Path(runtime_root))
+    return service.create_request(
+        state_db=Path(state_db),
+        subject_id=packet.subject_id,
+        repository=packet.repository,
+        ref=packet.ref,
+        exact_head=packet.exact_head,
+        lineage_id=packet.lineage_id,
+        work_fingerprint=packet.work_fingerprint,
+        fencing_token=packet.fencing_token,
+        holder=claim_holder,
+        operation=packet.action,
+        effect_class=effect_class,
+        execution_request=execution_request,
+        target=target or f"{packet.repository}@{packet.ref}",
+        summary=summary or packet.frontier or packet.action,
+        source=source,
+        now=float(clock()),
     )
 
 

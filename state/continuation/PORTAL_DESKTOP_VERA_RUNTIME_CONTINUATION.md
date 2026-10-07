@@ -350,3 +350,21 @@ Focused verification at this checkpoint:
 - `git diff --check`: clean apart from local Windows line-ending notices.
 
 Claim ceiling: source/branch behavior only until a new exact source head is committed, pushed, independently reviewed as appropriate, staged into a separate runtime, qualified, and explicitly selected/cut over. This checkpoint does not claim the currently running Desktop runtime consumed these changes.
+
+
+## Resident authority-surface consolidation checkpoint — 2026-10-07
+
+PR #6's independently developed Desktop authority substrate was ported into the newer PR #8 Desktop/runtime lineage without replacing PR #8's newer live-auto portfolio behavior.
+
+- Pending `PORTAL_DESKTOP_AUTHORITY_REQUEST_V1` records are surfaced by the resident host.
+- Desktop Approve/Deny goes through resident IPC.
+- Approve revalidates the durable Project Runner claim/head/fence/lease/effect ceiling and mints the existing execution grant plus protected-effect grant when required.
+- Approve does not itself execute the requested effect; Project Runner promotion/currentness/review/backend verification remains authoritative.
+- Deny resolves the request without minting authority.
+- Execution/effect key custody may use existing environment configuration or optional current-user DPAPI ciphertext.
+- Desktop does not auto-provision credentials and does not custody independent review-evidence keys.
+- `portal wave authority-request` and `portal wave promote --runtime-root ...` use the same request/grant contract.
+
+Focused consolidation verification: **46 passed, 1 skipped** across Desktop UI, resident host, authority/keyring/state, resident integration and wave CLI.
+
+Claim ceiling remains source/Draft PR only until a separately staged exact-source runtime is installed, qualified and explicitly selected.

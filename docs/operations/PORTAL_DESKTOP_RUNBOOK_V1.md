@@ -112,6 +112,32 @@ The local proposal worker is not the only possible execution route. ChatGPT/plug
 
 A host route must be genuinely executable and current. Route discovery, connector presence, a declared node, or a UI label never establishes worker attachment or effect authority.
 
+## Desktop authority surface
+
+The Runtime pane also surfaces exact pending `PORTAL_DESKTOP_AUTHORITY_REQUEST_V1` records. These are requests for authority, not authority by themselves.
+
+Selecting one request and choosing **Approve** sends the exact request ID through resident Desktop IPC. The resident host then:
+
+1. reloads the pending request from runtime state;
+2. requires the matching durable Project Runner work item to remain `CLAIMED`;
+3. revalidates repository/ref/exact-head/operation, lease holder, fencing token, lease freshness, and effect ceiling;
+4. requires an existing execution-authority key and, for a protected effect, the separate protected-effect key;
+5. mints Project Runner's existing HMAC-authenticated grant document(s);
+6. resolves the pending request as approved without executing the protected effect.
+
+**Deny** resolves the request without minting authority.
+
+Authority key custody is deliberately separate from review evidence. The optional `portal-desktop-authority-key` command can explicitly provision or rotate current-Windows-user DPAPI ciphertext for the execution and protected-effect key classes. Desktop startup never auto-creates those credentials, and Desktop never custodies the independent review-evidence key.
+
+`APPROVAL = AUTHORITY`
+
+`AUTHORITY != EXECUTION`
+
+`REQUEST != AUTHORITY`
+
+`COGNITION != PROTECTED_EFFECT_AUTHORITY`
+
+
 ## Durable evidence, recovery, and upgrades
 
 The runtime stores Vera state, Pre-Active/Volition state, Portal sessions, and cognition evidence under `state/`. The bridge retains submission identity, claimed requests, cancelled requests, and responses. A timeout before successful host claim is cancelled atomically; a claimed request with no response has an unknown outcome. Reusing the same ID and same request observes retained evidence or waits for the claim; changing its payload is rejected. Never blindly replay an unknown attempted effect.
