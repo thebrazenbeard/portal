@@ -35,11 +35,6 @@ class RuntimeSupervisorConfig:
     def python_path(self) -> Path:
         return self.runtime_root / ".venv" / "Scripts" / "python.exe"
 
-    @property
-    def host_script(self) -> Path:
-        return self.runtime_root / "host" / "vera_unified_host.py"
-
-
 @dataclass(frozen=True)
 class RuntimeStatus:
     state: RuntimeState
@@ -90,20 +85,83 @@ def process_is_alive(pid: int) -> bool:
     return True
 
 
-def _default_launcher(python: Path, script: Path) -> int:
+def discover_active_runtime_root(base_dir: Path) -> Path | None:
+    base_dir = Path(base_dir)
+    if not base_dir.is_dir():
+        return None
+
+    candidates: list[tuple[float, Path]] = []
+    for runtime_root in base_dir.iterdir():
+        if not runtime_root.is_dir():
+            continue
+        spec_path = runtime_root / "RUNTIME_INSTALL_SPEC.json"
+        qualification_path = runtime_root / "QUALIFICATION.json"
+        if not spec_path.is_file() or not qualification_path.is_file():
+            continue
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8-sig"))
+            qualification = json.loads(
+                qualification_path.read_text(encoding="utf-8-sig")
+            )
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(spec, dict) or not isinstance(qualification, dict):
+            continue
+        activation = spec.get("activation")
+        if (
+            not isinstance(activation, dict)
+            or activation.get("qualified") is not True
+            or activation.get("active") is not True
+            or qualification.get("qualified") is not True
+        ):
+            continue
+
+        installed_at = 0.0
+        result_path = runtime_root / "INSTALLATION_RESULT.json"
+        if result_path.is_file():
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8-sig"))
+                if (
+                    isinstance(result, dict)
+                    and isinstance(result.get("installed_at"), (int, float))
+                    and not isinstance(result.get("installed_at"), bool)
+                ):
+                    installed_at = float(result["installed_at"])
+            except (OSError, json.JSONDecodeError):
+                pass
+        if installed_at <= 0:
+            try:
+                installed_at = spec_path.stat().st_mtime
+            except OSError:
+                continue
+        candidates.append((installed_at, runtime_root.resolve()))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], str(item[1])))
+    return candidates[-1][1]
+
+
+def _default_launcher(python: Path, runtime_root: Path) -> int:
     if not python.is_file():
         raise FileNotFoundError(f"runtime python not found: {python}")
-    if not script.is_file():
-        raise FileNotFoundError(f"runtime host not found: {script}")
+    runtime_root = Path(runtime_root).resolve()
+    if not (runtime_root / "RUNTIME_INSTALL_SPEC.json").is_file():
+        raise FileNotFoundError(
+            f"runtime install spec not found: {runtime_root / 'RUNTIME_INSTALL_SPEC.json'}"
+        )
     creationflags = 0
     if os.name == "nt":
         creationflags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             | getattr(subprocess, "DETACHED_PROCESS", 0)
         )
+    env = dict(os.environ)
+    env["VERA_RUNTIME_ROOT"] = str(runtime_root)
     process = subprocess.Popen(
-        [str(python), str(script)],
-        cwd=str(script.parent),
+        [str(python), "-m", "portal.desktop_host"],
+        cwd=str(runtime_root),
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -230,7 +288,7 @@ class RuntimeSupervisor:
             return current
         pid = self._launcher(
             self.config.python_path,
-            self.config.host_script,
+            self.config.runtime_root,
         )
         return RuntimeStatus(
             RuntimeState.STARTING,

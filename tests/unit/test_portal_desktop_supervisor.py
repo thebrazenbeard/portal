@@ -42,6 +42,49 @@ def _supervisor(root: Path, *, alive: bool) -> RuntimeSupervisor:
     )
 
 
+def test_discover_active_runtime_root_selects_newest_qualified_active_install(
+    tmp_path: Path,
+) -> None:
+    from portal import desktop_supervisor
+
+    discover = getattr(desktop_supervisor, "discover_active_runtime_root", None)
+    assert callable(discover)
+
+    base = tmp_path / "VeraDesktopRuntime"
+    older = base / "older"
+    newer = base / "newer"
+    inactive = base / "inactive"
+    for root, installed_at, active in (
+        (older, 100.0, True),
+        (newer, 200.0, True),
+        (inactive, 300.0, False),
+    ):
+        root.mkdir(parents=True)
+        (root / "RUNTIME_INSTALL_SPEC.json").write_text(
+            json.dumps(
+                {
+                    "schema": "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+                    "activation": {
+                        "requested": active,
+                        "qualified": active,
+                        "active": active,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "QUALIFICATION.json").write_text(
+            json.dumps({"qualified": active}),
+            encoding="utf-8",
+        )
+        (root / "INSTALLATION_RESULT.json").write_text(
+            json.dumps({"installed_at": installed_at}),
+            encoding="utf-8",
+        )
+
+    assert discover(base) == newer
+
+
 def test_missing_heartbeat_is_offline(tmp_path: Path) -> None:
     status = _supervisor(tmp_path, alive=False).status(now=100.0)
     assert status.state is RuntimeState.OFFLINE
@@ -108,7 +151,7 @@ def test_offline_runtime_is_started_once_and_reported_starting(tmp_path: Path) -
     assert status.reason == "runtime_launch_requested"
     assert len(launches) == 1
     assert launches[0][0] == tmp_path / ".venv" / "Scripts" / "python.exe"
-    assert launches[0][1] == tmp_path / "host" / "vera_unified_host.py"
+    assert launches[0][1] == tmp_path
 
 
 def test_missing_component_marks_live_runtime_degraded(tmp_path: Path) -> None:

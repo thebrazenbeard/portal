@@ -33,6 +33,10 @@ This source implementation does not by itself prove that a resident P.O.R.T.A.L.
 
 The repository also contains the source for **P.O.R.T.A.L. Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
 
+Desktop-local conversation history is durable across restarts in its own SQLite store and is explicitly not Vera canonical memory. The operations pane surfaces the staged descriptive portfolio/open-loop corpus, cognition activity, and exact pending authority requests. `portal wave authority-request` can place one exact `CLAIMED` packet into that inbox. An **Approve** action is real authority: it cross-checks the durable claim/fence and mints Project Runner's existing HMAC-authenticated execution grant plus the separate protected-effect grant when required. A **Deny** action resolves the request without minting authority. The Desktop does not generate or persist authority keys, and approval does not bypass Project Runner review, fencing, currentness, promotion, or backend postcondition checks.
+
+The current promotion gate can consume `NO_PROTECTED_EFFECT` and `SOURCE_WRITE` authority under its public `NO_EFFECT`/`SOURCE_ONLY` ceilings. Merge, install, deploy, credential/permission, and destructive execution remain fail-closed until Project Runner itself gains an explicit bounded execution ceiling/backend for those effect classes; the Desktop does not fake support for them.
+
 The resident-host source composes:
 
 - `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;

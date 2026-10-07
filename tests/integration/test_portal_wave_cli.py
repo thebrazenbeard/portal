@@ -95,6 +95,73 @@ def test_portal_wave_prepare_cli_binds_budget_and_nodes(
     assert captured["budget"].max_parallel == 2
 
 
+def test_portal_wave_authority_request_cli_surfaces_exact_pending_request(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_request(**kwargs):
+        captured.update(kwargs)
+        return {
+            "request_id": "authority-123",
+            "request_path": str(tmp_path / "authority-123.json"),
+            "created": True,
+        }
+
+    monkeypatch.setattr(
+        portal_cli,
+        "request_portal_wave_authority",
+        fake_request,
+    )
+    execution_request = tmp_path / "execution-request.json"
+    execution_request.write_text(
+        json.dumps(
+            {
+                "schema": "PROJECT_RUNNER_GITHUB_SOURCE_WRITE_V1",
+                "operation": "PUT_FILE",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = portal_cli.entrypoint(
+        [
+            "wave",
+            "authority-request",
+            "--state-db",
+            str(tmp_path / "portal.sqlite3"),
+            "--run-id",
+            "wave-cli",
+            "--subject-id",
+            "project-runner",
+            "--runtime-root",
+            str(tmp_path / "runtime"),
+            "--effect-class",
+            "SOURCE_WRITE",
+            "--execution-request",
+            str(execution_request),
+            "--target",
+            "thebrazenbeard/project-runner@main",
+            "--summary",
+            "Write the exact reviewed change.",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "PORTAL_WAVE_AUTHORITY_REQUEST_V1"
+    assert payload["request_id"] == "authority-123"
+    assert payload["execution_authority_granted"] is False
+    assert payload["protected_effect_authority_granted"] is False
+    assert payload["backend_execution_performed"] is False
+    assert captured["run_id"] == "wave-cli"
+    assert captured["subject_id"] == "project-runner"
+    assert captured["effect_class"] == "SOURCE_WRITE"
+    assert captured["execution_request"]["operation"] == "PUT_FILE"
+
+
 def test_portal_wave_status_cli_reads_durable_outbox(
     tmp_path: Path,
     capsys,
