@@ -294,3 +294,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Stop/Hold/Run/Continue remain serialized; they cannot cancel or claim completion of in-flight cognition or worker effects. Cached unknown and known session monitoring does not imply new admission.
 - Slow-model test proved status deadline failure before fix; final resident/layout/controller surface -> 18 passed, including known RUNNING cached session <=0.5s and Stop transitioning only after admitted cognition returns.
 - Exact head: commit containing this continuation. Lou-Pole semantic candidates remain under active repair: upstream locality/cost proof for generic loopback gateways and submission-only crash recovery. Next checkpoint closes those, then clean staged proof.
+
+## Lou-Pole submission recovery closure — 2026-10-07
+- Model audit found a client interruption between durable submission identity and request publication could strand an unclaimed request forever. Under the existing per-ID OS lock, recovery republishes only the matching original marker when every request/claim/cancellation/response is absent. Existing lifecycle evidence is never replayed; every retained identity is checked.
+- Four focused failures proved the interrupted-publication/conflicting-evidence cases before fix. Complete IPC suite -> 15 passed. This closes the demonstrated source-level recovery candidate; it does not convert unknown host claims into permission to repeat an operation.
+- Deterministic canonical Lou-Pole engine 9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2 independently passed 17 tests + 9 subtests; eight exact source files at 060e71f produced 30 heuristic candidates, not 30 established loopholes. Model semantic findings remain separately labelled.
+- Exact head: commit containing this record. Next: local-gateway cost/locality closure and staged release qualification.

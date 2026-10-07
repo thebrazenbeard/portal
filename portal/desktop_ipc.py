@@ -180,6 +180,7 @@ class FileBridgeClient:
             directory / request_path.name
             for directory in (self.submissions, self.requests, self.claimed, self.cancelled)
         ]
+        retained: dict[Path, dict[str, object]] = {}
         for path in retained_paths:
             try:
                 prior = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -187,15 +188,28 @@ class FileBridgeClient:
                 continue
             if not isinstance(prior, dict) or self._identity(prior) != self._identity(body):
                 raise ValueError("bridge request_id already binds a different payload")
+            retained[path] = prior
+        response_path = self.responses / request_path.name
+        if any(path in retained or path.exists() for path in retained_paths[1:]):
+            # A request, claim or cancellation is already a published operation.
+            # Check every retained identity before returning; never republish it.
             return
-        if (self.responses / request_path.name).exists():
-            raise ValueError("bridge response has no retained request identity")
+        if response_path.exists():
+            if not retained:
+                raise ValueError("bridge response has no retained request identity")
+            return
+
+        # A matching marker with no lifecycle file/result proves the submitter
+        # stopped before request publication. Recover only this window under
+        # the per-ID lock, preserving its original body and caller timestamp.
+        recorded_body = retained.get(retained_paths[0], body)
 
         temp = self.submissions / (request_path.name + "." + uuid.uuid4().hex + ".tmp")
-        temp.write_text(json.dumps(body, sort_keys=True) + "\n", encoding="utf-8")
+        temp.write_text(json.dumps(recorded_body, sort_keys=True) + "\n", encoding="utf-8")
         try:
-            os.replace(temp, retained_paths[0])
-            temp.write_text(json.dumps(body, sort_keys=True) + "\n", encoding="utf-8")
+            if retained_paths[0] not in retained:
+                os.replace(temp, retained_paths[0])
+                temp.write_text(json.dumps(recorded_body, sort_keys=True) + "\n", encoding="utf-8")
             os.replace(temp, request_path)
         finally:
             temp.unlink(missing_ok=True)

@@ -338,3 +338,59 @@ def test_transient_response_sharing_denial_keeps_same_request_polling(tmp_path, 
     monkeypatch.setattr(Path, 'read_text', flaky)
     assert FileBridgeClient._response(path, 'stable') is None
     assert FileBridgeClient._response(path, 'stable') == {'state': 'ACTIVE'}
+
+
+def test_retry_recovers_submission_interrupted_before_request_publication(tmp_path: Path, monkeypatch) -> None:
+    client = FileBridgeClient(tmp_path, timeout_seconds=0.2, poll_seconds=0.002)
+    replace = os.replace
+    request_path = tmp_path / "bridge/requests/interrupted.json"
+    submission_path = tmp_path / "bridge/submissions/interrupted.json"
+    response_path = tmp_path / "bridge/responses/interrupted.json"
+
+    def interrupted_publication(source, destination):
+        if Path(destination) == request_path:
+            raise OSError("client interrupted after durable submission")
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", interrupted_publication)
+    with pytest.raises(OSError, match="client interrupted"):
+        client.request("desktop_status", request_id="interrupted", created_at=10.0)
+    assert submission_path.exists()
+    assert not request_path.exists()
+    monkeypatch.setattr(os, "replace", replace)
+    observed = []
+
+    def server():
+        deadline = time.monotonic() + 0.5
+        while not request_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.002)
+        if request_path.exists():
+            observed.append(json.loads(request_path.read_text()))
+            request_path.replace(tmp_path / "bridge/claimed/interrupted.json")
+            response_path.write_text(json.dumps({
+                "request_id": "interrupted", "ok": True, "result": {"state": "ACTIVE"},
+            }))
+
+    thread = threading.Thread(target=server)
+    thread.start()
+    try:
+        assert client.request("desktop_status", request_id="interrupted", created_at=20.0) == {"state": "ACTIVE"}
+    finally:
+        thread.join(timeout=1)
+    assert len(observed) == 1
+    assert observed[0]["created_at"] == 10.0
+    assert json.loads(submission_path.read_text())["created_at"] == 10.0
+
+
+@pytest.mark.parametrize("retained_state", ["requests", "claimed", "cancelled"])
+def test_retry_validates_all_retained_identities_before_recovery(tmp_path: Path, retained_state: str) -> None:
+    client = FileBridgeClient(tmp_path, timeout_seconds=0.01, poll_seconds=0.002)
+    marker = tmp_path / "bridge/submissions/conflict.json"
+    other = tmp_path / "bridge" / retained_state / "conflict.json"
+    marker.parent.mkdir(parents=True)
+    other.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({"command": "desktop_status", "request_id": "conflict"}))
+    other.write_text(json.dumps({"command": "desktop_recent_activity", "request_id": "conflict"}))
+    with pytest.raises(ValueError, match="different payload"):
+        client.request("desktop_status", request_id="conflict")
+    assert json.loads(other.read_text())["command"] == "desktop_recent_activity"
