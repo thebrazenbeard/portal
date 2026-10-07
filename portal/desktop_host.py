@@ -117,12 +117,38 @@ def _component_status(
     }
 
 
-def run_host(runtime_root: Path) -> int:
+def prepare_runtime_layout(runtime_root: Path) -> dict[str, Path]:
     runtime_root = Path(runtime_root).resolve()
     state_root = runtime_root / "state"
     bridge_root = runtime_root / "bridge"
     requests = bridge_root / "requests"
     responses = bridge_root / "responses"
+    for path in (
+        state_root,
+        state_root / "vera",
+        state_root / "portal",
+        state_root / "pre-active",
+        state_root / "cognition",
+        requests,
+        responses,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    return {
+        "runtime_root": runtime_root,
+        "state_root": state_root,
+        "bridge_root": bridge_root,
+        "requests": requests,
+        "responses": responses,
+    }
+
+
+def run_host(runtime_root: Path) -> int:
+    layout = prepare_runtime_layout(runtime_root)
+    runtime_root = layout["runtime_root"]
+    state_root = layout["state_root"]
+    bridge_root = layout["bridge_root"]
+    requests = layout["requests"]
+    responses = layout["responses"]
     heartbeat = bridge_root / "heartbeat.json"
     pid_file = bridge_root / "pid.txt"
     install_spec = runtime_root / "RUNTIME_INSTALL_SPEC.json"
