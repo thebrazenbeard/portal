@@ -36,8 +36,21 @@ Base at start: `a4cf02d34c2f8c4ac2b1e60161cc53e9845616f0`
 - Live discovery probe selected `ollama:vera-local:latest` and left `codex:cli` non-auto-admissible.
 - Isolated real Pre-Active + live Ollama autonomous cognition proof completed and source event reached `DONE`.
 
+- Desktop IPC implemented in `portal/desktop_ipc.py` using the existing unified-runtime request/response envelope.
+- Resident desktop commands: status, cognition-route discovery, cognition, and recent observable activity.
+- File bridge client distinguishes timeout-before-claim from claimed-but-response-missing ambiguity, preventing blind retry.
+- Thin Tkinter shell implemented in `portal/desktop_app.py` and exposed as `portal-desktop`.
+- The GUI owns presentation only: conversation input, runtime health, selected cognition route, autonomous/recent activity, and pending-effect display.
+- Human messages are sent through `desktop_cognize`; the GUI never calls a model endpoint directly.
+- The pending-effects pane currently reports no authority-bearing requests because the resident cognition path grants no protected-effect authority.
+
+## Verification
+- Desktop supervisor/cognition/runtime/IPC/app unit surfaces are green together.
+- UI view-model tests verify message submission reaches IPC rather than a direct model adapter.
+- Tkinter remains a presentation dependency only; tests do not require an interactive display.
+
 ## Next
-Add local IPC command handling and a thin desktop client/UI so conversation submission reaches the resident runtime boundary rather than invoking a model directly from the window process.
+Build the idempotent Windows bootstrap/runtime package, install exact source revisions into an isolated user-local environment, generate the resident host with desktop IPC + Pre-Active cognition processing, and register logon activation only after health qualification.
 
 ## Claim ceiling
-SOURCE_IMPLEMENTATION_AND_ISOLATED_LIVE_COGNITION_PROOF_ONLY_NOT_INSTALLED_DESKTOP_NOT_DEPLOYED_NOT_BOUND_INTO_THE_INSTALLED_RESIDENT_HOST
+SOURCE_IMPLEMENTATION_WITH_FUNCTIONAL_THIN_DESKTOP_SHELL_NOT_INSTALLED_NOT_DEPLOYED_NOT_BOUND_INTO_THE_CURRENT_INSTALLED_RESIDENT_HOST

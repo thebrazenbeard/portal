@@ -84,6 +84,20 @@ class CognitionLedger:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def list_recent(self, *, limit: int = 20) -> list[dict[str, object]]:
+        if limit < 1 or limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM desktop_cognition_runs
+            ORDER BY updated_at DESC, request_id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def store(
         self,
         request: CognitionRequestEnvelope,

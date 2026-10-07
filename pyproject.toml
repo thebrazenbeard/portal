@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 project-runner = "runner.cli:entrypoint"
 portal = "portal.cli:entrypoint"
+portal-desktop = "portal.desktop_app:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]
