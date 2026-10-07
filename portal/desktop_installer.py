@@ -350,6 +350,12 @@ def install(
     spec: InstallSpec,
     activate: bool,
 ) -> dict[str, object]:
+    spec.validate()
+    if spec.cognition_target is None:
+        raise RuntimeError(
+            "new resident runtime installation requires a V2 install spec "
+            "with an explicit cognition target"
+        )
     runtime_root = prepare_stage_root(runtime_root, spec)
     spec.write(runtime_root / "RUNTIME_INSTALL_SPEC.json")
 

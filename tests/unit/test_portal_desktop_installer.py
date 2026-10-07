@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import portal.desktop_installer as desktop_installer
 from portal.desktop_install import InstallSpec, RuntimeCognitionTarget, RuntimeSource
 from portal.desktop_installer import (
@@ -74,6 +76,34 @@ def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path
         "active": True,
     }
     assert "ACTIVE_AT_LOGON" in updated["claim_ceiling"]
+
+
+def test_install_rejects_v1_before_staging_any_runtime_files(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    spec = InstallSpec(
+        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        install_id="legacy",
+        sources=(
+            RuntimeSource("vera-mono", "x/a", "main", "a" * 40),
+            RuntimeSource("portal", "x/b", "main", "b" * 40),
+            RuntimeSource("pre-active", "x/c", "main", "c" * 40),
+            RuntimeSource("volition", "x/d", "main", "d" * 40),
+        ),
+    )
+
+    def must_not_stage(*_args, **_kwargs):
+        raise AssertionError("V1 rejection must happen before stage preparation")
+
+    monkeypatch.setattr(desktop_installer, "prepare_stage_root", must_not_stage)
+
+    with pytest.raises(RuntimeError, match="V2"):
+        desktop_installer.install(
+            runtime_root=tmp_path / "runtime",
+            spec=spec,
+            activate=False,
+        )
 
 
 def test_configure_cognition_target_persists_and_reads_back_exact_binding(

@@ -170,16 +170,45 @@ def claim_bridge_request(
     return claimed_path
 
 
+def _cognition_target_binding(value: object) -> tuple[object, ...] | None:
+    if not isinstance(value, dict):
+        return None
+    name = value.get("name")
+    provider = value.get("provider")
+    base_url = value.get("base_url")
+    model = value.get("model")
+    api_key_env = value.get("api_key_env")
+    if not all(isinstance(item, str) for item in (name, provider, base_url, model)):
+        return None
+    if api_key_env is not None and not isinstance(api_key_env, str):
+        return None
+    return (
+        name.strip(),
+        provider.strip(),
+        base_url.strip().rstrip("/"),
+        model.strip(),
+        (api_key_env.strip() if isinstance(api_key_env, str) else None) or None,
+    )
+
+
 def discover_resident_cognition_routes(
     pre_active: object,
     *,
+    expected_target: object,
     models_probe=None,
 ):
     active_target_probe = getattr(pre_active, "get_active_model_target", None)
     if not callable(active_target_probe):
         return ()
+    expected_binding = _cognition_target_binding(expected_target)
+    active_target = active_target_probe()
+    if (
+        expected_binding is None
+        or _cognition_target_binding(active_target) != expected_binding
+    ):
+        return ()
     return discover_pre_active_target_routes(
-        active_target_probe=active_target_probe,
+        active_target_probe=lambda: active_target,
         models_probe=models_probe,
     )
 
@@ -238,7 +267,10 @@ def run_host(runtime_root: Path) -> int:
         state_root / "cognition" / "desktop-cognition.sqlite3"
     )
     def resident_routes():
-        return discover_resident_cognition_routes(pre_active)
+        return discover_resident_cognition_routes(
+            pre_active,
+            expected_target=source_manifest.get("cognition_target"),
+        )
 
     cognition_engine = ResidentCognitionEngine(
         ledger=cognition_ledger,
