@@ -49,10 +49,23 @@ Base at start: `a4cf02d34c2f8c4ac2b1e60161cc53e9845616f0`
 - UI view-model tests verify message submission reaches IPC rather than a direct model adapter.
 - Tkinter remains a presentation dependency only; tests do not require an interactive display.
 
+- Frozen install-spec primitives implemented in `portal/desktop_install.py`; a stage root is idempotent only for the exact same four-source spec and rejects source drift.
+- Resident host implemented in `portal/desktop_host.py`.
+- The host composes Vera Mono, P.O.R.T.A.L., Pre-Active scheduler/observers, persisted Volition state/bridge, cognition ledger, route discovery, IPC, and the local cognition engine.
+- Autonomous queue processing claims only `autonomous.turn`; unrelated higher-priority Pre-Active events cannot be stolen.
+- Completed autonomous cognition is the only path to `ack_event`; failed/unresolved cognition uses Pre-Active retry/dead-letter semantics.
+- Current upstream `VolitionBridge` is reused for `volition.signal`; validated endogenous cognition requests remain `effect_authority=false`.
+
+## Verification
+- Resident host modules compile.
+- Focused Pre-Active targeted-claim, autonomous-processing, IPC, and cognition tests: 14 passed.
+- Exact current source heads observed for staging: Vera Mono `e5af8cb740267bb5674864571e915842bf5e6677`; P.O.R.T.A.L. desktop branch will bind its checkpoint head; Pre-Active `1f23a809d7274df506e03e2d9052525538c3bcf6`; Volition `dbc628d376515a0a523b1eecdf62129cca5d6b08`.
+
 ## Next
-Build the idempotent Windows bootstrap/runtime package, install exact source revisions into an isolated user-local environment, generate the resident host with desktop IPC + Pre-Active cognition processing, and register logon activation only after health qualification.
+Finish and run the Windows staged installer: clone exact SHAs, create isolated venv, install all four sources, smoke-test imports, launch the staged resident host, exercise IPC + human cognition + real Pre-Active autonomous cognition, then register logon activation only if qualification passes.
 
 ## Claim ceiling
+<<<<<<< HEAD
 SOURCE_IMPLEMENTATION_WITH_FUNCTIONAL_THIN_DESKTOP_SHELL_NOT_INSTALLED_NOT_DEPLOYED_NOT_BOUND_INTO_THE_CURRENT_INSTALLED_RESIDENT_HOST
 
 ## Fresh continuation — 2026-10-07
@@ -67,3 +80,6 @@ SOURCE_IMPLEMENTATION_WITH_FUNCTIONAL_THIN_DESKTOP_SHELL_NOT_INSTALLED_NOT_DEPLO
 - Next: compose real QualifiedVeraRuntime + Pre-Active Daemon/Engine/observers/scheduler + existing VolitionBridge; add process singleton and responsive heartbeat/IPC; bind explicit local policy. UI and installer work in progress is not yet qualified.
 - Strongest objection accepted: isolated source tests do not prove a composed resident host. Current engine without a Vera acceptance callback explicitly records UNQUALIFIED_LEDGER_ONLY.
 - Claim ceiling remains source-only; no installation or resident end-to-end proof freshly established in this session. Existing live runtimes untouched. Push commits use [skip ci] to avoid initiating paid CI compute.
+=======
+SOURCE_IMPLEMENTATION_WITH_RESIDENT_HOST_NOT_YET_STAGED_INSTALLED_OR_ACTIVATED
+>>>>>>> 793ab14 (Add resident host and staged install contracts)
