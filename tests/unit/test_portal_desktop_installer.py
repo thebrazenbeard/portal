@@ -206,10 +206,31 @@ def test_windows_exact_checkout_enables_repository_local_longpaths_before_checko
     installer._clone_exact(source, destination)
     config = ["git", "-C", str(destination), "config", "--local", "core.longpaths", "true"]
     assert config in calls
+    raw_bytes = ["git", "-C", str(destination), "config", "--local", "core.autocrlf", "false"]
+    assert raw_bytes in calls
+    attrs = destination / ".git" / "info" / "attributes"
+    assert attrs.read_text(encoding="utf-8").splitlines() == ["* -text"]
     checkout = next(index for index, args in enumerate(calls) if "checkout" in args)
     status = next(index for index, args in enumerate(calls) if "status" in args)
     assert calls.index(config) < checkout < status
+    assert calls.index(raw_bytes) < checkout
     assert calls[status][-2:] == ["--porcelain", "--untracked-files=no"]
+
+
+def test_windows_checkout_refuses_preexisting_unexpected_git_attributes(tmp_path: Path, monkeypatch) -> None:
+    source = _spec().sources[0]
+    destination = tmp_path / "source"
+    info = destination / ".git" / "info"
+    info.mkdir(parents=True)
+    (info / "attributes").write_text("*.py text eol=crlf\n", encoding="utf-8")
+
+    def run(args, **_kwargs):
+        return subprocess.CompletedProcess(args, 0, source.sha if "rev-parse" in args else "", "")
+
+    monkeypatch.setattr(installer, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(installer, "_run", run)
+    with pytest.raises(RuntimeError, match="unexpected local Git attributes"):
+        installer._clone_exact(source, destination)
 
 
 def test_exact_checkout_rejects_missing_tracked_files_even_when_checkout_returns_success(tmp_path: Path, monkeypatch) -> None:

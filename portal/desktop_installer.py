@@ -86,9 +86,21 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
         ]
     )
     if os.name == "nt":
-        # Deep Vera resource paths need Git's checkout support. This setting
-        # belongs only to this staged clone; no global/OS policy is changed.
+        # Bind source bytes to the exact Git blob, not the user's global
+        # autocrlf policy. Some upstream blobs contain mixed newlines while
+        # .gitattributes demands LF, which otherwise creates a false dirty
+        # checkout before any user or installer modification.
+        # These settings are clone-local; they do not alter tracked sources.
         _run(["git", "-C", str(destination), "config", "--local", "core.longpaths", "true"])
+        _run(["git", "-C", str(destination), "config", "--local", "core.autocrlf", "false"])
+        attributes = destination / ".git" / "info" / "attributes"
+        expected_attributes = "* -text\n"
+        attributes.parent.mkdir(parents=True, exist_ok=True)
+        if attributes.exists():
+            if attributes.read_text(encoding="utf-8") != expected_attributes:
+                raise RuntimeError("staged clone contains unexpected local Git attributes")
+        else:
+            attributes.write_text(expected_attributes, encoding="utf-8")
     _run(
         [
             "git",
