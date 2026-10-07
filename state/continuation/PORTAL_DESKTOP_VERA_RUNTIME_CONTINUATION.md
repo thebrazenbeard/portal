@@ -250,3 +250,10 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Results are durable before qualified intake; rejected intake retries the stored result without another model invocation. Accepted statuses are verified and source/request identity cannot drift.
 - Focused suite: runtime-venv Python -m pytest cognition/local_provider/runtime/route_currentness tests -> 36 passed, including real loopback transport checks (sandbox socket restriction required approved execution).
 - Exact head: commit containing this continuation. Next: resident worker checkpoint, staged installer and full qualification. Trust limit: the local model server is inside the logged-in user's host boundary; Ollama cannot atomically bind tag inspection and generation.
+
+## Resident composition checkpoint — 2026-10-07
+- Resident now composes actual QualifiedVeraRuntime, PortalCommandSession, Pre-Active Engine/Daemon/Scheduler/observers and VolitionBridge on one state-owner worker. Heartbeat/status IPC stays responsive during cognition.
+- Root-specific OS lock enforces singleton across source versions. Exact SHA/tracked cleanliness/import origin checked before composition. Startup failures BLOCKED; stalled worker DEGRADED; no route leaves autonomous source PENDING without acknowledgement.
+- Durable activity correlates real Pre-Active source_event_id, qualified acceptance and route provenance. Human responses return provider/model/reason/timestamps/acceptance. Portfolio controls execute through resident IPC.
+- Tests: runtime-venv Python -m pytest tests/integration/test_portal_desktop_resident.py tests/unit/test_portal_desktop_host_layout.py --basetemp ../test-tmp-resident-green3 -q -> 11 passed. Real Pre-Active/Volition/Vera packages used with fake cognition; restart does not replay accepted work; responsive heartbeat, mismatch rejection, source guards and stalled worker recovery tested.
+- Exact head: commit containing this continuation. Next: installer checkpoint and clean staged local-model end-to-end proof. Existing live installations untouched.
