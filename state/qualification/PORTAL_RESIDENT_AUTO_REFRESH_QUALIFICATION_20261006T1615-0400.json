@@ -1,0 +1,101 @@
+{
+  "cycle_packets": [
+    [
+      "resident-refresh-a"
+    ],
+    [
+      "resident-refresh-b"
+    ],
+    []
+  ],
+  "effects": [
+    {
+      "adapter_id": "local-command",
+      "attempt_id": "resident-auto-refresh-attempt:resident-refresh-a",
+      "dispatch_id": "be4554d9533930bd96dcb77792670f3f561da5195a569130c09978cf4e45f045",
+      "route_id": "lappy-local:portal",
+      "subject_id": "resident-refresh-a"
+    },
+    {
+      "adapter_id": "local-command",
+      "attempt_id": "resident-auto-refresh-attempt:resident-refresh-b",
+      "dispatch_id": "962fbe6ed28693b52fb74ae009256f0e13505452334b1efedc8f3e50003834a9",
+      "route_id": "lappy-local:portal",
+      "subject_id": "resident-refresh-b"
+    }
+  ],
+  "implementation_head": "306250ef758c18292d6e58da34eab268c4905f22",
+  "observed_occupancy": {
+    "lappy": 3
+  },
+  "pending": 0,
+  "refresh_count": 3,
+  "refresh_evidence_ids": [
+    [
+      "resident-probe:lappy-local"
+    ],
+    [
+      "resident-probe:lappy-local"
+    ],
+    [
+      "resident-probe:lappy-local"
+    ]
+  ],
+  "routes": [
+    {
+      "adapter_id": "local-command",
+      "attached": true,
+      "authorized_effects": [
+        "SOURCE_ONLY"
+      ],
+      "available": true,
+      "current": true,
+      "route_id": "lappy-local:portal"
+    }
+  ],
+  "schema": "PORTAL_RESIDENT_AUTO_REFRESH_QUALIFICATION_V1",
+  "status": {
+    "control_state": "RUNNING",
+    "generation": 3,
+    "holder": "vera",
+    "session_id": "resident-auto-refresh-live-qual",
+    "subjects": [
+      {
+        "adapter_id": "local-command",
+        "dispatch_evidence_id": "local-file:.portal-qualification/resident-effects-auto-refresh/resident-refresh-a.json:f08972c9d7eabcf0c0a2a82ba9472422778c9c3d5462f7fbd52dbcc8aa05de06",
+        "dispatch_state": "HOST_QUEUED",
+        "hold_requested": false,
+        "route_id": "lappy-local:portal",
+        "state": "TERMINAL",
+        "subject_id": "resident-refresh-a",
+        "subject_kind": "repository",
+        "verification_state": "VERIFIED_COMPLETE",
+        "wave_run_id": "resident-auto-refresh-live-qual::g1"
+      },
+      {
+        "adapter_id": "local-command",
+        "dispatch_evidence_id": "local-file:.portal-qualification/resident-effects-auto-refresh/resident-refresh-b.json:1f7cf9fa5448343cc28d02ddd791c6d6937cd68cb37ebb48b2644dde676f880a",
+        "dispatch_state": "HOST_QUEUED",
+        "hold_requested": false,
+        "route_id": "lappy-local:portal",
+        "state": "TERMINAL",
+        "subject_id": "resident-refresh-b",
+        "subject_kind": "repository",
+        "verification_state": "VERIFIED_COMPLETE",
+        "wave_run_id": "resident-auto-refresh-live-qual::g2"
+      }
+    ],
+    "summary": {
+      "active": 0,
+      "held": 0,
+      "terminal": 2
+    }
+  },
+  "stop_reason": "IDLE",
+  "summary": {
+    "active": 0,
+    "held": 0,
+    "terminal": 2
+  },
+  "unresolved": 0
+}

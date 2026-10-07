@@ -1,0 +1,112 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V2",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1351-0400",
+  "created_local": "2026-10-06T13:51-04:00",
+  "purpose": "Durable handoff because the originating ChatGPT conversation reached its practical context limit.",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "implementation_subject": {
+    "sha": "618a5f63211b13d390b74d522734fca9bf743bbc",
+    "message": "docs: document atomic project route advertisement",
+    "ci": {
+      "test": "SUCCESS",
+      "pytest": "672 passed in 31.06s",
+      "task_monitor_windows": "SUCCESS",
+      "dependency_review": "SUCCESS"
+    }
+  },
+  "checkpoint": {
+    "markdown_path": "state/continuation/PORTAL_CHAT_CONTINUATION_20261006T1351-0400.md",
+    "markdown_commit": "9f6182a80ca7102aa367576570dce76808b9e517",
+    "json_path": "state/continuation/PORTAL_CHAT_CONTINUATION_20261006T1351-0400.json",
+    "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1351-0400"
+  },
+  "task": "Build and populate P.O.R.T.A.L. until it works as the single-chat whole-portfolio coordinator Patrick wants.",
+  "verified_capabilities": [
+    "durable command session run/continue/hold/complete/status/stop",
+    "resident bounded reconcile/refill",
+    "verification-gated completion and capacity release",
+    "live occupied-node accounting",
+    "capability/currentness/authority route resolver",
+    "composite execution routing",
+    "durable bind-before-dispatch route evidence",
+    "adapter-owned reconciliation",
+    "OUTCOME_UNKNOWN remains active and route-pinned",
+    "external host bridge with expiring route/node/frontier currentness",
+    "atomic host take/attempt boundary",
+    "PortalHostPump bounded dispatch and reconciliation",
+    "closed-loop source-level acceptance coverage",
+    "advisory process-proposal adapter",
+    "atomic exact project-level route advertisement via host advertise-projects",
+    "host diagnostics and Project Runner task-currentness integration"
+  ],
+  "invariants": [
+    "PORTAL_OWNS_COORDINATION_STATE; EXECUTION_SUBSTRATES_OWN_EXECUTION_STATE",
+    "ACTIVE_SUBJECTS_CONSUME_BUDGET_AND_COLLISION",
+    "WORKER_SUCCESS_NE_VERIFIED_COMPLETION",
+    "BIND_ROUTE_BEFORE_ATTEMPT",
+    "NO_SILENT_ROUTE_SUBSTITUTION_AFTER_ATTEMPT",
+    "OUTCOME_UNKNOWN_REMAINS_ACTIVE_AND_ROUTE_PINNED",
+    "AVAILABILITY_NE_ATTACHMENT_NE_CURRENTNESS_NE_CAPABILITY_NE_AUTHORITY",
+    "DECLARED_CAPACITY_NE_LIVE_FREE_CAPACITY",
+    "HOLD_NE_CANCELLATION",
+    "STOP_PRESERVES_ACTIVE_AND_UNRESOLVED_WORK",
+    "SOURCE_PASS_NE_INSTALL_ROUTE_RUNTIME_EFFECT"
+  ],
+  "major_files": [
+    "PORTAL.md",
+    "portal/session.py",
+    "portal/route_resolver.py",
+    "portal/execution_router.py",
+    "portal/host_bridge.py",
+    "portal/host_pump.py",
+    "portal/host_command_driver.py",
+    "portal/host_driver_registry.py",
+    "portal/frontier_currentness.py",
+    "portal/task_currentness.py",
+    "portal/live_portfolio.py",
+    "portal/process_adapter.py",
+    "portal/diagnostics.py",
+    "docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md"
+  ],
+  "next_frontier": [
+    "Fresh-read Draft PR #1 head and exact-head CI before mutation.",
+    "Inspect outstanding mutation ownership/delegation; unexpected head movement requires reread/reconcile and no force.",
+    "Read PORTAL.md and the host bridge runbook at the current head.",
+    "Refresh execution routes actually available in the new ChatGPT runtime.",
+    "Advertise exact target routes for a bounded safe test portfolio.",
+    "Register only concrete host drivers the current host can actually drive.",
+    "Run one non-protected end-to-end closed-loop qualification from currentness/admission through verified effect and refill/idle.",
+    "Exercise fresh-process/chat recovery of an OUTCOME_UNKNOWN route-pinned attempted effect.",
+    "If bounded qualification is green, widen portfolio lanes while preserving collision/occupancy/authority ceilings.",
+    "Persist a new checkpoint before another chat/runtime boundary."
+  ],
+  "authority": {
+    "allowed": [
+      "working-branch source changes",
+      "working-branch tests",
+      "working-branch documentation",
+      "bounded non-protected qualification"
+    ],
+    "prohibited_without_new_exact_authority": [
+      "merge PR #1",
+      "direct main mutation",
+      "deployment",
+      "native Project install",
+      "production-provider mutation",
+      "credential or permission changes",
+      "paid spend",
+      "destructive cleanup",
+      "protected-effect promotion",
+      "canonical-memory writes",
+      "private publication"
+    ]
+  },
+  "historical_note": "Earlier live Project Runner observations in the originating chat showed many stale/orphaned registrations and only a small number of genuinely running tasks. This is historical evidence only; refresh live task/currentness state before any present claim.",
+  "restore_rule": "Treat this checkpoint as evidence, refresh mutable Git/CI/route/task state, then resume the highest-value non-colliding runnable frontier. Do not stop at a status recap."
+}

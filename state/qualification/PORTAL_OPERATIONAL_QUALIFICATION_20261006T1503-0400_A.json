@@ -1,0 +1,16 @@
+{
+  "schema": "PORTAL_OPERATIONAL_QUALIFICATION_EFFECT_V1",
+  "qualification_id": "PORTAL_OPERATIONAL_QUALIFICATION_20261006T1503-0400",
+  "subject_id": "portal-qual-a",
+  "dispatch_id": "ca4d208fedb2beadc52da32e0698d3f4793342d7b5e510aead07580931a90981",
+  "attempt_id": "portal-live-qual-a-attempt-1",
+  "adapter_id": "github",
+  "route_id": "repo-native:thebrazenbeard/portal",
+  "target": "thebrazenbeard/portal",
+  "ref": "work/portal-coordinator-v1",
+  "bound_exact_head": "ceed3b638bc7bedbd3c3200fb255ecda565b1f9d",
+  "effect_class": "SOURCE_ONLY",
+  "authority": "USER_AUTHORIZED_WORKING_BRANCH_QUALIFICATION",
+  "purpose": "Bound non-protected effect marker for P.O.R.T.A.L. closed-loop operational qualification.",
+  "claim_ceiling": "EFFECT_ATTEMPT_MARKER_ONLY; REQUIRES_OWNING_SUBSTRATE_READBACK_AND_RECONCILIATION"
+}

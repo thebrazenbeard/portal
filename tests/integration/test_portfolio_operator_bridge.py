@@ -13,6 +13,8 @@ from runner.portfolio_operator_bridge import (
     claim_bound_plan_subject,
     verify_bound_plan_subject,
 )
+from runner.portfolio_plan_binding import build_bound_wave_plan_payload
+from runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -466,3 +468,154 @@ def test_replay_after_live_head_moves_fails_closed(tmp_path):
 
     with pytest.raises(ValueError, match="exact work state is not durable"):
         claim_bound_plan_subject(**common)
+
+
+
+def _write_no_effect_currentness_plan(tmp_path: Path):
+    wave_payload = json.loads(WAVE.read_text(encoding="utf-8"))
+    matches = 0
+    for item in wave_payload["items"]:
+        if (
+            item.get("subject_kind") == "repository"
+            and item.get("subject_id") == "project-runner"
+        ):
+            matches += 1
+            item["action"] = "CURRENTNESS_AUDIT"
+            item["execution_state"] = "QUEUED"
+            item["effect_ceiling"] = "NO_EFFECT"
+            item["review_gate"] = "CURRENTNESS_ONLY"
+        else:
+            item["execution_state"] = "HELD"
+    assert matches == 1
+    wave_payload["generated_at"] = "2026-10-06T09:40:00-04:00"
+
+    wave_path = tmp_path / "wave-no-effect.json"
+    wave_path.write_text(
+        json.dumps(wave_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    plan_payload = build_bound_wave_plan_payload(
+        wave_path,
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+            max_per_lane=1,
+        ),
+    )
+    assert [item["subject_id"] for item in plan_payload["selected"]] == [
+        "project-runner"
+    ]
+    plan_path = tmp_path / "plan-no-effect.json"
+    plan_path.write_text(
+        json.dumps(plan_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    return wave_path, plan_path
+
+
+def test_no_effect_currentness_subject_can_acquire_claim_without_execution_authority(
+    tmp_path,
+):
+    wave_path, plan_path = _write_no_effect_currentness_plan(tmp_path)
+    corpus = load_portfolio_corpus(CORPUS, public_safe=True)
+    record = next(item for item in corpus.records if item.id == "project-runner")
+    transport = FakeReadOnlyTransport(
+        {(record.repository, record.default_branch): "a" * 40}
+    )
+
+    verified = verify_bound_plan_subject(
+        plan_path=plan_path,
+        wave_path=wave_path,
+        corpus_path=CORPUS,
+        projects_path=PROJECTS,
+        subject_id="project-runner",
+    )
+    assert verified.item.effect_ceiling == "NO_EFFECT"
+    assert verified.item.action == "CURRENTNESS_AUDIT"
+
+    claim = claim_bound_plan_subject(
+        plan_path=plan_path,
+        wave_path=wave_path,
+        corpus_path=CORPUS,
+        projects_path=PROJECTS,
+        subject_id="project-runner",
+        state_db=tmp_path / "operator.sqlite3",
+        holder="currentness-audit",
+        lease_ttl=60.0,
+        allowed_repositories=(record.repository,),
+        transport=transport,
+        clock=lambda: 1000.0,
+    )
+
+    assert claim.repository == record.repository
+    assert claim.exact_head == "a" * 40
+    assert transport.reads == [(record.repository, record.default_branch)]
+    assert transport.mutations == []
+
+def _write_local_sha_bound_plan(tmp_path: Path):
+    corpus_path = tmp_path / "corpus.live.public.json"
+    corpus_path.write_bytes(CORPUS.read_bytes())
+    corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+
+    wave_payload = json.loads(WAVE.read_text(encoding="utf-8"))
+    wave_payload["generated_at"] = "2026-10-06T00:00:00Z"
+    wave_payload["corpus_binding"] = {
+        "binding_kind": "LOCAL_SHA256",
+        "sha256": corpus.sha256,
+        "public_repository_count": corpus.counts.public,
+        "total_repository_count": corpus.counts.total,
+        "private_repository_count": corpus.counts.private,
+        "public_workstream_count": corpus.workstream_counts.public,
+        "total_workstream_count": corpus.workstream_counts.total,
+        "private_workstream_count": corpus.workstream_counts.private,
+    }
+    wave_path = tmp_path / "advancement_wave.live.public.json"
+    wave_path.write_text(
+        json.dumps(wave_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    payload = build_bound_wave_plan_payload(
+        wave_path,
+        budget=WaveExecutionBudget(
+            max_parallel=50,
+            max_per_identity=50,
+            max_per_family=50,
+            max_per_lane=50,
+        ),
+    )
+    plan_path = tmp_path / "plan.local.json"
+    plan_path.write_text(
+        json.dumps(payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    return plan_path, wave_path, corpus_path
+
+
+def test_local_sha256_corpus_binding_verifies_generated_live_corpus(tmp_path):
+    plan_path, wave_path, corpus_path = _write_local_sha_bound_plan(tmp_path)
+
+    verified = verify_bound_plan_subject(
+        plan_path=plan_path,
+        wave_path=wave_path,
+        corpus_path=corpus_path,
+        projects_path=PROJECTS,
+        subject_id="project-runner",
+    )
+
+    assert verified.record.id == "project-runner"
+
+
+def test_local_sha256_corpus_binding_rejects_changed_corpus_bytes(tmp_path):
+    plan_path, wave_path, corpus_path = _write_local_sha_bound_plan(tmp_path)
+    corpus_path.write_bytes(corpus_path.read_bytes() + b"\n")
+
+    with pytest.raises(ValueError, match="local corpus sha256"):
+        verify_bound_plan_subject(
+            plan_path=plan_path,
+            wave_path=wave_path,
+            corpus_path=corpus_path,
+            projects_path=PROJECTS,
+            subject_id="project-runner",
+        )

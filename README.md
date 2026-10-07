@@ -1,309 +1,142 @@
 > **License:** Source-visible, not open source. Original material is proprietary. Commercial use, redistribution, hosted-service use, and commercial derivative products require written permission. See [LICENSE](LICENSE) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md). Separately identified third-party components retain their own licenses.
 
-# Project Runner
+# P.O.R.T.A.L.
 
-Public-safe orchestration kernel for Patrick's multi-repository project ecosystem.
+**Portfolio Orchestration & Repository Tracking Access Layer**
 
-> Redundant? No. It's just an extra redundancy.
+P.O.R.T.A.L. exists so a **single P.O.R.T.A.L. chat** can coordinate and advance the **whole portfolio** in maximal safe parallelism.
 
-Project Runner answers: what exists, what changed, what depends on the change, what work is justified and authorized, what can execute now, and what evidence demonstrates completion.
+The intended operating model is not one chat manually working repositories in sequence. Vera acts as the cross-project coordinator; P.O.R.T.A.L. discovers and schedules executable frontiers across all active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane is refilled with the next eligible frontier.
 
-## Current state: M6 bounded execution fabric
+See [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
 
-M1 established typed project/worker registries. M2 added exact observations, dependency/currentness logic, and invalidation propagation. M3 added frontier generation, semantic deduplication, collision grouping, and deterministic priority. M4 added bounded recursive work units, budgets, fenced leases, mock dispatch, and exact-subject completion checks.
+## Architecture
 
-M5 adds the first real GitHub execution route:
+- `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
+- `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
+- Vera owns cross-project coordination and collision/ownership arbitration.
+- Durable state lives outside chat context so a fresh P.O.R.T.A.L. chat can reconstruct and resume the portfolio.
+- Node placement and schedulability do not create protected-effect authority.
 
-- JSON-bound operation payloads are part of semantic work identity;
-- GitHub REST transport supports exact ref reads, branch creation, and UTF-8 file writes;
-- technical backend capability and target repository authority are independent gates;
-- target grants constrain repository, operation, ref, and path scope;
-- mutations require exact expected-head/blob preconditions;
-- successful writes require post-write ref/file readback;
-- SQLite-backed lineage budgets persist across process/workflow boundaries with generation CAS;
-- SQLite-backed leases persist claim/reclaim/completion state and monotonic fencing tokens;
-- recursive work identity, parent linkage, exact ancestry, budget scope, lifecycle status, and generation survive restart in a digest-verified SQLite record;
-- recursive child admission is one SQLite transaction: parent-budget CAS, child-budget creation, and child-work/ancestry persistence either all commit or all roll back;
-- ordinary child budget/work initialization is rejected so callers cannot bypass the atomic admission path;
-- each durable work record integrity-binds its effective capability ceiling; child admission derives the parent ceiling from durable state, so a restarted caller cannot widen inherited capabilities;
-- pre-ceiling legacy recursive records are accepted only after their legacy integrity digest verifies, then migrate conservatively to their recorded required-capability set;
-- durable dispatch admission commits budget reservation, lease claim/fencing token, and WorkUnit `CLAIMED` state in one SQLite transaction **before** backend execution;
-- a crash after durable dispatch admission cannot restore the reserved active/backend-job quota or forget the owning lease/work state;
-- retry/unknown redispatch consumes retry quota while reclaiming with a higher fence;
-- the atomic boundary reconstructs the durable parent and re-runs decomposition/capability narrowing rather than trusting a caller-supplied `ChildAdmission`;
-- lease-bound nonterminal work states (`CLAIMED`, `RUNNING`, `VERIFYING`, `FAILED_RETRYABLE`, `OUTCOME_UNKNOWN`) require the exact current holder/fencing token and an unexpired lease at transition time;
-- retryable/unknown outcomes therefore cannot be asserted by a non-owner; after expiry, a reclaimed higher fence may resume them through the allowed lifecycle;
-- durable lifecycle follows an explicit forward state machine; ownership never authorizes forward skips or backward active transitions;
-- terminal finalization is atomic: verification proposes the terminal outcome without mutating the lease, then one SQLite transaction finalizes the exact lease fence and WorkUnit terminal status together;
-- direct terminal status CAS is rejected, eliminating the crash window that could strand `VERIFYING` beside a separately completed lease;
-- durable work status cannot roll terminal states back or reset active work to `PENDING`;
-- stale generations/fences fail closed across both the lease table and the durable WorkUnit lifecycle;
-- CI exercises the actual GitHub backend against the workflow repository in read-only mode;
-- M4 post-work currentness and independent completion-evidence rules remain in force.
+P.O.R.T.A.L. was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
 
-The live CI route still has only `contents: read`; it proves exact-head GitHub connectivity and the read-only HC Brain → Transcendence M6 path without manufacturing downstream mutation authority.
+## Current implementation state
+
+The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
+
+The preferred human-facing source surface is now the durable command session. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+
+This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
+
+## Internal-first donor policy
+
+Before implementing new orchestration machinery, Portal mines Patrick-owned repositories for existing qualified mechanisms. External projects are secondary research inputs.
+
+See [Loop Donor Mining V1](docs/research/PORTAL_LOOP_DONOR_MINING_V1.md).
+
+Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB Base, Intranel, VeraMesh, WorkBridge Commander, WorkBridgeMCP, Vera Mono, Discovery, DriftGuard, Ingest, and Temporal.
 
 ## Quick start
 
     python -m pip install -e '.[dev]'
     project-runner validate
-    project-runner inventory
-    project-runner dispatch-report --before tests/fixtures/observations-before.yaml --after tests/fixtures/observations-after.yaml --dependencies tests/fixtures/m3-dependencies.yaml
-    project-runner github-read-smoke --repository thebrazenbeard/project-runner --ref main
     python -m pytest -q
 
-## Governed read/write execution
-
-Project Runner has both read-only inspection routes and a narrowly scoped GitHub
-source-write backend. After a portfolio claim is durably promoted to `RUNNING`
-with an exact signed execution request, separate review, protected-effect
-authority, and a current fencing token, the operator can invoke:
+Create a node manifest:
 
-    project-runner github-source-write-execute \
-      --state-db .project-runner/project-runner.sqlite3 \
-      --lineage-id <lineage-id> \
-      --work-fingerprint <fingerprint> \
-      --fencing-token <token>
+    schema: PORTAL_EXECUTION_NODES_V1
+    nodes:
+      - id: lappy
+        max_parallel: 2
+        allowed_lanes: []
+        enabled: true
+      - id: worklaptop
+        max_parallel: 2
+        allowed_lanes: []
+        enabled: true
 
-This command requires `PROJECT_RUNNER_GITHUB_TOKEN` in the environment. It
-recovers the exact existing promotion from durable storage: callers cannot
-supply fresh repository, ref, path, or content arguments. Runtime execution
-rechecks lease, review and authority expiry, live source head, expected blob,
-non-force ref CAS, and post-publication readback. An uncertain outcome is
-recorded as `OUTCOME_UNKNOWN` and must be reconciled, never blindly replayed.
-The current adapter supports only `PUT_FILE` on an exact authorized branch;
-it does not merge PRs, deploy, or grant itself new permissions.
+Run a durable portfolio command session (the occupied-node values are a current snapshot, not permanent configuration):
 
-## Real operator path
+    portal run \
+      --session-id portfolio \
+      --nodes tests/fixtures/portal-nodes-valid.yaml \
+      --max-parallel 8 \
+      --occupied-node lappy=54 \
+      --occupied-node worklaptop=0
 
-The ordinary CLI now has one deliberately narrow real execution route: a durable, read-only M6 GitHub inspection. It derives one READY INSPECT frontier, persists budget/work/lease/journal state before and during execution, performs exact-ref reads under explicit grants, independently rechecks currentness, and atomically finalizes terminal evidence.
+That form performs durable admission/reconciliation/refill but does not invent an execution route. To enable the built-in advisory process-proposal adapter, supply an explicit worker-backend manifest:
 
-    export PROJECT_RUNNER_GITHUB_TOKEN=<token-with-required-read-access>
-    project-runner run-inspection \
-      --before <previous-observations.yaml> \
-      --after <current-observations.yaml> \
-      --dependencies <dependencies.yaml> \
-      --project <consumer-project-id> \
-      --target-repository <owner/repository> \
-      --target-ref <branch> \
-      --target-head <exact-40-hex-head> \
-      --state-db .project-runner/project-runner.sqlite3
+    portal run \
+      --session-id portfolio \
+      --nodes path/to/nodes.yaml \
+      --worker-backends path/to/worker-backends.yaml \
+      --workspace-root .portal/workers
 
-Interrupted or unresolved durable attempts are visible without backend re-execution:
+The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
 
-    project-runner operator-status --state-db .project-runner/project-runner.sqlite3
+For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
 
-This first operator route is intentionally read-only. A GitHub token's technical permissions do not manufacture write, merge, or deploy authority. The SQLite file is durable only on the filesystem that retains it; an ephemeral CI runner does not become a persistent orchestrator merely because SQLite was involved.
+Seed one identical host capability across every exact repository target in a project registry without inventing wildcard authority:
 
-See docs/OPERATOR_EXECUTION_V1.md.
+    portal host advertise-projects \
+      --projects registry/projects.yaml \
+      --adapter-id github \
+      --route-prefix repo-native \
+      --node-id repo-native \
+      --capability semantic_work \
+      --effect-capability SOURCE_ONLY \
+      --authorized-effect NO_PROTECTED_EFFECT \
+      --ttl-seconds 300
 
-## Local background-task monitor (Windows / Lappy)
+The batch is atomic and still stores one exact target-bound route per repository. The operator must explicitly provide technical effect capability and authorized effect; bulk advertisement never upgrades authority. Use a stronger `--authorized-effect` only when that exact host/target scope is separately authorized.
 
-Project Runner keeps an explicit local registry for background processes it owns and
-also discovers several live ChatGPT execution trees (Executor, Codex bridge workers,
-and named VERA workers) without pretending that every generic Python/PowerShell
-process belongs to ChatGPT.
+Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The pump consumes only already-bound work, persists the attempt before calling the driver, leaves ambiguous driver failures unresolved, tolerates competing-host attempt races without replay, and propagates process-control exceptions. Source-level integration coverage closes the full loop: admit -> queue -> durable attempt -> owning-driver verification -> free capacity -> refill -> verified idle.
 
-Launch a tracked background task from **any working directory** with:
+See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host take`, `host pending`, `host unresolved`, reconciliation, and refill.
 
-    project-runner task-start `
-      --name "model-training-lane-b" `
-      --repository "thebrazenbeard/vera_model_training" `
-      --lane "lane-b" `
-      --working-directory "C:\path\to\vera_model_training" `
-      --command "python train.py"
+For a one-read operational diagnosis of a durable session, include host details:
 
-The CLI and all task-status/history/reconcile commands share the same default task
-root: `PROJECT_RUNNER_TASKS_ROOT` when set, otherwise
-`%LOCALAPPDATA%\ProjectRunner\tasks` on Windows. They therefore do not depend on
-the shell's current directory.
+    portal status \
+      --state-db .portal/portal.sqlite3 \
+      --session-id portfolio \
+      --host-details
 
-`task-start` uses `cmd.exe` by default for bounded noninteractive execution.
-Use `--shell powershell` only when the task command requires PowerShell syntax.
-The checkout-local `scripts\Start-ProjectRunnerTask.ps1` compatibility launcher
-retains its historical PowerShell command semantics.
+The host diagnostics are also available through the public `build_host_diagnostics(...)` library API for ChatGPT/web or embedded hosts. The read model separates queued work whose bound route is currently qualified, queued work that needs route refresh, and attempted effects that require reconciliation; it does not attempt, cancel, replay, or free work.
 
-Tracked launches run through the Python `runner.task_supervisor` module. The
-supervisor registers itself as the live task root, launches the requested command,
-waits for it to terminate, captures the real process return code, and writes a terminal receipt.
-Exit code `0` becomes `COMPLETED`; a nonzero exit code becomes `FAILED`.
-Terminal tasks are atomically moved from `active\` to `history\` instead of
-remaining in the live monitor as dead PIDs.
+`portal run --session-id ...` performs bounded reconcile/refill generations by default. Add `--once` for one generation. The other top-level control commands are `continue`, `hold`, `complete`, `status`, and `stop`. `portal continue` accepts the same execution-adapter and occupancy-currentness configuration needed by the selected route.
 
-By default Windows state is stored under
-`%LOCALAPPDATA%\ProjectRunner\tasks`; set `PROJECT_RUNNER_TASKS_ROOT` or pass
-`--tasks-root` to a Project Runner task command to select another local state
-directory.
+Plan a bounded portfolio wave:
 
-Open the live dashboard with:
+    portal plan \
+      --wave portfolio/advancement_wave.public.json \
+      --nodes tests/fixtures/portal-nodes-valid.yaml \
+      --max-parallel 4 \
+      --max-per-lane 2 \
+      --max-per-identity 2 \
+      --max-per-family 2
 
-    powershell -NoProfile -File .\scripts\Watch-ProjectRunnerTasks.ps1
+The `plan` command remains the read-only planning surface. Command sessions own operator intent/refill state; `wave` and `ecosystem` remain lower-level governed execution/proposal workflows.
 
-Use `-Once` for one snapshot, `-IncludeCommand` to display command metadata,
-and `-History` to display terminal task history below the live set. The live
-dashboard reports registered Project Runner tasks plus discovered ChatGPT process
-trees and labels their attribution strength (`EXACT`, `STRONG`, or
-`HEURISTIC`).
-
-An `ORPHANED` record is now exceptional: the registered supervisor disappeared
-before an authoritative terminal receipt was written. Reconcile such stale records
-without inventing an exit code with:
-
-    project-runner task-reconcile --tasks-root "$env:LOCALAPPDATA\ProjectRunner\tasks"
-
-Reconciliation moves dead unresolved records to history as `UNKNOWN_EXIT` with
-`PROCESS_GONE_WITHOUT_FINAL_RECEIPT`. Historical state is available as JSON with:
-
-    project-runner task-history --tasks-root "$env:LOCALAPPDATA\ProjectRunner\tasks"
-
-The monitor remains observability-only: it has no stop/kill action.
-
-## Multi-lane scheduling
-
-Project Runner can bound independent progress streams without creating separate authority domains. Advancement items may declare an optional `lane`; otherwise their lead identity is the effective lane. The wave planner keeps collision keys global and can enforce global, per-lane, per-identity, and per-family capacity at the same time.
-
-```bash
-project-runner portfolio-wave-plan \
-  --max-parallel 6 \
-  --max-per-lane 2 \
-  --max-per-identity 2 \
-  --max-per-family 2
-```
-
-Lane placement is scheduling metadata, not durable work identity or permission. The plan digest binds the lane assignment, while the operator bridge continues to bind the underlying work subject independently.
-
-Local supervised tasks can also be inspected per lane:
-
-```powershell
-project-runner task-status --lane lane-b
-project-runner task-history --lane lane-b
-```
-
-The task monitor binds a recorded Windows supervisor PID to its process creation time when available, preventing PID reuse from masquerading as the original task. See `docs/MULTI_LANE_TASK_HANDLING_V1.md`.
-
-## Durable portfolio currentness
-
-Project Runner can now collect registered dependency refs itself and persist the resulting scheduler state:
-
-    export PROJECT_RUNNER_GITHUB_TOKEN=<token-with-required-read-access>
-    project-runner portfolio-cycle \
-      --dependencies topology/dependencies.yaml \
-      --state-db .project-runner/project-runner.sqlite3
-
-The first cycle for a dependency-topology digest establishes an observation baseline and schedules nothing. Project- or worker-registry changes on the same topology preserve observation continuity: unresolved exact-subject work is recovered from durable history, re-evaluated under current capabilities/scheduling/target/worker-route authority, and carried forward when still relevant. Later cycles atomically persist the new snapshot plus READY/BLOCKED scheduler decisions.
-
-    project-runner portfolio-status \
-      --state-db .project-runner/project-runner.sqlite3
-
-Collection is read-only. Dependency selectors manufacture neither provider scope nor write authority: provider/consumer IDs must exist in the current project registry, selector repositories must belong to the declared provider, refs must be exact, and READ_REF grants are derived only after those checks. If any required read fails, the durable snapshot does not advance.
-
-The durable queue now has a bounded read-only consumer. Projects declare exact `execution_targets` by work type; without one, otherwise-runnable work becomes `WAITING_AUTHORITY`.
-
-    project-runner consume-queue \
-      --dependencies topology/dependencies.yaml \
-      --state-db .project-runner/project-runner.sqlite3
-
-Queue claims use monotonic fencing and collision-domain exclusion. Unchanged observation cycles do not erase pending queue work; compatible historical rows remain claimable only while their full exact provider subject is still current. The consumer binds the declared target ref to an exact current commit and persists that binding. INSPECT may use the built-in durable GitHub read operator. Other supported read-only work types require an explicitly bound worker whose exact route is VERIFIED and whose route contract is READ_ONLY. Reclaimed INSPECT claims reconcile existing terminal operator state without re-execution; nonterminal durable operator state becomes `OUTCOME_UNKNOWN` rather than being blindly retried.
-
-    project-runner queue-status \
-      --state-db .project-runner/project-runner.sqlite3
-
-Read-only worker handoffs are persisted in a digest-bound outbox and can be summarized without invoking a worker:
-
-    project-runner worker-route-status \
-      --state-db .project-runner/project-runner.sqlite3
-
-A qualified worker route uses a fenced pull/receipt protocol. Delivery rechecks the current worker/route qualification and the provider exact subject; superseded provider work is retired before a worker can pull it. The packet is written to a `0600` owner-only file on POSIX, or to a file with explicit owner-only NTFS permissions on Windows, rather than echoed to ordinary logs. On Windows, inherited access is removed from a fresh temporary file before its private contents are written. With an external/private project registry, the packet must be written outside the public checkout:
-
-    project-runner claim-worker-route \
-      --worker-id <worker-id> \
-      --route <verified-route> \
-      --holder <claimant-id> \
-      --payload-out /secure/path/packet.json \
-      --state-db .project-runner/project-runner.sqlite3
-
-A built-in reference endpoint exercises the same delivery protocol with real GitHub READ_REF currentness checks:
-
-    PROJECT_RUNNER_GITHUB_TOKEN=<read-token> \
-    project-runner run-reference-worker \
-      --holder project-runner-reference-read-worker \
-      --state-db .project-runner/project-runner.sqlite3
-
-The reference worker is read-only and emits only route/receipt summary metadata.
-
-    project-runner record-worker-receipt \
-      --route-id <route-id> \
-      --worker-id <worker-id> \
-      --route <verified-route> \
-      --holder <same-claimant-id> \
-      --expected-fencing-token <delivery-fence> \
-      --receipt-class SUCCEEDED \
-      --receipt-sha256 <sha256> \
-      --state-db .project-runner/project-runner.sqlite3
-
-SAFE routes may reclaim expired delivery claims. RECONCILE_REQUIRED routes freeze expired claims into ambiguity until explicit reconciliation; NEVER routes are not replay-releasable.
-
-Ambiguous or routed queue items retain their collision reservation until explicit evidence-bound reconciliation:
-
-    project-runner reconcile-queue \
-      --snapshot-id <id> \
-      --frontier-fingerprint <sha256> \
-      --expected-fencing-token <token> \
-      --resolution CONFIRM_COMPLETE \
-      --evidence-sha256 <sha256> \
-      --reconciler <identity> \
-      --state-db .project-runner/project-runner.sqlite3
-
-A read-only retry release advances the durable attempt generation and uses a new deterministic lineage. SAFE routes permit automatic expired-claim replay and explicit retry release; RECONCILE_REQUIRED permits retry only through explicit reconciliation; NEVER does not permit retry release. Routed `CONFIRM_COMPLETE` also re-reads both the provider ref and bound consumer target ref live—worker success alone is not completion.
-
-The committed public registry binds Project Runner's built-in `INSPECT` target and a `REREVIEW` target to the Project Runner reference read worker. The 12 Custom GPT records remain REGISTERED with UNVERIFIED routes and are not silently activated. The reference worker is separate: a GITHUB_ACTION worker with a VERIFIED `RUNNER_ACTION_PULL` READ_ONLY/SAFE route that is live-proven in CI. Other work remains blocked until its target and qualified route are explicitly declared; Project Runner does not infer `main`, choose the first repository, or manufacture routing authority.
-
-## Private portfolio registry
-
-The committed `registry/projects.yaml` is a public-safe seed. It may name repositories that were already part of Project Runner's historical public baseline, but it must not expand the public repository with additional private project identifiers merely because those projects are relevant to orchestration.
-
-For a complete private portfolio, supply a **complete replacement registry** from outside this checkout and pin the exact expected bytes:
-
-    PROJECT_RUNNER_PROJECT_REGISTRY=/absolute/private/path/projects.yaml \
-    PROJECT_RUNNER_PROJECT_REGISTRY_SHA256=<lowercase-sha256> \
-    PROJECT_RUNNER_PRIVATE_COLLISION_KEY=<private-64-hex-key> \
-    project-runner inventory
-
-The override must be an absolute path and its exact SHA-256 must match before the registry is accepted. Project Runner does not merge a hidden/private layer into the committed seed.
-
-Private frontier derivation requires `PROJECT_RUNNER_PRIVATE_COLLISION_KEY`, a separate stable 256-bit runtime key used only to derive opaque collision domains. The registry digest is a currentness binding, not secret key material. Keep the collision key outside public Git, logs, receipts, and workflow artifacts. Reuse the same key across restarts that must preserve private semantic/collision identity; deliberate key rotation creates a new private collision namespace.
-
-Every external project record must explicitly declare assignment scope, review scope, family, and `scheduling_state`. `HELD` projects contribute no runnable capabilities even if capabilities are listed in the record; only `SCHEDULABLE` records may contribute to ready frontier derivation.
-
-Detailed `evaluate-change`, `frontier-report`, and `dispatch-report` CLI output is disabled while an external registry is selected, preventing private project IDs, repository subjects, dependency IDs, or collision keys from being emitted into ordinary logs. Inventory/validation remain count-only.
-
-`frontier-summary` is the private-safe visibility surface: it emits only total, READY, non-READY, and per-status counts. It never emits project IDs, subjects, dependency IDs, collision keys, reasons, or input paths, and external-input failures collapse to a generic structural-error message.
-
-## Authority model
-
-Backend capability answers "can this route technically perform an operation?"
-
-Target authority answers "is this operation authorized for this exact repository/ref/path?"
-
-Both must pass. Connector/token permissions do not manufacture governance authority.
-
-Core invariants:
+## Core invariants
 
 - observation is not authority;
 - coordination is not authorization;
 - exact evidence outranks convenience pointers;
-- blocked work remains visible without stalling unrelated work;
-- semantic work identity ignores incidental IDs/order but includes material payload;
-- child capability and budget only narrow;
-- persistent budgets cannot silently reset between workflows;
-- semantic claims use atomic leases and monotonic fences;
-- stale workers cannot complete reclaimed work;
-- mutations use expected-state checks and exact readback;
-- backend success is not completion until currentness and completion evidence are independently verified;
-- public repository state remains public-safe.
+- one colliding semantic mutation subject has one mutation owner;
+- blocked work does not stall unrelated executable work;
+- node/tool availability does not manufacture authority;
+- stale or ambiguous effects fail closed;
+- worker success is not completion until required currentness/effect evidence verifies it;
+- fresh-chat recovery comes from durable evidence, not assumed conversational continuity.
 
-See `docs/superpowers/plans/2026-09-17-m5-github-backend.md`.
+## Repository provenance
 
-## Worker recovery
+This repository was bootstrapped from:
 
-Project Runner and its dispatched workers do not require permanent ChatGPT conversations. Fresh runtimes reconstruct from durable repository/Bus/currentness/authority evidence; chat URLs and Custom GPT share links are locators or provenance only. See `docs/PROJECT_RUNNER_WORKER_RECONSTRUCTION_V1.md`.
+- source repository: `thebrazenbeard/project-runner`
+- source commit: `04702abbf51aa2920b7d054275619253ea6fa748`
+- source tree: `f3f228258bc2de73724c598721bd5aa5beedab95`
+
+The machine-readable binding is in [`.portal-bootstrap.json`](.portal-bootstrap.json).
+
+Project Runner's inherited operator documentation remains in [`PROJECT_RUNNER.md`](PROJECT_RUNNER.md). P.O.R.T.A.L.'s coordination contract is in [`PORTAL.md`](PORTAL.md).

@@ -1,0 +1,63 @@
+{
+  "schema": "PORTAL_RESIDENT_REFILL_QUALIFICATION_V1",
+  "qualification_id": "PORTAL_RESIDENT_REFILL_QUALIFICATION_20261006T1511-0400",
+  "persistence_dispatch": {
+    "subject_id": "portal-qual-c",
+    "dispatch_id": "666513f24868dceb9a9cd18e8444ed1bbba87c30b7d8929d6ea159552e2f04dd",
+    "attempt_id": "portal-live-qual-c-attempt-1",
+    "adapter_id": "github",
+    "route_id": "repo-native:thebrazenbeard/portal",
+    "bound_exact_head": "11f49ce14b0a14d6359e219e4c1ba6b630276949"
+  },
+  "resident_runtime": {
+    "session_id": "resident-live-qual",
+    "node_id": "lappy",
+    "max_parallel": 4,
+    "observed_occupied_slots": 3,
+    "free_slots": 1,
+    "adapter_id": "local-command",
+    "route_id": "lappy-local:portal",
+    "driver": "PortalCommandHostDriver",
+    "host_loop": "PortalHostPump + PortalCommandSession.run_until_idle",
+    "cycles": [
+      [
+        "resident-a"
+      ],
+      [
+        "resident-b"
+      ],
+      []
+    ],
+    "stop_reason": "IDLE",
+    "final_summary": {
+      "active": 0,
+      "held": 0,
+      "terminal": 2
+    },
+    "pending": 0,
+    "unresolved": 0,
+    "effects": [
+      {
+        "subject_id": "resident-a",
+        "attempt_id": "resident-attempt:resident-a",
+        "dispatch_id": "23c6cdaa9ef2e899265fbf16d4419c23fbf81201fa756cce65a60cff4444330e",
+        "evidence_sha256": "f63048f39ca975ee503b4c5df5639e14a5291b0b8aaa5939496a3c5918cca83c",
+        "verification": "LOCAL_FILESYSTEM_WRITE_AND_READBACK"
+      },
+      {
+        "subject_id": "resident-b",
+        "attempt_id": "resident-attempt:resident-b",
+        "dispatch_id": "77d0186a2c665a7f963eaaa4e0778e3545c1dd6832267dfbf86e3e7162c1ecae",
+        "evidence_sha256": "1ce7ea84d939063a11b57f2bf706f9efed586bd683c871f91d7565a6cf39a23a",
+        "verification": "LOCAL_FILESYSTEM_WRITE_AND_READBACK"
+      }
+    ]
+  },
+  "conclusion": {
+    "automatic_refill_observed": true,
+    "capacity_release_after_verified_completion_observed": true,
+    "verified_idle_observed": true,
+    "declared_capacity_not_used_as_free_capacity": true
+  },
+  "claim_ceiling": "BOUNDED_LOCAL_RUNTIME_QUALIFICATION; NOT_INSTALLATION; NOT_RESIDENT_SERVICE_DEPLOYMENT; NOT_CONTINUOUS_BETWEEN_TURNS; NOT_PROTECTED_EFFECT_AUTHORITY"
+}

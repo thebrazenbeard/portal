@@ -1,0 +1,36 @@
+﻿{
+    "schema":  "PORTAL_DISCOVERY_CODEX_QUALIFICATION_V1",
+    "observed_at":  "2026-10-06T21:48:27.9980132Z",
+    "implementation_head":  "d42ec64a9b6045930f64b4789b7ece7e2703553e",
+    "full_regression":  {
+                            "passed":  698,
+                            "failed":  0,
+                            "warnings":  1,
+                            "warning":  "pytest-asyncio deprecation warning"
+                        },
+    "live_inventory":  {
+                           "repositories":  84,
+                           "public":  65,
+                           "private":  19,
+                           "archived":  5,
+                           "discovered":  33,
+                           "nonarchived_discovered_source_only":  30,
+                           "archived_discovered_held":  3,
+                           "curated_nonarchived_preserved":  49
+                       },
+    "backend":  {
+                    "kind":  "CODEX_GH_PROPOSAL_V1",
+                    "worker_exists":  true,
+                    "codex_cli_parse":  true,
+                    "github_authenticated":  true
+                },
+    "privacy":  {
+                    "public_artifacts_exclude_private_repository_names":  true
+                },
+    "authority":  {
+                      "proposal_generation":  "SOURCE_ONLY",
+                      "remote_source_mutation_authorized":  false,
+                      "protected_effects_authorized":  false
+                  },
+    "claim_ceiling":  "SOURCE_PROPOSAL_ONLY_NOT_PUBLICATION_AUTHORITY"
+}

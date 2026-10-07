@@ -1,0 +1,96 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V3",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1618-0400",
+  "created_local": "2026-10-06T16:18:12-04:00",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "state_head_before_checkpoint": {
+    "sha": "6d0d158ab7ee5ce06d0821cdb07a9e94d65420d3",
+    "message": "state: record resident auto-refresh qualification",
+    "ci": {
+      "test": "SUCCESS",
+      "dependency_review": "SUCCESS"
+    }
+  },
+  "implementation_head": {
+    "sha": "306250ef758c18292d6e58da34eab268c4905f22",
+    "message": "portal: refresh host state before resident cycles",
+    "verification": {
+      "local_pytest": "689 passed",
+      "test": "SUCCESS",
+      "dependency_review": "SUCCESS"
+    }
+  },
+  "resident_host_refresh": {
+    "probe_schema": "PORTAL_HOST_PROBE_RESULT_V1",
+    "probe_manifest_schema": "PORTAL_HOST_COMMAND_PROBES_V1",
+    "authority_schema": "PORTAL_HOST_AUTHORITY_V1",
+    "automatic_before_cycle": true,
+    "cycle_order": [
+      "REFRESH_HOST_OBSERVATIONS",
+      "PUMP_BOUND_HOST_WORK",
+      "RECONCILE",
+      "READ_FRESH_OCCUPANCY",
+      "ADMIT",
+      "BIND",
+      "QUEUE"
+    ],
+    "discovery_self_authorizes": false,
+    "authority_must_be_subset_of_observed_effect_capability": true,
+    "resume_spec_persists_probe_inputs": true,
+    "old_resume_specs_compatible": true
+  },
+  "operational_qualification": {
+    "path": "state/qualification/PORTAL_RESIDENT_AUTO_REFRESH_QUALIFICATION_20261006T1615-0400.json",
+    "implementation_head": "306250ef758c18292d6e58da34eab268c4905f22",
+    "refresh_count": 3,
+    "occupancy": {
+      "lappy": 3
+    },
+    "cycle_packets": [
+      [
+        "resident-refresh-a"
+      ],
+      [
+        "resident-refresh-b"
+      ],
+      []
+    ],
+    "stop_reason": "IDLE",
+    "summary": {
+      "active": 0,
+      "held": 0,
+      "terminal": 2
+    },
+    "pending": 0,
+    "unresolved": 0
+  },
+  "live_portfolio": {
+    "total": 84,
+    "public": 65,
+    "private": 19,
+    "private_no_effect": 19,
+    "private_held_archived": 3,
+    "private_queued_currentness": 16
+  },
+  "chat_host_bindings": {
+    "pre_active": {
+      "sha": "a6900dc2d2fb65f4ea66db95fca1b9c5b022450b",
+      "version": "0.1.0",
+      "daemon_started": false
+    },
+    "volition": {
+      "sha": "dbc628d376515a0a523b1eecdf62129cca5d6b08",
+      "version": "0.10.0"
+    },
+    "native_chatgpt_runtime_install": false,
+    "receipt": "C:\\Users\\patri\\AppData\\Local\\PortalChatRuntime\\20261006\\CHAT_BINDING.json"
+  },
+  "predecessor": "PORTAL_CHAT_CONTINUATION_20261006T1556-0400",
+  "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1618-0400"
+}

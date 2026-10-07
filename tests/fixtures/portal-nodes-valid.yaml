@@ -1,0 +1,10 @@
+schema: PORTAL_EXECUTION_NODES_V1
+nodes:
+  - id: lappy
+    max_parallel: 1
+    allowed_lanes: []
+    enabled: true
+  - id: worklaptop
+    max_parallel: 1
+    allowed_lanes: []
+    enabled: true

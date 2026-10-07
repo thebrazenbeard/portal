@@ -21,7 +21,11 @@ from .github_backend import (
 )
 from .models import ExactSubject
 from .portfolio_advancement import AdvancementItem, load_advancement_wave
-from .portfolio_corpus import PortfolioRecord, load_portfolio_corpus
+from .portfolio_corpus import (
+    PortfolioRecord,
+    load_portfolio_corpus,
+    validate_complete_repository_inventory,
+)
 from .portfolio_operator_binding import bind_wave_to_operator_registry
 from .portfolio_wave_scheduler import collision_keys
 from .registry import load_project_snapshot
@@ -31,6 +35,7 @@ from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _INERT_ACTIONS = {"PRESERVE_ONLY", "REFRESH_IF_REACTIVATED"}
+_CLAIMABLE_EFFECT_CEILINGS = {"NO_EFFECT", "SOURCE_ONLY"}
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,7 @@ def verify_bound_plan_subject(
     corpus_path: Path,
     projects_path: Path,
     subject_id: str,
+    public_safe: bool = True,
 ) -> VerifiedPlanSubject:
     plan_raw = plan_path.read_bytes()
     try:
@@ -182,12 +188,25 @@ def verify_bound_plan_subject(
     if wave_binding.get("corpus_binding") != dict(wave.corpus_binding):
         raise ValueError("admission plan corpus binding mismatch")
 
-    expected_blob = str(wave.corpus_binding.get("git_blob_sha", ""))
-    if not expected_blob:
-        raise ValueError("wave corpus git blob binding is missing")
-    if _git_blob_sha_for_path(corpus_path) != expected_blob:
-        raise ValueError("local corpus does not match wave git blob binding")
-    corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+    binding_kind = wave.corpus_binding.get("binding_kind")
+    if binding_kind == "LOCAL_SHA256":
+        expected_sha256 = str(wave.corpus_binding.get("sha256", ""))
+        if _SHA256.fullmatch(expected_sha256) is None:
+            raise ValueError("wave local corpus sha256 binding is invalid")
+        observed_sha256 = hashlib.sha256(corpus_path.read_bytes()).hexdigest()
+        if not hmac.compare_digest(expected_sha256, observed_sha256):
+            raise ValueError("local corpus sha256 does not match wave binding")
+    elif binding_kind in (None, "GIT_BLOB"):
+        expected_blob = str(wave.corpus_binding.get("git_blob_sha", ""))
+        if not expected_blob:
+            raise ValueError("wave corpus git blob binding is missing")
+        if _git_blob_sha_for_path(corpus_path) != expected_blob:
+            raise ValueError("local corpus does not match wave git blob binding")
+    else:
+        raise ValueError("unsupported wave corpus binding kind")
+    corpus = load_portfolio_corpus(corpus_path, public_safe=public_safe)
+    if not public_safe:
+        validate_complete_repository_inventory(corpus)
 
     selected_raw = plan_payload.get("selected")
     if not isinstance(selected_raw, list):
@@ -210,8 +229,11 @@ def verify_bound_plan_subject(
         raise ValueError("bound plan bridge V1 supports repository subjects only")
     if item.execution_state != "QUEUED":
         raise ValueError("bound plan subject is not queued")
-    if item.action in _INERT_ACTIONS or item.effect_ceiling != "SOURCE_ONLY":
-        raise ValueError("bound plan subject is not source-execution admissible")
+    if (
+        item.action in _INERT_ACTIONS
+        or item.effect_ceiling not in _CLAIMABLE_EFFECT_CEILINGS
+    ):
+        raise ValueError("bound plan subject is not claim-admissible")
 
     expected_selected = _selected_item_payload(item)
     if dict(selected) != expected_selected:
@@ -233,7 +255,7 @@ def verify_bound_plan_subject(
         wave,
         corpus,
         registry,
-        public_safe=True,
+        public_safe=public_safe,
     )
     binding_matches = [
         decision
@@ -320,6 +342,7 @@ def claim_bound_plan_subject(
     holder: str,
     lease_ttl: float,
     allowed_repositories: Iterable[str],
+    public_safe: bool = True,
     token: str | None = None,
     transport: GitHubTransport | None = None,
     clock: Callable[[], float] = time.time,
@@ -344,6 +367,7 @@ def claim_bound_plan_subject(
         corpus_path=Path(corpus_path),
         projects_path=Path(projects_path),
         subject_id=subject_id,
+        public_safe=public_safe,
     )
     repository = verified.record.repository
     authorized = frozenset(str(value) for value in allowed_repositories)

@@ -300,3 +300,210 @@ def test_lane_is_bound_in_plan_summary_but_not_a_collision_override():
     assert [item.subject_id for item in planned.selected] == ["shared-a"]
     assert planned.deferred[0].reason == "COLLISION"
     assert planned.summary()["selected_by_lane"] == {"ONE": 1}
+
+
+
+def test_terminal_subject_exclusion_refills_with_next_eligible_subject():
+    planned = plan_wave_admission(
+        wave(
+            item("a", priority="P0", repository="owner/a"),
+            item("b", priority="P0", repository="owner/b"),
+            item("c", priority="P1", repository="owner/c"),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        excluded_subjects=(("repository", "a"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == ["b"]
+    excluded = next(
+        value for value in planned.deferred if value.subject_id == "a"
+    )
+    assert excluded.reason == "EXCLUDED_TERMINAL"
+    assert planned.excluded_subjects == (("repository", "a"),)
+    assert planned.summary()["excluded_subjects"] == ["repository:a"]
+
+
+def test_excluded_subject_identity_is_kind_scoped():
+    planned = plan_wave_admission(
+        wave(
+            item("same", repository="owner/repo", kind="repository"),
+            item(
+                "same",
+                repository="surface-a",
+                kind="workstream",
+                lead="VOSS",
+                family="other",
+            ),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        excluded_subjects=(("repository", "same"),),
+    )
+
+    assert [selected.subject_kind for selected in planned.selected] == [
+        "workstream"
+    ]
+
+
+
+def test_active_subjects_seed_global_identity_family_lane_and_collision_loads():
+    active = item(
+        "active",
+        priority="P0",
+        lead="ONE",
+        repository="owner/active",
+        family="family-a",
+    )
+    same_identity = item(
+        "same-identity",
+        priority="P0",
+        lead="ONE",
+        repository="owner/other",
+        family="family-b",
+    )
+    other_identity = item(
+        "other-identity",
+        priority="P0",
+        lead="VOSS",
+        repository="owner/voss",
+        family="family-c",
+    )
+    colliding_workstream = item(
+        "colliding-workstream",
+        priority="P0",
+        lead="REZON",
+        repository="owner/active",
+        kind="workstream",
+        family="family-d",
+    )
+
+    planned = plan_wave_admission(
+        wave(active, same_identity, other_identity, colliding_workstream),
+        budget=WaveExecutionBudget(
+            max_parallel=2,
+            max_per_identity=1,
+            max_per_family=2,
+            max_per_lane=1,
+        ),
+        active_subjects=(("repository", "active"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == [
+        "other-identity"
+    ]
+    reasons = {
+        deferred.subject_id: deferred.reason
+        for deferred in planned.deferred
+    }
+    assert reasons["active"] == "ALREADY_ACTIVE"
+    assert reasons["same-identity"] == "LANE_BUDGET"
+    assert reasons["colliding-workstream"] == "COLLISION"
+    assert planned.active_subjects == (("repository", "active"),)
+    assert planned.summary()["active_subjects"] == ["repository:active"]
+
+
+def test_active_subjects_consume_global_parallel_budget():
+    planned = plan_wave_admission(
+        wave(
+            item("active", repository="owner/active", family="a"),
+            item(
+                "next",
+                repository="owner/next",
+                lead="VOSS",
+                family="b",
+            ),
+        ),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+        ),
+        active_subjects=(("repository", "active"),),
+    )
+
+    assert planned.selected == ()
+    deferred = next(
+        item for item in planned.deferred if item.subject_id == "next"
+    )
+    assert deferred.reason == "GLOBAL_BUDGET"
+
+
+def test_active_subject_must_exist_in_wave():
+    with pytest.raises(ValueError, match="active subject is absent"):
+        plan_wave_admission(
+            wave(item("known")),
+            budget=WaveExecutionBudget(
+                max_parallel=1,
+                max_per_identity=1,
+                max_per_family=1,
+            ),
+            active_subjects=(("repository", "missing"),),
+        )
+
+
+def test_blocked_subject_reserves_collision_without_consuming_execution_budget():
+    blocked = item(
+        "blocked",
+        priority="P0",
+        lead="ONE",
+        repository="owner/shared",
+        family="family-a",
+    )
+    colliding = item(
+        "colliding",
+        priority="P0",
+        lead="VOSS",
+        repository="owner/shared",
+        family="family-b",
+    )
+    unrelated = item(
+        "unrelated",
+        priority="P1",
+        lead="ONE",
+        repository="owner/unrelated",
+        family="family-a",
+    )
+
+    planned = plan_wave_admission(
+        wave(blocked, colliding, unrelated),
+        budget=WaveExecutionBudget(
+            max_parallel=1,
+            max_per_identity=1,
+            max_per_family=1,
+            max_per_lane=1,
+        ),
+        blocked_subjects=(("repository", "blocked"),),
+    )
+
+    assert [selected.subject_id for selected in planned.selected] == [
+        "unrelated"
+    ]
+    reasons = {
+        deferred.subject_id: deferred.reason
+        for deferred in planned.deferred
+    }
+    assert reasons["blocked"] == "BLOCKED_ACTIVE"
+    assert reasons["colliding"] == "COLLISION"
+    assert planned.blocked_subjects == (("repository", "blocked"),)
+    assert planned.summary()["blocked_subjects"] == ["repository:blocked"]
+
+
+def test_subject_cannot_be_active_and_blocked():
+    with pytest.raises(ValueError, match="both active and blocked"):
+        plan_wave_admission(
+            wave(item("same")),
+            budget=WaveExecutionBudget(
+                max_parallel=1,
+                max_per_identity=1,
+                max_per_family=1,
+            ),
+            active_subjects=(("repository", "same"),),
+            blocked_subjects=(("repository", "same"),),
+        )

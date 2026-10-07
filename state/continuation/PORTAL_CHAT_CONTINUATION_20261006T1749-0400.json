@@ -1,0 +1,78 @@
+{
+  "schema": "PORTAL_CHAT_CONTINUATION_V3",
+  "logical_id": "PORTAL_CHAT_CONTINUATION_20261006T1749-0400",
+  "created_local": "2026-10-06T17:49:33-04:00",
+  "repository": "thebrazenbeard/portal",
+  "branch": "work/portal-coordinator-v1",
+  "draft_pr": 1,
+  "base": {
+    "ref": "main",
+    "sha": "fa125a74bd42bc2bdabf3f8f9ef677b225db6f76"
+  },
+  "state_head_before_checkpoint": {
+    "sha": "eb5535846f37da2820a65ffe20b6700bb7416b6d",
+    "message": "state: record live discovery proposal qualification"
+  },
+  "implementation_head": {
+    "sha": "d42ec64a9b6045930f64b4789b7ece7e2703553e",
+    "message": "portal: enable codex proposals for live discoveries",
+    "verification": {
+      "local_pytest": "698 passed",
+      "warnings": 1,
+      "live_inventory_qualification": "PASS",
+      "codex_cli_parse": "PASS",
+      "github_cli_authenticated": true
+    }
+  },
+  "live_portfolio": {
+    "total": 84,
+    "public": 65,
+    "private": 19,
+    "archived": 5,
+    "discoveries": 33,
+    "nonarchived_discovered_source_only": 30,
+    "archived_discovered_held": 3,
+    "curated_nonarchived_preserved": 49,
+    "public_artifacts_private_name_free": true
+  },
+  "codex_gh_backend": {
+    "kind": "CODEX_GH_PROPOSAL_V1",
+    "proposal_only": true,
+    "exact_head_required": true,
+    "local_head_movement_rejected": true,
+    "symlinks_rejected": true,
+    "binary_output_rejected": true,
+    "source_write_publication_authorized": false,
+    "protected_effects_authorized": false
+  },
+  "discovered_effect_ceiling": {
+    "default": "NO_EFFECT",
+    "opt_in": "SOURCE_ONLY",
+    "archived_discoveries_remain_no_effect": true,
+    "resume_spec_persisted": true,
+    "older_resume_specs_default_no_effect": true
+  },
+  "qualification": {
+    "path": "state/qualification/PORTAL_DISCOVERY_CODEX_QUALIFICATION_20261006T1747-0400.json",
+    "implementation_head": "d42ec64a9b6045930f64b4789b7ece7e2703553e"
+  },
+  "host_tool_preference": {
+    "primary": "Executor",
+    "prefer_over": "Remote Desktop Commander",
+    "scope": "Lappy workstation operations while Executor is functioning"
+  },
+  "chat_host_bindings": {
+    "pre_active": {
+      "sha": "a6900dc2d2fb65f4ea66db95fca1b9c5b022450b",
+      "version": "0.1.0",
+      "daemon_started": false
+    },
+    "volition": {
+      "sha": "dbc628d376515a0a523b1eecdf62129cca5d6b08",
+      "version": "0.10.0"
+    },
+    "native_chatgpt_runtime_install": false
+  },
+  "predecessor": "PORTAL_CHAT_CONTINUATION_20261006T1618-0400",
+  "restore_grammar": "PORTAL::RESTORE::PORTAL_CHAT_CONTINUATION_20261006T1749-0400"
+}

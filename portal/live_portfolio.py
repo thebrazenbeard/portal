@@ -1,0 +1,486 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Iterable
+
+from runner.portfolio_advancement import (
+    load_advancement_wave,
+    validate_wave_against_corpus,
+)
+from runner.portfolio_corpus import load_portfolio_corpus
+
+from .discovery import RepositoryInventoryItem
+
+
+_DISCOVERY_FRONTIER = (
+    "Inspect current repository purpose, active work, dependencies, and authority "
+    "before assigning effect-bearing work."
+)
+_DISCOVERY_PURPOSE = (
+    "Live repository discovered after the baseline portfolio cut; semantic role "
+    "has not yet been admitted into the curated corpus."
+)
+_DISCOVERY_STATUS = (
+    "Live GitHub membership is current for this cut; descriptive purpose/frontier "
+    "metadata still requires a bounded currentness audit."
+)
+_DISCOVERY_SOURCE_PROPOSAL_FRONTIER = (
+    "Orient to the repository at the exact current head, preserve repository-local "
+    "instructions and intent, then implement the smallest coherent source-only improvement "
+    "that advances the project. Produce a reviewable proposal only; do not perform remote "
+    "mutation or protected effects."
+)
+
+
+@dataclass(frozen=True)
+class PortalLivePortfolioRefresh:
+    corpus_path: Path
+    wave_path: Path
+    public_repositories: int
+    private_repositories: int
+    archived_repositories: int
+
+
+def _json_write(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _live_index(
+    owner: str,
+    repositories: Iterable[RepositoryInventoryItem],
+) -> dict[str, RepositoryInventoryItem]:
+    index: dict[str, RepositoryInventoryItem] = {}
+    for repo in repositories:
+        observed_owner, _, _ = repo.full_name.partition("/")
+        if observed_owner.casefold() != owner.casefold():
+            raise ValueError(
+                "live repository is outside baseline portfolio owner"
+            )
+        key = repo.full_name.casefold()
+        if key in index:
+            raise ValueError(f"duplicate live repository: {repo.full_name}")
+        index[key] = repo
+    return index
+
+
+def _discovery_record(repo: RepositoryInventoryItem) -> dict[str, object]:
+    archived = bool(repo.archived)
+    return {
+        "id": repo.name.casefold(),
+        "repository": repo.full_name,
+        "name": repo.name,
+        "visibility": "public",
+        "archived": archived,
+        "default_branch": repo.default_branch,
+        "priority": "P3",
+        "family_id": "live-discovery",
+        "activity_state": "ARCHIVED" if archived else "UNKNOWN",
+        "purpose": _DISCOVERY_PURPOSE,
+        "status": (
+            "Live GitHub membership marks this repository archived; no new work "
+            "is admitted."
+            if archived
+            else _DISCOVERY_STATUS
+        ),
+        "current_frontier": (
+            "Preserve archived repository; do not admit new work."
+            if archived
+            else _DISCOVERY_FRONTIER
+        ),
+    }
+
+
+def _refresh_known_record(
+    raw: dict[str, object],
+    repo: RepositoryInventoryItem,
+) -> dict[str, object]:
+    record = dict(raw)
+    record["visibility"] = "public"
+    record["archived"] = bool(repo.archived)
+    record["default_branch"] = repo.default_branch
+    if repo.archived:
+        record["activity_state"] = "ARCHIVED"
+        record["status"] = (
+            "Live GitHub membership marks this repository archived; prior "
+            "descriptive metadata is retained only as historical context."
+        )
+        record["current_frontier"] = (
+            "Preserve archived repository; do not admit new work."
+        )
+    return record
+
+
+def _refresh_wave_item(
+    *,
+    record: dict[str, object],
+    baseline_item: dict[str, object] | None,
+) -> dict[str, object]:
+    archived = bool(record["archived"])
+    if baseline_item is None:
+        item: dict[str, object] = {
+            "subject_kind": "repository",
+            "subject_id": record["id"],
+            "repository": record["repository"],
+            "priority": record["priority"],
+            "family_id": record["family_id"],
+            "activity_state": record["activity_state"],
+            "lead_identity": "DISCOVERY",
+            "reviewer_identities": ["REZON"],
+            "action": "PRESERVE_ONLY" if archived else "CURRENTNESS_AUDIT",
+            "execution_state": "HELD" if archived else "QUEUED",
+            "effect_ceiling": "NO_EFFECT",
+            "review_gate": "NO_NEW_WORK" if archived else "CURRENTNESS_ONLY",
+            "frontier": record["current_frontier"],
+            "source_status": record["status"],
+        }
+        return item
+
+    item = dict(baseline_item)
+    item["subject_id"] = record["id"]
+    item["repository"] = record["repository"]
+    item["priority"] = record["priority"]
+    item["family_id"] = record["family_id"]
+    item["activity_state"] = record["activity_state"]
+    item["frontier"] = record["current_frontier"]
+    item["source_status"] = record["status"]
+    if archived:
+        item["action"] = "PRESERVE_ONLY"
+        item["execution_state"] = "HELD"
+        item["effect_ceiling"] = "NO_EFFECT"
+        item["review_gate"] = "NO_NEW_WORK"
+    return item
+
+
+def _apply_discovery_effect_ceiling(
+    *,
+    record: dict[str, object],
+    item: dict[str, object],
+    effect_ceiling: str,
+) -> None:
+    if effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
+    if bool(record["archived"]):
+        return
+    item["effect_ceiling"] = effect_ceiling
+    if effect_ceiling != "SOURCE_ONLY":
+        return
+    record["current_frontier"] = _DISCOVERY_SOURCE_PROPOSAL_FRONTIER
+    record["status"] = (
+        "Repository explicitly admitted for bounded source-only proposal "
+        "generation; remote mutation remains separately gated."
+    )
+    item["action"] = "EXECUTE_FRONTIER"
+    item["review_gate"] = "EXACT_HEAD_REVIEW"
+    item["frontier"] = record["current_frontier"]
+    item["source_status"] = record["status"]
+
+
+def refresh_live_public_portfolio(
+    *,
+    baseline_corpus_path: Path,
+    baseline_wave_path: Path,
+    repositories: Iterable[RepositoryInventoryItem],
+    observed_at: str,
+    output_dir: Path,
+    discovered_effect_ceiling: str = "NO_EFFECT",
+) -> PortalLivePortfolioRefresh:
+    """Render a privacy-safe live public corpus/wave overlay.
+
+    Exact live membership replaces stale membership. Existing descriptive
+    metadata is reused only for repositories that still have the same exact
+    repository identity. Newly discovered public repositories default to a
+    NO_EFFECT currentness audit; an explicit SOURCE_ONLY ceiling converts only
+    those discoveries into proposal-generation frontiers. Private membership is
+    represented only by counts.
+    """
+
+    if discovered_effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
+
+    observed_at = observed_at.strip()
+    if not observed_at:
+        raise ValueError("observed_at is required")
+
+    baseline_corpus = load_portfolio_corpus(
+        Path(baseline_corpus_path),
+        public_safe=True,
+    )
+    baseline_wave = load_advancement_wave(Path(baseline_wave_path))
+    validate_wave_against_corpus(
+        baseline_wave,
+        baseline_corpus,
+        public_safe=True,
+    )
+    if "DISCOVERY" not in baseline_wave.identities or "REZON" not in baseline_wave.identities:
+        raise ValueError(
+            "baseline wave must define DISCOVERY and REZON identities"
+        )
+
+    live = _live_index(baseline_corpus.owner, repositories)
+    public_live = tuple(
+        sorted(
+            (repo for repo in live.values() if not repo.private),
+            key=lambda repo: repo.full_name.casefold(),
+        )
+    )
+    private_live = tuple(repo for repo in live.values() if repo.private)
+
+    corpus_raw = json.loads(Path(baseline_corpus_path).read_text(encoding="utf-8"))
+    wave_raw = json.loads(Path(baseline_wave_path).read_text(encoding="utf-8"))
+
+    baseline_records = {
+        str(raw["repository"]).casefold(): raw
+        for raw in corpus_raw["records"]
+    }
+    baseline_items = {
+        str(raw["repository"]).casefold(): raw
+        for raw in wave_raw["items"]
+        if raw.get("subject_kind") == "repository"
+    }
+
+    records: list[dict[str, object]] = []
+    repository_items: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for repo in public_live:
+        key = repo.full_name.casefold()
+        raw_record = baseline_records.get(key)
+        if raw_record is None:
+            record = _discovery_record(repo)
+        else:
+            record = _refresh_known_record(raw_record, repo)
+
+        record_id = str(record["id"])
+        if record_id in seen_ids:
+            raise ValueError(
+                f"live public repository id collision: {record_id}"
+            )
+        seen_ids.add(record_id)
+        records.append(record)
+        item = _refresh_wave_item(
+            record=record,
+            baseline_item=baseline_items.get(key),
+        )
+        if raw_record is None:
+            _apply_discovery_effect_ceiling(
+                record=record,
+                item=item,
+                effect_ceiling=discovered_effect_ceiling,
+            )
+        repository_items.append(item)
+
+    public_archived = sum(repo.archived for repo in public_live)
+    private_archived = sum(repo.archived for repo in private_live)
+    counts = {
+        "total": len(live),
+        "public": len(public_live),
+        "private": len(private_live),
+        "archived": public_archived + private_archived,
+        "public_archived": public_archived,
+        "private_archived": private_archived,
+    }
+
+    corpus_payload = dict(corpus_raw)
+    corpus_payload["observed_at"] = observed_at
+    corpus_payload["status_basis"] = (
+        "Live GitHub owner membership overlaid onto the previous public-safe "
+        "curated corpus. Exact private membership is intentionally not published."
+    )
+    corpus_payload["counts"] = counts
+    corpus_payload["private_inventory"] = {
+        "count": len(private_live),
+        "public_commitment_scheme": "COUNT_ONLY_PUBLIC_V1",
+        "exact_membership_publicly_committed": False,
+    }
+    corpus_payload["records"] = sorted(records, key=lambda raw: str(raw["id"]))
+
+    output_dir = Path(output_dir)
+    corpus_path = output_dir / "corpus.live.public.json"
+    wave_path = output_dir / "advancement_wave.live.public.json"
+    _json_write(corpus_path, corpus_payload)
+
+    live_corpus = load_portfolio_corpus(corpus_path, public_safe=True)
+    workstream_items = [
+        raw
+        for raw in wave_raw["items"]
+        if raw.get("subject_kind") == "workstream"
+    ]
+    wave_payload = dict(wave_raw)
+    wave_payload["generated_at"] = observed_at
+    wave_payload["corpus_binding"] = {
+        "binding_kind": "LOCAL_SHA256",
+        "sha256": live_corpus.sha256,
+        "public_repository_count": counts["public"],
+        "total_repository_count": counts["total"],
+        "private_repository_count": counts["private"],
+        "public_workstream_count": live_corpus.workstream_counts.public,
+        "total_workstream_count": live_corpus.workstream_counts.total,
+        "private_workstream_count": live_corpus.workstream_counts.private,
+    }
+    wave_payload["items"] = sorted(
+        [*repository_items, *workstream_items],
+        key=lambda raw: (str(raw["subject_kind"]), str(raw["subject_id"])),
+    )
+    _json_write(wave_path, wave_payload)
+
+    live_wave = load_advancement_wave(wave_path)
+    validate_wave_against_corpus(live_wave, live_corpus, public_safe=True)
+    return PortalLivePortfolioRefresh(
+        corpus_path=corpus_path,
+        wave_path=wave_path,
+        public_repositories=counts["public"],
+        private_repositories=counts["private"],
+        archived_repositories=counts["archived"],
+    )
+
+
+def refresh_live_local_portfolio(
+    *,
+    baseline_corpus_path: Path,
+    baseline_wave_path: Path,
+    repositories: Iterable[RepositoryInventoryItem],
+    observed_at: str,
+    output_dir: Path,
+    discovered_effect_ceiling: str = "NO_EFFECT",
+) -> PortalLivePortfolioRefresh:
+    """Render a local runtime overlay that can include exact private membership.
+
+    The public overlay remains the privacy-safe publication surface. Private
+    repositories are added only to this local corpus/wave. All newly discovered
+    repositories default to NO_EFFECT; SOURCE_ONLY must be explicitly selected
+    and still grants proposal generation rather than remote mutation authority.
+    """
+
+    if discovered_effect_ceiling not in {"NO_EFFECT", "SOURCE_ONLY"}:
+        raise ValueError(
+            "discovered_effect_ceiling must be NO_EFFECT or SOURCE_ONLY"
+        )
+
+    repository_tuple = tuple(repositories)
+    output_dir = Path(output_dir)
+    public_result = refresh_live_public_portfolio(
+        baseline_corpus_path=baseline_corpus_path,
+        baseline_wave_path=baseline_wave_path,
+        repositories=repository_tuple,
+        observed_at=observed_at,
+        output_dir=output_dir / "public",
+        discovered_effect_ceiling=discovered_effect_ceiling,
+    )
+
+    private_live = tuple(
+        sorted(
+            (repo for repo in repository_tuple if repo.private),
+            key=lambda repo: repo.full_name.casefold(),
+        )
+    )
+    if not private_live:
+        return PortalLivePortfolioRefresh(
+            corpus_path=public_result.corpus_path,
+            wave_path=public_result.wave_path,
+            public_repositories=public_result.public_repositories,
+            private_repositories=0,
+            archived_repositories=public_result.archived_repositories,
+        )
+
+    corpus_payload = json.loads(
+        public_result.corpus_path.read_text(encoding="utf-8")
+    )
+    wave_payload = json.loads(
+        public_result.wave_path.read_text(encoding="utf-8")
+    )
+
+    records = list(corpus_payload["records"])
+    items = list(wave_payload["items"])
+    seen_ids = {str(record["id"]).casefold() for record in records}
+    seen_repositories = {
+        str(record["repository"]).casefold() for record in records
+    }
+
+    for repo in private_live:
+        record = _discovery_record(repo)
+        record["visibility"] = "private"
+        record_id = str(record["id"]).casefold()
+        repository_key = str(record["repository"]).casefold()
+        if record_id in seen_ids:
+            raise ValueError(
+                f"live local repository id collision: {record['id']}"
+            )
+        if repository_key in seen_repositories:
+            raise ValueError(
+                f"duplicate live local repository: {record['repository']}"
+            )
+        seen_ids.add(record_id)
+        seen_repositories.add(repository_key)
+        records.append(record)
+        item = _refresh_wave_item(record=record, baseline_item=None)
+        _apply_discovery_effect_ceiling(
+            record=record,
+            item=item,
+            effect_ceiling=discovered_effect_ceiling,
+        )
+        items.append(item)
+
+    corpus_payload["status_basis"] = (
+        "Live GitHub owner membership overlaid onto the previous public-safe "
+        "curated corpus. Exact private repository membership is retained only "
+        "in this local runtime artifact and must not be published."
+    )
+    corpus_payload["records"] = sorted(
+        records, key=lambda raw: str(raw["id"]).casefold()
+    )
+
+    corpus_path = output_dir / "corpus.live.local.json"
+    _json_write(corpus_path, corpus_payload)
+    local_corpus = load_portfolio_corpus(corpus_path)
+    if len(local_corpus.records) != local_corpus.counts.total:
+        raise ValueError(
+            "local live corpus must enumerate every discovered repository"
+        )
+    if (
+        sum(record.visibility == "public" for record in local_corpus.records)
+        != local_corpus.counts.public
+        or sum(
+            record.visibility == "private"
+            for record in local_corpus.records
+        )
+        != local_corpus.counts.private
+    ):
+        raise ValueError(
+            "local live corpus visibility counts do not match records"
+        )
+
+    binding = dict(wave_payload["corpus_binding"])
+    binding["sha256"] = local_corpus.sha256
+    wave_payload["corpus_binding"] = binding
+    wave_payload["items"] = sorted(
+        items,
+        key=lambda raw: (
+            str(raw["subject_kind"]),
+            str(raw["subject_id"]).casefold(),
+        ),
+    )
+
+    wave_path = output_dir / "advancement_wave.live.local.json"
+    _json_write(wave_path, wave_payload)
+    local_wave = load_advancement_wave(wave_path)
+    validate_wave_against_corpus(
+        local_wave,
+        local_corpus,
+        public_safe=False,
+    )
+    return PortalLivePortfolioRefresh(
+        corpus_path=corpus_path,
+        wave_path=wave_path,
+        public_repositories=public_result.public_repositories,
+        private_repositories=public_result.private_repositories,
+        archived_repositories=public_result.archived_repositories,
+    )
