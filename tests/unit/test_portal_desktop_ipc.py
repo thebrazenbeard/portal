@@ -367,9 +367,11 @@ def test_retry_recovers_submission_interrupted_before_request_publication(tmp_pa
         if request_path.exists():
             observed.append(json.loads(request_path.read_text()))
             request_path.replace(tmp_path / "bridge/claimed/interrupted.json")
-            response_path.write_text(json.dumps({
+            staged_response = response_path.with_suffix(".json.tmp")
+            staged_response.write_text(json.dumps({
                 "request_id": "interrupted", "ok": True, "result": {"state": "ACTIVE"},
             }))
+            staged_response.replace(response_path)
 
     thread = threading.Thread(target=server)
     thread.start()
