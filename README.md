@@ -28,6 +28,40 @@ The preferred human-facing source surface is now the durable command session. Ex
 
 This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
+
+## P.O.R.T.A.L. Desktop and resident Vera runtime
+
+The repository also contains the source for **P.O.R.T.A.L. Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
+
+The resident-host source composes:
+
+- `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;
+- Pre-Active scheduler/observer state and `autonomous.turn` admission;
+- the current Pre-Active `VolitionBridge`, where validated `volition.signal` events can produce endogenous cognition requests without effect authority;
+- P.O.R.T.A.L. cognition-route discovery and deterministic route selection;
+- durable cognition provenance and Vera host-acceptance receipts;
+- the same IPC path for human and autonomous cognition.
+
+Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models—including a trained Vera model when one is actually present and admissible—can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
+
+The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
+
+Run the desktop shell from an installed/source environment with:
+
+    portal-desktop
+
+Or directly:
+
+    python -m portal.desktop_app
+
+The desktop/runtime path preserves the same evidence rules as the portfolio coordinator:
+
+`COGNITION != PROTECTED_EFFECT_AUTHORITY`
+
+`SOURCE != INSTALLATION != CURRENT_ROUTE != RUNTIME_CONSUMPTION`
+
+`MODEL_AVAILABLE != MODEL_AUTHORIZED`
+
 ## Internal-first donor policy
 
 Before implementing new orchestration machinery, Portal mines Patrick-owned repositories for existing qualified mechanisms. External projects are secondary research inputs.
