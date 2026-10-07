@@ -10,6 +10,51 @@ import uuid
 from .desktop_ipc import FileBridgeClient
 
 
+def _qualified_portfolio_telemetry(portfolio: object) -> str:
+    """Qualify read-only portfolio telemetry, not worker execution or authority."""
+    error = "portfolio status IPC did not return governed telemetry"
+    if not isinstance(portfolio, dict):
+        raise RuntimeError(error)
+    schema = portfolio.get("schema")
+    mode = portfolio.get("dispatch_mode")
+    if (
+        schema not in {
+            "PORTAL_DESKTOP_PORTFOLIO_V1",
+            "PORTAL_DESKTOP_PORTFOLIO_V2",
+        }
+        or portfolio.get("protected_effect_authority") is not False
+        or not isinstance(portfolio.get("sessions"), list)
+        or type(portfolio.get("configured")) is not bool
+    ):
+        raise RuntimeError(error)
+
+    if schema == "PORTAL_DESKTOP_PORTFOLIO_V1":
+        if mode != "ADMISSION_ONLY":
+            raise RuntimeError(error)
+        return mode
+
+    worker_state = portfolio.get("worker_state")
+    if mode == "ADMISSION_ONLY":
+        if worker_state != "UNAVAILABLE":
+            raise RuntimeError(error)
+    elif mode == "PROCESS_PROPOSAL":
+        profile = portfolio.get("profile")
+        if (
+            worker_state != "CONFIGURED"
+            or portfolio.get("configured") is not True
+            or not isinstance(profile, dict)
+            or not isinstance(profile.get("worker_backends"), str)
+            or not profile["worker_backends"].strip()
+        ):
+            raise RuntimeError(error)
+    else:
+        raise RuntimeError(error)
+
+    # A status response can describe a configured worker, but never prove
+    # that it ran, verified a result, or has protected-effect authority.
+    return mode
+
+
 def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1, label: str = "qualification condition"):
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError("qualification timeout must be finite and positive")
@@ -260,11 +305,7 @@ def qualify_runtime(
     portfolio = client.request(
         "desktop_portfolio", action="status", session_id="qualification-" + uuid.uuid4().hex,
     )
-    if (portfolio.get("schema") != "PORTAL_DESKTOP_PORTFOLIO_V1"
-            or portfolio.get("protected_effect_authority") is not False
-            or portfolio.get("dispatch_mode") != "ADMISSION_ONLY"
-            or not isinstance(portfolio.get("sessions"), list)):
-        raise RuntimeError("portfolio status IPC did not return governed admission-only telemetry")
+    portfolio_dispatch_mode = _qualified_portfolio_telemetry(portfolio)
 
     final_status = client.request("desktop_status")
     if (final_status.get("runtime_id") != runtime_id
@@ -313,7 +354,7 @@ def qualify_runtime(
         },
         "portfolio_ipc": {
             "status_only": True,
-            "dispatch_mode": portfolio["dispatch_mode"],
+            "dispatch_mode": portfolio_dispatch_mode,
             "configured": portfolio.get("configured"),
             "observed_session_count": len(portfolio["sessions"]),
             "worker_execution_verified": False,

@@ -181,3 +181,70 @@ def test_qualification_real_engine_and_file_ipc_complete_every_chain(tmp_path):
         stop.set()
         server.join(timeout=5)
     assert not server.is_alive()
+
+
+@pytest.mark.parametrize(
+    ("telemetry", "expected_mode"),
+    [
+        (
+            {
+                "schema": "PORTAL_DESKTOP_PORTFOLIO_V1",
+                "sessions": [],
+                "configured": False,
+                "dispatch_mode": "ADMISSION_ONLY",
+                "protected_effect_authority": False,
+            },
+            "ADMISSION_ONLY",
+        ),
+        (
+            {
+                "schema": "PORTAL_DESKTOP_PORTFOLIO_V2",
+                "sessions": [],
+                "configured": False,
+                "dispatch_mode": "ADMISSION_ONLY",
+                "worker_state": "UNAVAILABLE",
+                "protected_effect_authority": False,
+            },
+            "ADMISSION_ONLY",
+        ),
+        (
+            {
+                "schema": "PORTAL_DESKTOP_PORTFOLIO_V2",
+                "sessions": [],
+                "configured": True,
+                "profile": {"worker_backends": "state/worker-backends.live.yaml"},
+                "dispatch_mode": "PROCESS_PROPOSAL",
+                "worker_state": "CONFIGURED",
+                "protected_effect_authority": False,
+            },
+            "PROCESS_PROPOSAL",
+        ),
+    ],
+)
+def test_qualification_accepts_governed_portfolio_versions(
+    telemetry, expected_mode,
+):
+    assert qualification._qualified_portfolio_telemetry(telemetry) == expected_mode
+
+
+@pytest.mark.parametrize("changes", [
+    {"schema": "UNRECOGNIZED"},
+    {"protected_effect_authority": True},
+    {"sessions": "not a list"},
+    {"dispatch_mode": "PRODUCTION_WRITE"},
+    {"worker_state": "CONFIGURED", "dispatch_mode": "ADMISSION_ONLY"},
+    {"worker_state": "UNAVAILABLE", "dispatch_mode": "PROCESS_PROPOSAL"},
+    {"configured": False, "dispatch_mode": "PROCESS_PROPOSAL"},
+])
+def test_v2_portfolio_qualification_rejects_false_telemetry(changes):
+    good = {
+        "schema": "PORTAL_DESKTOP_PORTFOLIO_V2",
+        "sessions": [],
+        "configured": True,
+        "profile": {"worker_backends": "state/worker-backends.live.yaml"},
+        "dispatch_mode": "PROCESS_PROPOSAL",
+        "worker_state": "CONFIGURED",
+        "protected_effect_authority": False,
+    }
+    with pytest.raises(RuntimeError, match="portfolio status IPC"):
+        qualification._qualified_portfolio_telemetry({**good, **changes})

@@ -38,7 +38,7 @@ To construct and health-check the resident components with local cognition still
 .\scripts\Install-PortalVera.ps1 -InstallId desktop-v1 -RuntimeRoot $runtimeRoot -Python $python -PortalSha $portalSha -VeraMonoSha $veraMonoSha -PreActiveSha $preActiveSha -VolitionSha $volitionSha -AllowLocalNoPaidCompute
 ```
 
-The installer persists the four exact sources and `cognition_policy.allow_local_no_paid_compute` in `RUNTIME_INSTALL_SPEC.json`, creates `.venv`, verifies import origins and clean source heads, performs component construction, and starts the resident host through the singleton supervisor. The explicit cognition-policy option also runs the local cognition qualification. Finding Codex CLI or an external/API route never admits it automatically. The installer does not install models, change provider credentials, or provision credentials.
+The installer persists the four exact sources and `cognition_policy.allow_local_no_paid_compute` in `RUNTIME_INSTALL_SPEC.json`, creates `.venv`, verifies import origins and clean source heads, performs component construction, and starts the resident host through the singleton supervisor. On Windows, each staged Git clone uses clone-local byte-exact checkout attributes and disables automatic line-ending conversion before checking out its pinned commit. This preserves upstream blobs with mixed newlines without weakening the clean-checkout guard or changing global Git settings. The explicit cognition-policy option also runs the local cognition qualification. Finding Codex CLI or an external/API route never admits it automatically. The installer does not install models, change provider credentials, or provision credentials.
 
 The default policy can leave a loaded resident runtime **BLOCKED** with `no_admissible_cognition_route`. That is truthful and preserves cognition requests as unresolved/retryable. It is not a local cognition proof. Even an admitted policy requires an actually available, current, eligible route; a missing provider/model or rejected result cannot be reported as success.
 
@@ -69,6 +69,8 @@ Or launch that installation's Python explicitly:
 ```powershell
 & (Join-Path $runtimeRoot '.venv\Scripts\python.exe') -m portal.desktop_app --runtime-root $runtimeRoot
 ```
+
+The installer qualification's read-only portfolio IPC check accepts governed `PORTAL_DESKTOP_PORTFOLIO_V1` admission-only telemetry and V2 admission-only or configured proposal-worker telemetry. It rejects inconsistent worker-state/dispatch-mode pairs and any protected-effect authority. A configured proposal worker is not evidence of successful worker execution; the qualification record retains `worker_execution_verified=false` until separate execution receipts are observed.
 
 The runtime panel distinguishes **OFFLINE**, **STARTING**, **ACTIVE**, **DEGRADED**, and **BLOCKED**. Assess the reported reason, heartbeat age, loaded components, exact source revisions, and selected cognition route together. A heartbeat file by itself is not proof of a running host. The desktop requests startup through the supervisor and sends conversation requests to the resident runtime; it does not call a fixed model endpoint.
 
