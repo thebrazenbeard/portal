@@ -20,6 +20,12 @@ The original single-chat design remains a supported interaction pattern and hist
 
 P.O.R.T.A.L. was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
 
+## Reasoning specialist delegation
+
+The 2026-10-07 High / Work Ultra / Work Max experiment identifies a future integration boundary with Rezon: P.O.R.T.A.L. may eventually dispatch exact-bound reasoning packets to supported specialist surfaces and reconcile their returned artifacts. This is explicit delegation, not a way to mutate an existing chat's reasoning tier.
+
+Automatic specialist delegation is currently **design-only** and is blocked on repair/qualification of reproduced P.O.R.T.A.L. execution-control defects. See [Reasoning Specialist Delegation V1](docs/architecture/REASONING_SPECIALIST_DELEGATION_V1.md).
+
 ## Current implementation state
 
 The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
