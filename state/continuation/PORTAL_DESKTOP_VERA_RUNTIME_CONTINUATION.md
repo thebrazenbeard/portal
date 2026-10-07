@@ -282,3 +282,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Example profile uses only supported local-artifact fields; JSON parses and diff check clean. No runtime source change in this checkpoint.
 - Full regression run is in progress with writable TEMP/TMP and approved loopback/read-only discovery access. Next: qualifier checkpoint and staged proof. Lou-Pole invoked by Patrick: current engine fresh-read at 9ea4eaefe5229ca90d7ae6099dbf30d9e13b64b2; deterministic and semantic evidence will remain distinct.
 - Exact head: commit containing this record.
+
+## Exact end-to-end qualification checkpoint — 2026-10-07
+- Qualifier now separates Pre-Active admission from completed adapter evidence and correlates source_event_id with real Engine steps. Qualified receipt must bind the exact request/runtime/route. Human cache publication is polled; final runtime/source continuity checked.
+- Read-only portfolio IPC is included. Qualification receipt writes atomically; source-event dedup is unique per proof. Windows transient response sharing denial polls the same durable ID without another submission.
+- TDD correlation/replacement tests failed first; final qualifier+IPC surface -> 18 passed. Includes real Pre-Active Engine, VolitionBridge, QualifiedVeraRuntime and filesystem IPC with fake local cognition. All component remote mains freshly unchanged: Vera e5af8cb740267bb5674864571e915842bf5e6677; Pre-Active 1f23a809d7274df506e03e2d9052525538c3bcf6; Volition dbc628d376515a0a523b1eecdf62129cca5d6b08.
+- Exact head: commit containing this continuation. Next: current-source staged installer using discovered Ollama, UI closure proof and complete regression result. No live install replaced.

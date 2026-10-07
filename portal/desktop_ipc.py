@@ -204,7 +204,9 @@ class FileBridgeClient:
     def _response(path: Path, request_id: str) -> dict[str, object] | None:
         try:
             response = json.loads(path.read_text(encoding="utf-8-sig"))
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
+            # Windows may deny the read briefly around atomic publication.
+            # Poll the same durable outcome; never submit another operation.
             return None
         if not isinstance(response, dict):
             raise RuntimeError("bridge response is not an object")

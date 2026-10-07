@@ -323,3 +323,18 @@ def test_file_bridge_client_surfaces_host_error(tmp_path: Path) -> None:
             client.request("desktop_status", request_id="bad")
     finally:
         thread.join(timeout=2)
+
+def test_transient_response_sharing_denial_keeps_same_request_polling(tmp_path, monkeypatch):
+    path = tmp_path / 'response.json'
+    path.write_text(json.dumps({'request_id': 'stable', 'ok': True, 'result': {'state': 'ACTIVE'}}))
+    original = Path.read_text
+    attempts = []
+    def flaky(self, *args, **kwargs):
+        if self == path:
+            attempts.append(self)
+            if len(attempts) == 1:
+                raise PermissionError('Windows transient sharing denial')
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'read_text', flaky)
+    assert FileBridgeClient._response(path, 'stable') is None
+    assert FileBridgeClient._response(path, 'stable') == {'state': 'ACTIVE'}
