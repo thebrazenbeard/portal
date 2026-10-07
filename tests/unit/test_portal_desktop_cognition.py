@@ -10,6 +10,8 @@ from portal.desktop_cognition import (
 
 def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes() -> None:
     routes = discover_cognition_routes(
+        allow_local_no_paid_compute=True,
+        pre_active_models=lambda: None,
         command_probe=lambda name, args: (
             "codex-cli 1.2.3" if name == "codex" else None
         ),
@@ -38,6 +40,7 @@ def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes()
 
 def test_trained_pre_active_adapter_is_discovered_and_preferred_over_ollama_vera() -> None:
     routes = discover_cognition_routes(
+        allow_local_no_paid_compute=True,
         command_probe=lambda _name, _args: None,
         ollama_tags=lambda: {
             "models": [
@@ -74,6 +77,7 @@ def test_trained_pre_active_adapter_is_discovered_and_preferred_over_ollama_vera
 
 def test_base_only_pre_active_model_is_discovered_but_ollama_vera_remains_preferred() -> None:
     routes = discover_cognition_routes(
+        allow_local_no_paid_compute=True,
         command_probe=lambda _name, _args: None,
         ollama_tags=lambda: {
             "models": [
@@ -175,11 +179,13 @@ def test_codex_requires_explicit_route_authority_before_selection() -> None:
     request = CognitionRequest(required_capabilities=("text",))
 
     assert select_cognition_route(request, (codex,)) is None
+    assert select_cognition_route(request, (codex,), authorized_route_ids=frozenset({"codex:cli"})) is None
     assert (
         select_cognition_route(
             request,
             (codex,),
             authorized_route_ids=frozenset({"codex:cli"}),
+            authorized_paid_route_ids=frozenset({"codex:cli"}),
         )
         == codex
     )

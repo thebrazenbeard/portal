@@ -243,3 +243,10 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Tests: `python -m pytest -q tests/unit/test_portal_desktop_app.py tests/unit/test_portal_desktop_portfolio.py --basetemp ../test-tmp-portfolio-ui-final` -> 17 passed. Real SQLite session controls tested with the external wave-preparation boundary substituted; no interactive GUI proof yet.
 - Next: host worker will expose desktop_portfolio; end-to-end qualifier will verify commands through IPC and actual Pre-Active Engine cognition. Installer, policy, and resident changes are separate in-progress slices.
 - Exact head is the commit containing this record. Existing credentials, logon tasks and active runtimes untouched.
+
+## Cognition currentness and authority checkpoint — 2026-10-07
+- Local no-incremental-paid cognition requires explicit policy (default false). Route expiry, cost authority and effect ceilings remain separate. Discovered Codex remains inadmissible by default.
+- Loopback model transport bypasses proxies and blocks redirects. Ollama refreshes tags/show, rejects cloud-backed routes, and binds model digest/modified_at before invocation; trained Pre-Active targets retain exact model provenance.
+- Results are durable before qualified intake; rejected intake retries the stored result without another model invocation. Accepted statuses are verified and source/request identity cannot drift.
+- Focused suite: runtime-venv Python -m pytest cognition/local_provider/runtime/route_currentness tests -> 36 passed, including real loopback transport checks (sandbox socket restriction required approved execution).
+- Exact head: commit containing this continuation. Next: resident worker checkpoint, staged installer and full qualification. Trust limit: the local model server is inside the logged-in user's host boundary; Ollama cannot atomically bind tag inspection and generation.
