@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -165,7 +166,10 @@ def test_file_bridge_client_uses_existing_request_response_envelope(tmp_path: Pa
         client = FileBridgeClient(tmp_path, timeout_seconds=2.0)
         result = client.request("desktop_status", request_id="fixed")
         assert result == {"state": "ACTIVE"}
-        assert not (responses / "fixed.json").exists()
+        assert (responses / "fixed.json").exists()
+        assert client.request("desktop_status", request_id="fixed") == result
+        with pytest.raises(ValueError, match="different payload"):
+            client.request("desktop_recent_activity", request_id="fixed")
     finally:
         thread.join(timeout=2)
 
@@ -183,6 +187,70 @@ def test_file_bridge_client_timeout_before_claim_removes_request(tmp_path: Path)
     assert not (
         tmp_path / "bridge" / "requests" / "never-claimed.json"
     ).exists()
+    cancelled = tmp_path / "bridge" / "cancelled" / "never-claimed.json"
+    assert json.loads(cancelled.read_text())["command"] == "desktop_status"
+    with pytest.raises(BridgeTimeoutError):
+        client.request("desktop_status", request_id="never-claimed")
+    assert not (tmp_path / "bridge/requests/never-claimed.json").exists()
+
+
+def test_timeout_losing_atomic_claim_race_is_unknown_not_cancelled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    client = FileBridgeClient(tmp_path, timeout_seconds=0.01, poll_seconds=0.002)
+    replace = os.replace
+    claimed = tmp_path / "bridge/claimed/raced.json"
+    claimed.parent.mkdir(parents=True)
+
+    def claim_before_cancel(source, destination):
+        if Path(destination).parent.name == "cancelled":
+            replace(source, claimed)
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", claim_before_cancel)
+    with pytest.raises(BridgeOutcomeUnknownError, match="claimed"):
+        client.request("desktop_status", request_id="raced")
+    assert claimed.exists()
+    assert not (tmp_path / "bridge/cancelled/raced.json").exists()
+    with pytest.raises(BridgeOutcomeUnknownError):
+        client.request("desktop_status", request_id="raced")
+    assert not (tmp_path / "bridge/requests/raced.json").exists()
+
+
+def test_response_at_timeout_boundary_is_returned_and_durable(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    client = FileBridgeClient(tmp_path, timeout_seconds=0.01, poll_seconds=0.002)
+    replace = os.replace
+    claimed = tmp_path / "bridge/claimed/late.json"
+    claimed.parent.mkdir(parents=True)
+    response = tmp_path / "bridge/responses/late.json"
+
+    def finish_before_cancel(source, destination):
+        if Path(destination).parent.name == "cancelled":
+            replace(source, claimed)
+            response.write_text(json.dumps({"request_id": "late", "ok": True, "result": {"state": "ACTIVE"}}))
+        replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", finish_before_cancel)
+    assert client.request("desktop_status", request_id="late") == {"state": "ACTIVE"}
+    assert response.exists()
+    assert claimed.exists()
+
+
+def test_identical_claimed_retry_ignores_caller_timestamp_without_resubmission(tmp_path: Path) -> None:
+    claimed = tmp_path / "bridge/claimed/retry.json"
+    claimed.parent.mkdir(parents=True)
+    claimed.write_text(json.dumps({
+        "command": "desktop_cognize", "request_id": "retry", "task": "hello",
+        "source": "HUMAN", "reason": "test", "created_at": 1.0,
+    }))
+    client = FileBridgeClient(tmp_path, timeout_seconds=0.01, poll_seconds=0.002)
+    with pytest.raises(BridgeOutcomeUnknownError):
+        client.request("desktop_cognize", request_id="retry", task="hello", source="HUMAN", reason="test", created_at=2.0)
+    assert not (tmp_path / "bridge/requests/retry.json").exists()
+    with pytest.raises(ValueError, match="different payload"):
+        client.request("desktop_cognize", request_id="retry", task="changed", source="HUMAN", reason="test")
 
 
 def test_file_bridge_client_claimed_request_timeout_is_outcome_unknown(

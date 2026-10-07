@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -13,6 +14,7 @@ from .desktop_runtime import (
     CognitionRequestEnvelope,
     ResidentCognitionEngine,
 )
+from .desktop_supervisor import _launch_guard
 
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -140,6 +142,8 @@ class FileBridgeClient:
         self.requests = self.runtime_root / "bridge" / "requests"
         self.claimed = self.runtime_root / "bridge" / "claimed"
         self.responses = self.runtime_root / "bridge" / "responses"
+        self.cancelled = self.runtime_root / "bridge" / "cancelled"
+        self.submissions = self.runtime_root / "bridge" / "submissions"
         self.timeout_seconds = float(timeout_seconds)
         self.poll_seconds = float(poll_seconds)
 
@@ -148,6 +152,70 @@ class FileBridgeClient:
         if not _REQUEST_ID_RE.fullmatch(request_id):
             raise ValueError("invalid bridge request_id")
         return request_id
+
+    @staticmethod
+    def _identity(body: Mapping[str, object]) -> str:
+        # The resident host owns timestamps. Caller clock changes on a retry
+        # must not make an otherwise identical request a different operation.
+        return json.dumps(
+            {key: value for key, value in body.items() if key != "created_at"},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def _submit_once(self, body: dict[str, object], request_path: Path) -> None:
+        deadline = time.monotonic() + self.timeout_seconds
+        while time.monotonic() < deadline:
+            # A short OS-held file lock releases automatically if a submitter
+            # dies; both GUI instances and retry processes share it.
+            with _launch_guard(self.submissions / (request_path.name + ".lock")) as acquired:
+                if acquired:
+                    self._publish_or_validate(body, request_path)
+                    return
+            time.sleep(self.poll_seconds)
+        raise BridgeOutcomeUnknownError("bridge submission lock timed out")
+
+    def _publish_or_validate(self, body: dict[str, object], request_path: Path) -> None:
+        retained_paths = [
+            directory / request_path.name
+            for directory in (self.submissions, self.requests, self.claimed, self.cancelled)
+        ]
+        for path in retained_paths:
+            try:
+                prior = json.loads(path.read_text(encoding="utf-8-sig"))
+            except FileNotFoundError:
+                continue
+            if not isinstance(prior, dict) or self._identity(prior) != self._identity(body):
+                raise ValueError("bridge request_id already binds a different payload")
+            return
+        if (self.responses / request_path.name).exists():
+            raise ValueError("bridge response has no retained request identity")
+
+        temp = self.submissions / (request_path.name + "." + uuid.uuid4().hex + ".tmp")
+        temp.write_text(json.dumps(body, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            os.replace(temp, retained_paths[0])
+            temp.write_text(json.dumps(body, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(temp, request_path)
+        finally:
+            temp.unlink(missing_ok=True)
+
+    @staticmethod
+    def _response(path: Path, request_id: str) -> dict[str, object] | None:
+        try:
+            response = json.loads(path.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            return None
+        if not isinstance(response, dict):
+            raise RuntimeError("bridge response is not an object")
+        if response.get("request_id") != request_id:
+            raise RuntimeError("bridge response request_id mismatch")
+        if response.get("ok") is not True:
+            raise RuntimeError(str(response.get("error") or "bridge request failed"))
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError("bridge result is not an object")
+        return result
 
     def request(
         self,
@@ -159,55 +227,41 @@ class FileBridgeClient:
         request_id = self._validate_request_id(
             request_id or uuid.uuid4().hex
         )
-        self.requests.mkdir(parents=True, exist_ok=True)
-        self.claimed.mkdir(parents=True, exist_ok=True)
-        self.responses.mkdir(parents=True, exist_ok=True)
+        for directory in (self.requests, self.claimed, self.responses, self.cancelled, self.submissions):
+            directory.mkdir(parents=True, exist_ok=True)
         request_path = self.requests / f"{request_id}.json"
-        claimed_path = self.claimed / f"{request_id}.json"
         response_path = self.responses / f"{request_id}.json"
-        if (
-            request_path.exists()
-            or claimed_path.exists()
-            or response_path.exists()
-        ):
-            raise FileExistsError(f"bridge request_id already exists: {request_id}")
+        cancelled_path = self.cancelled / f"{request_id}.json"
 
         body = {
             **payload,
             "request_id": request_id,
             "command": command,
         }
-        temp = request_path.with_suffix(".json.tmp")
-        temp.write_text(
-            json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
-        temp.replace(request_path)
+        self._submit_once(body, request_path)
+        if cancelled_path.exists():
+            raise BridgeTimeoutError(f"bridge request timed out before host claim: {request_id}")
 
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
-            if response_path.is_file():
-                response = json.loads(
-                    response_path.read_text(encoding="utf-8-sig")
-                )
-                response_path.unlink(missing_ok=True)
-                if not isinstance(response, dict):
-                    raise RuntimeError("bridge response is not an object")
-                if response.get("request_id") != request_id:
-                    raise RuntimeError("bridge response request_id mismatch")
-                if response.get("ok") is not True:
-                    raise RuntimeError(
-                        str(response.get("error") or "bridge request failed")
-                    )
-                result = response.get("result")
-                if not isinstance(result, dict):
-                    raise RuntimeError("bridge result is not an object")
+            result = self._response(response_path, request_id)
+            if result is not None:
                 return result
             time.sleep(self.poll_seconds)
 
         try:
-            request_path.unlink()
+            # Host claim and cancellation compete for the same atomic rename.
+            # Only one can win; a request removed by its host is never called
+            # cancelled or silently resubmitted by this client.
+            os.replace(request_path, cancelled_path)
         except FileNotFoundError:
+            result = self._response(response_path, request_id)
+            if result is not None:
+                return result
+            if cancelled_path.exists():
+                raise BridgeTimeoutError(
+                    f"bridge request timed out before host claim: {request_id}"
+                )
             raise BridgeOutcomeUnknownError(
                 f"bridge request was claimed but no response arrived: {request_id}"
             )
