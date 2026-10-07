@@ -1,1 +1,4 @@
 .project-runner/
+__pycache__/
+*.py[cod]
+*.egg-info/

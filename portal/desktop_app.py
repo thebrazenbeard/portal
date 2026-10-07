@@ -77,6 +77,8 @@ class DesktopViewModel:
             None,
         )
         state = str(status.get("state", "DEGRADED"))
+        if health is not None and health.state is not RuntimeState.ACTIVE:
+            state = health.state.value
         if state not in {item.value for item in RuntimeState}:
             state = "DEGRADED"
         pending = status.get("pending_effects", [])
@@ -94,7 +96,7 @@ class DesktopViewModel:
             recent_activity=tuple(activities),
             pending_effects=tuple(item for item in pending if isinstance(item, dict))
             if isinstance(pending, list) else (),
-            health_reason=str(status.get("failure") or status.get("reason") or ""),
+            health_reason=health.reason if health and health.state is not RuntimeState.ACTIVE else str(status.get("failure") or status.get("reason") or ""),
             heartbeat_age_seconds=health.heartbeat_age_seconds if health else None,
             components=dict(components) if isinstance(components, dict) else {},
         )
@@ -453,7 +455,7 @@ def default_runtime_root() -> Path:
         return Path(configured)
     local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     candidates = []
-    for base in (local_app_data / "VeraDesktopRuntime", local_app_data / "PortalVera"):
+    for base in (local_app_data / "VeraDesktopRuntime", local_app_data / "PortalVera", local_app_data / "P.O.R.T.A.L." / "runtimes"):
         if not base.is_dir():
             continue
         for runtime_root in base.iterdir():

@@ -264,3 +264,9 @@ This is source capability only. No trained adapter was installed, bound, restart
 - Native Task Scheduler invokes the thin supervisor. Recovery can launch the installed host module when a historical shim is absent, with stdout/stderr retained in the root's logs. Desktop close still controls only its window.
 - TDD: two launcher recovery/logging/CLI tests failed before implementation; final installer/install/IPC/supervisor surface -> 64 passed (including native Windows PowerShell dry-run, approved execution because sandbox denies registry reads).
 - Exact head: commit containing this continuation. Next: qualification correlation proof, full tests with workspace TEMP/TMP, clean staged install and native window lifecycle probe. No logon task or live-runtime cutover performed.
+
+## Desktop stale-health correction — 2026-10-07
+- Host IPC may remain readable while process/heartbeat evidence is DEGRADED. The GUI now preserves supervisor health through that refresh; a cached ACTIVE response cannot conceal stale heartbeat evidence.
+- Installer's new user-local P.O.R.T.A.L./runtimes directory joins explicit activated-install selection; explicit runtime-root remains preferred for stages.
+- Focused app test observed wrong ACTIVE before fix; final app view-model suite 16 passed. Generated Python caches/packaging metadata ignored.
+- Exact head: commit containing this record. Next: qualification source-event completion proof and clean staged installation.

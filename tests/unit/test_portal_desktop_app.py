@@ -250,3 +250,11 @@ def test_default_selects_existing_explicitly_activated_install(monkeypatch, tmp_
     (installed / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps({"activation": {"active": True, "qualified": True}}))
     (installed / "QUALIFICATION.json").write_text(json.dumps({"qualified": True, "qualified_at": 10}))
     assert module.default_runtime_root() == installed
+
+def test_loaded_runtime_ipc_cannot_override_stale_supervisor_health():
+    class Supervisor:
+        def ensure_started(self):
+            return RuntimeStatus(RuntimeState.DEGRADED, 'heartbeat_stale_process_alive', components_loaded=True, heartbeat_age_seconds=8)
+    snapshot = DesktopViewModel(FakeClient([]), supervisor=Supervisor()).refresh()
+    assert snapshot.runtime_state == 'DEGRADED'
+    assert snapshot.health_reason == 'heartbeat_stale_process_alive'
