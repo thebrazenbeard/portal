@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -190,6 +191,37 @@ def test_component_check_invokes_exact_root_and_requires_success(tmp_path: Path,
     result = installer._check_components(tmp_path / "python.exe", tmp_path)
     assert result["components_loaded"] is True
     assert seen[0][-3:] == ["--runtime-root", str(tmp_path), "--check"]
+
+
+def test_windows_exact_checkout_enables_repository_local_longpaths_before_checkout(tmp_path: Path, monkeypatch) -> None:
+    source = _spec().sources[0]
+    destination = tmp_path / "source"
+    (destination / ".git").mkdir(parents=True)
+    calls = []
+    def run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, source.sha if "rev-parse" in args else "", "")
+    monkeypatch.setattr(installer, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(installer, "_run", run)
+    installer._clone_exact(source, destination)
+    config = ["git", "-C", str(destination), "config", "--local", "core.longpaths", "true"]
+    assert config in calls
+    checkout = next(index for index, args in enumerate(calls) if "checkout" in args)
+    status = next(index for index, args in enumerate(calls) if "status" in args)
+    assert calls.index(config) < checkout < status
+    assert calls[status][-2:] == ["--porcelain", "--untracked-files=no"]
+
+
+def test_exact_checkout_rejects_missing_tracked_files_even_when_checkout_returns_success(tmp_path: Path, monkeypatch) -> None:
+    source = _spec().sources[0]
+    destination = tmp_path / "source"
+    (destination / ".git").mkdir(parents=True)
+    def run(args, **_kwargs):
+        output = " D resources/missing.txt\n" if "status" in args else source.sha if "rev-parse" in args else ""
+        return subprocess.CompletedProcess(args, 0, output, "")
+    monkeypatch.setattr(installer, "_run", run)
+    with pytest.raises(RuntimeError, match="tracked source checkout is not clean"):
+        installer._clone_exact(source, destination)
 
 
 def test_startup_accepts_no_admitted_route_but_rejects_stopped_worker(tmp_path: Path, monkeypatch) -> None:

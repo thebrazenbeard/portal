@@ -85,6 +85,10 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
             source.sha,
         ]
     )
+    if os.name == "nt":
+        # Deep Vera resource paths need Git's checkout support. This setting
+        # belongs only to this staged clone; no global/OS policy is changed.
+        _run(["git", "-C", str(destination), "config", "--local", "core.longpaths", "true"])
     _run(
         [
             "git",
@@ -103,6 +107,14 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
         raise RuntimeError(
             f"{source.component} checkout mismatch: "
             f"expected {source.sha}, got {observed}"
+        )
+    dirty = _run(
+        ["git", "-C", str(destination), "status", "--porcelain", "--untracked-files=no"],
+        capture=True,
+    ).stdout.strip()
+    if dirty:
+        raise RuntimeError(
+            f"{source.component} tracked source checkout is not clean after exact checkout: {dirty}"
         )
 
 
