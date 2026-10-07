@@ -31,7 +31,7 @@ def test_portal_identity_and_bootstrap_provenance_are_explicit() -> None:
     assert bootstrap["source_tree"] == SOURCE_TREE
 
 
-def test_single_chat_whole_portfolio_mission_is_architectural() -> None:
+def test_whole_portfolio_host_interface_mission_is_architectural() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     portal_doc = (ROOT / "PORTAL.md").read_text(encoding="utf-8")
     architecture = (
@@ -47,10 +47,18 @@ def test_single_chat_whole_portfolio_mission_is_architectural() -> None:
         / "PORTAL_LOOP_DONOR_MINING_V1.md"
     ).read_text(encoding="utf-8")
 
-    for text in (readme, portal_doc, architecture):
-        assert "single P.O.R.T.A.L. chat" in text
-        assert "whole portfolio" in text
-        assert "parallel" in text.lower()
+    assert "whole-portfolio orchestration and host interface layer" in readme
+    assert "ChatGPT can be one interaction surface" in readme
+    assert "not a runtime dependency" in readme
+
+    assert "whole-portfolio orchestration and host interface layer" in portal_doc
+    assert "one interaction surface" in portal_doc
+    assert "not canonical persistence" in portal_doc
+    assert "parallel" in portal_doc.lower()
+
+    assert "single P.O.R.T.A.L. chat" in architecture
+    assert "whole portfolio" in architecture
+    assert "parallel" in architecture.lower()
 
     assert "Vera" in architecture
     assert "Project Runner" in architecture

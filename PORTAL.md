@@ -1,8 +1,8 @@
 # P.O.R.T.A.L. Coordination Contract
 
-**P.O.R.T.A.L. — Portfolio Orchestration & Repository Tracking Access Layer**
+**P.O.R.T.A.L. � Portfolio Orchestration & Repository Tracking Access Layer**
 
-P.O.R.T.A.L. is designed so a **single P.O.R.T.A.L. chat** can coordinate and advance the **whole portfolio** through independent **parallel** execution lanes.
+P.O.R.T.A.L. is Vera's **whole-portfolio orchestration and host interface layer**. A chat can be **one interaction surface**, but it is not the runtime, not canonical persistence, and not the architectural center. P.O.R.T.A.L. coordinates the **whole portfolio** through independent **parallel** execution lanes while durable state, execution, verification, and recovery remain outside any one interface.
 
 Project Runner remains the governed execution substrate. P.O.R.T.A.L. composes its currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics rather than replacing them.
 
@@ -10,11 +10,11 @@ Project Runner remains the governed execution substrate. P.O.R.T.A.L. composes i
 
 Mission:
 - whole accessible active portfolio;
-- single chat control surface;
+- multiple interchangeable interaction surfaces over one durable orchestration boundary;
 - Vera cross-project coordination;
 - maximal safe parallel waves;
 - continuous lane refill;
-- durable recovery across chat/runtime loss.
+- durable recovery across UI/chat/runtime loss.
 
 Implemented coordinator core:
 - live repository discovery with exact private repository membership kept operator-local; command-session live overlays schedule those private repositories locally as `NO_EFFECT` currentness audits until stronger authority is separately bound, while public portfolio artifacts remain name-redacted;
@@ -57,11 +57,11 @@ The inherited `runner/` already exposes the critical loop primitives:
 
 The command-session/refill layer composes those mechanisms rather than replacing them. Remaining execution-adapter work should bind qualified repository/workstation/service routes behind a small capability/evidence/reconciliation contract rather than adding another scheduler.
 
-## Single-chat control boundary
+## Interaction/control boundary
 
-The single P.O.R.T.A.L. chat is an operator/control surface, not canonical persistence.
+A P.O.R.T.A.L. chat, P.O.R.T.A.L. Desktop, CLI, or another qualified host can be an operator/control surface. No one interaction surface is canonical persistence.
 
-A fresh chat must be able to reconstruct the run from durable state and continue without requiring the prior transcript.
+A fresh interaction surface must be able to reconstruct the run from durable state and continue without requiring the prior transcript.
 
 Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution routes are selected per target/effect from currently qualified repository, workstation, or service adapters. Discovery or connector presence is not capability, attachment, currentness, or authority. No workstation or repository is permanently married to one transport.
 
