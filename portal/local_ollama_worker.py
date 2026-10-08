@@ -14,6 +14,14 @@ REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 OUTPUT_PATH = "docs/portal/local-review-evidence-v1.md"
 
 
+def _safe_repository(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and REPO.fullmatch(value) is not None
+        and all(part not in {".", ".."} for part in value.split("/"))
+    )
+
+
 def _git(checkout: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(checkout), *args],
@@ -39,7 +47,7 @@ def _validate(packet: dict, checkout: Path) -> str:
     if (packet.get("execution_promotion") is not None
             or packet.get("execution_effect_class") is not None):
         raise ValueError("unexpected execution promotion")
-    if not isinstance(packet.get("repository"), str) or not REPO.fullmatch(packet["repository"]):
+    if not _safe_repository(packet.get("repository")):
         raise ValueError("invalid repository")
     if not isinstance(packet.get("exact_head"), str) or not SHA40.fullmatch(packet["exact_head"]):
         raise ValueError("invalid head")
@@ -56,8 +64,13 @@ def _validate(packet: dict, checkout: Path) -> str:
         raise ValueError("wrong checkout origin")
     if (checkout / OUTPUT_PATH).exists():
         raise ValueError("proposal path already exists")
-    whitelist = ("README.md", ".github/workflows/manifest-provenance.yml",
-                 "tests/test_manifest_validation.py")
+    whitelist = (
+        "README.md", "PORTAL.md", "pyproject.toml", "package.json",
+        "pytest.ini", ".github/workflows/ci.yml",
+        ".github/workflows/test.yml", ".github/workflows/tests.yml",
+        ".github/workflows/manifest-provenance.yml",
+        "tests/test_manifest_validation.py",
+    )
     sections = []
     for relative in whitelist:
         item = checkout / relative
@@ -148,12 +161,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--portal-packet", required=True)
     parser.add_argument("--portal-receipt", required=True)
-    parser.add_argument("--checkout", required=True)
+    checkout_group = parser.add_mutually_exclusive_group(required=True)
+    checkout_group.add_argument("--checkout")
+    checkout_group.add_argument("--checkout-root")
     parser.add_argument("--model", default="qwen3:4b-instruct")
     args = parser.parse_args()
     try:
+        if args.checkout_root:
+            packet = json.loads(Path(args.portal_packet).read_text(encoding="utf-8"))
+            repository = packet.get("repository")
+            if not _safe_repository(repository):
+                raise ValueError("invalid checkout repository")
+            checkout = Path(args.checkout_root) / repository
+        else:
+            checkout = Path(args.checkout)
         run(Path(args.portal_packet), Path(args.portal_receipt),
-            Path(args.checkout), args.model)
+            checkout, args.model)
         return 0
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, URLError) as exc:
         receipt = Path(args.portal_receipt)
