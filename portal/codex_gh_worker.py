@@ -3,12 +3,38 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import subprocess
 from typing import Callable, Mapping
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def _diagnostic_code(stderr: str) -> str:
+    """Map untrusted subprocess stderr to static labels, never persist its text."""
+    value = stderr.casefold()
+    if "read acl run had errors" in value:
+        return "SANDBOX_READ_ACL"
+    if "createprocesswithlogonw failed" in value:
+        return "SANDBOX_CREATE_PROCESS"
+    if "windows sandbox failed" in value:
+        return "SANDBOX_FAILURE"
+    return "UNCLASSIFIED"
+
+
+class WorkerCommandFailed(RuntimeError):
+    """Nonzero child command with a private-safe, stage-bound diagnostic."""
+
+    def __init__(
+        self, *, tool: str, returncode: int, phase: str, diagnostic: str
+    ) -> None:
+        self.phase = phase
+        super().__init__(
+            f"command failed ({tool}): exit {returncode}; "
+            f"phase={phase}; diagnostic={diagnostic}"
+        )
+
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
@@ -23,6 +49,7 @@ def _checked(
     argv: tuple[str, ...],
     *,
     timeout_seconds: float,
+    phase: str = "pre_codex",
 ) -> subprocess.CompletedProcess[str]:
     result = runner(
         argv,
@@ -33,8 +60,14 @@ def _checked(
         timeout=timeout_seconds,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"command failed ({Path(argv[0]).name}): exit {result.returncode}"
+        tool = PureWindowsPath(str(argv[0])).name
+        raise WorkerCommandFailed(
+            tool=tool,
+            returncode=result.returncode,
+            phase=phase,
+            diagnostic=_diagnostic_code(
+                result.stderr if isinstance(result.stderr, str) else ""
+            ),
         )
     return result
 
@@ -84,6 +117,7 @@ def _changed_paths(
             "--untracked-files=all",
         ),
         timeout_seconds=timeout_seconds,
+        phase="post_codex",
     )
     changed: list[tuple[str, str]] = []
     for record in result.stdout.split("\0"):
@@ -141,6 +175,7 @@ def _proposal_files(
                 runner,
                 (git, "-C", str(checkout), "rev-parse", f"{head}:{path}"),
                 timeout_seconds=timeout_seconds,
+                phase="post_codex",
             ).stdout.strip()
             if len(observed) != 40 or any(
                 ch not in "0123456789abcdef" for ch in observed
@@ -242,11 +277,13 @@ def run_codex_gh_proposal(
             _prompt(packet),
         ),
         timeout_seconds=timeout_seconds,
+        phase="codex_execution",
     )
     local_head = _checked(
         process_runner,
         (git, "-C", str(checkout), "rev-parse", "HEAD"),
         timeout_seconds=timeout_seconds,
+        phase="post_codex",
     ).stdout.strip()
     if local_head != head:
         raise ValueError("local HEAD moved during proposal generation")
@@ -315,6 +352,23 @@ def main() -> int:
                 "schema": "PORTAL_WORKER_RECEIPT_V1",
                 "receipt_class": "FAILED_DETERMINISTIC",
                 "reason": f"{type(exc).__name__}: {exc}",
+                "artifacts": [],
+            },
+        )
+    except WorkerCommandFailed as exc:
+        # Codex, and checks performed after Codex, can leave local changes even
+        # when the subprocess exits nonzero. Never silently invite a retry.
+        unknown = exc.phase in {"codex_execution", "post_codex"}
+        _write_json(
+            args.portal_receipt,
+            {
+                "schema": "PORTAL_WORKER_RECEIPT_V1",
+                "receipt_class": "OUTCOME_UNKNOWN" if unknown else "FAILED_RETRYABLE",
+                "reason": (
+                    f"{exc}; inspect before retry"
+                    if unknown
+                    else str(exc)
+                ),
                 "artifacts": [],
             },
         )
