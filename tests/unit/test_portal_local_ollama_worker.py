@@ -110,3 +110,43 @@ def test_temporary_local_model_outage_is_retryable(tmp_path, monkeypatch):
     assert worker.main() == 1
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert payload["receipt_class"] == "FAILED_RETRYABLE"
+
+
+def test_indexed_checkout_root_uses_repository_identity(tmp_path, monkeypatch):
+    checkout, packet, packet_path = _seed(tmp_path)
+    root = tmp_path / "indexed"
+    owner = root / "thebrazenbeard"
+    owner.mkdir(parents=True)
+    checkout.rename(owner / "firesafe")
+    monkeypatch.setattr(worker, "_query_local_model", lambda *args: {
+        "observations": ["README provides a bounded source review."],
+        "suggested_check": "Compare the README to this exact head.",
+        "uncertainty": "Only provided files were read.",
+    })
+    receipt = tmp_path / "receipt.json"
+    monkeypatch.setattr("sys.argv", [
+        "local_ollama_worker", "--portal-packet", str(packet_path),
+        "--portal-receipt", str(receipt),
+        "--checkout-root", str(root),
+    ])
+    assert worker.main() == 0
+    assert json.loads(receipt.read_text(encoding="utf-8"))["receipt_class"] == "PROPOSED_SOURCE_TREE"
+    assert _git(owner / "firesafe", "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("name", [
+    "../escape", "thebrazenbeard/..", "../firesafe", "thebrazenbeard/.",
+])
+def test_checkout_root_rejects_traversal_before_model(tmp_path, monkeypatch, name):
+    checkout, packet, packet_path = _seed(tmp_path)
+    packet["repository"] = name
+    packet_path.write_text(json.dumps(packet), encoding="utf-8")
+    monkeypatch.setattr(worker, "_query_local_model",
+                        lambda *args: pytest.fail("traversal reached model"))
+    receipt = tmp_path / "receipt.json"
+    monkeypatch.setattr("sys.argv", [
+        "local_ollama_worker", "--portal-packet", str(packet_path),
+        "--portal-receipt", str(receipt), "--checkout-root", str(tmp_path),
+    ])
+    assert worker.main() == 1
+    assert json.loads(receipt.read_text(encoding="utf-8"))["receipt_class"] == "FAILED_DETERMINISTIC"

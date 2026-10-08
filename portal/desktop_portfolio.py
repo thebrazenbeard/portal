@@ -497,7 +497,7 @@ class DesktopPortfolioController:
                 ),
                 max_parallel=int(payload.get("max_parallel", 1)),
             )
-        elif action not in {"status", "run", "continue", "hold", "stop"}:
+        elif action not in {"status", "inspect", "run", "continue", "hold", "stop"}:
             raise ValueError("unsupported portfolio control")
 
         session_id = str(
@@ -510,9 +510,24 @@ class DesktopPortfolioController:
             required_for_action=action in {"configure", "run", "continue"}
         )
 
+        if (action == "continue" and profile is None
+                and payload.get("expected_generation") is not None):
+            raise ValueError("pinned continuation requires an existing profile")
         if action in {"run", "continue"} and profile is None:
             profile = self._bootstrap_live_profile()
             profile_error = None
+
+        if action == "continue" and payload.get("expected_generation") is not None:
+            expected_generation = payload["expected_generation"]
+            if isinstance(expected_generation, bool) or not isinstance(expected_generation, int):
+                raise ValueError("expected_generation must be an integer")
+            current = self.session.status(session_id)
+            if (current["control_state"] != "RUNNING"
+                    or current["generation"] != expected_generation):
+                raise ValueError("stale portfolio generation; no new work admitted")
+            expected_holder = payload.get("expected_holder")
+            if expected_holder is not None and current["holder"] != expected_holder:
+                raise ValueError("portfolio holder changed; no new work admitted")
 
         if action in {"run", "continue"}:
             assert profile is not None

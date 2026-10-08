@@ -285,3 +285,43 @@ def test_live_auto_refuses_silent_public_only_inventory_downgrade(
         ).fetchone()[0] == 0
     finally:
         session.close()
+
+
+def test_autopilot_inspect_and_generation_cas_fail_closed(tmp_path, monkeypatch):
+    paths = {}
+    for name in ("wave", "corpus", "projects", "nodes"):
+        item = tmp_path / (name + ".json")
+        item.write_text("{}", encoding="utf-8")
+        paths[name] = str(item)
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(paths), encoding="utf-8")
+    monkeypatch.setattr(
+        "portal.session.prepare_portal_wave",
+        lambda **kwargs: SimpleNamespace(packets=()),
+    )
+    monkeypatch.setattr(
+        "portal.desktop_portfolio.load_execution_nodes", lambda path: ()
+    )
+    session = PortalCommandSession(tmp_path / "portal.sqlite3")
+    try:
+        controller = DesktopPortfolioController(tmp_path, session=session)
+        controller.handle({"action": "configure", "profile_path": str(profile)})
+        initial = controller.handle({"action": "run", "session_id": "portfolio"})
+        assert initial["session"]["generation"] == 1
+        fresh = controller.handle({"action": "inspect", "session_id": "portfolio"})
+        assert fresh["session"]["generation"] == 1
+        holder = fresh["session"]["holder"]
+        with pytest.raises(ValueError, match="stale portfolio generation"):
+            controller.handle({"action": "continue", "session_id": "portfolio",
+                               "expected_generation": 0,
+                               "expected_holder": holder})
+        with pytest.raises(ValueError, match="holder changed"):
+            controller.handle({"action": "continue", "session_id": "portfolio",
+                               "expected_generation": 1,
+                               "expected_holder": "other-worker"})
+        assert controller.handle({"action": "inspect"})["session"]["generation"] == 1
+        controller.handle({"action": "continue", "session_id": "portfolio",
+                           "expected_generation": 1, "expected_holder": holder})
+        assert controller.handle({"action": "inspect"})["session"]["generation"] == 2
+    finally:
+        session.close()
