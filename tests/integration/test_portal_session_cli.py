@@ -425,6 +425,10 @@ def test_session_run_persists_non_secret_resume_envelope(
     FakeSession.calls.clear()
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
 
+    def reject_live_discovery(*args, **kwargs):
+        raise AssertionError("resume serialization test must not discover GitHub")
+
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", reject_live_discovery)
     nodes_path = ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"
     code = portal_cli.entrypoint([
         "run",
@@ -440,6 +444,7 @@ def test_session_run_persists_non_secret_resume_envelope(
         "--host-bridge",
         "--host-node-occupancy",
         "--host-frontier-currentness",
+        "--static-projects",
         "--project-runner-tasks", f"lappy={tmp_path / 'lappy-tasks'}",
         "--occupied-node", "worklaptop=0",
         "--once",
@@ -467,6 +472,7 @@ def test_session_run_persists_non_secret_resume_envelope(
     assert spec["host_bridge"] is True
     assert spec["host_node_occupancy"] is True
     assert spec["host_frontier_currentness"] is True
+    assert spec["static_projects"] is True
     assert spec["project_runner_tasks"] == [
         f"lappy={tmp_path / 'lappy-tasks'}"
     ]
