@@ -18,6 +18,7 @@ _ALLOWED_WORKER_KEYS = {
     "command",
     "timeout_seconds",
     "pass_env",
+    "allow_cross_os_workspace",
     "codex",
     "gh",
     "git",
@@ -75,6 +76,11 @@ def load_worker_backends(path: Path) -> dict[str, ProcessWorkerSpec]:
         if not isinstance(pass_env, list):
             raise ValueError("process worker backend pass_env must be a list")
         timeout_seconds = raw.get("timeout_seconds", 900.0)
+        allow_cross_os_workspace = raw.get("allow_cross_os_workspace", False)
+        if not isinstance(allow_cross_os_workspace, bool):
+            raise ValueError(
+                "allow_cross_os_workspace must be boolean"
+            )
 
         if kind == "PROCESS_JSON_V1":
             if any(raw.get(name) is not None for name in ("codex", "gh", "git")):
@@ -110,6 +116,7 @@ def load_worker_backends(path: Path) -> dict[str, ProcessWorkerSpec]:
             command=tuple(command),
             timeout_seconds=timeout_seconds,
             pass_env=tuple(pass_env),
+            allow_cross_os_workspace=allow_cross_os_workspace,
         )
 
     return dict(sorted(result.items()))

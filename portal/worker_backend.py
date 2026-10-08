@@ -8,6 +8,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 import re
 import subprocess
+import sys
 from typing import Mapping
 
 
@@ -29,6 +30,7 @@ class ProcessWorkerSpec:
     command: tuple[str, ...]
     timeout_seconds: float = 900.0
     pass_env: tuple[str, ...] = ()
+    allow_cross_os_workspace: bool = False
 
     def __post_init__(self) -> None:
         if not self.command:
@@ -44,6 +46,8 @@ class ProcessWorkerSpec:
             or self.timeout_seconds <= 0
         ):
             raise ValueError("process worker timeout_seconds must be positive")
+        if not isinstance(self.allow_cross_os_workspace, bool):
+            raise ValueError("allow_cross_os_workspace must be boolean")
         normalized_env: list[str] = []
         seen: set[str] = set()
         for name in self.pass_env:
@@ -76,6 +80,65 @@ class ProcessWorkerResult:
     returncode: int | None
     timed_out: bool
     replayed: bool
+
+
+def _host_worker_platform() -> str:
+    """Distinguish Linux-on-WSL from ordinary Linux without starting WSL."""
+    if os.name == "nt":
+        return "windows"
+    if sys.platform.startswith("linux"):
+        if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+            return "wsl"
+        try:
+            release = Path("/proc/sys/kernel/osrelease").read_text(
+                encoding="utf-8"
+            ).casefold()
+        except OSError:
+            release = ""
+        if "microsoft" in release or "wsl" in release:
+            return "wsl"
+    return "linux"
+
+
+def _cross_os_workspace_reason(path: str, *, worker_platform: str) -> str | None:
+    """Identify only known Windows/WSL cross-filesystem workspace layouts."""
+    if worker_platform == "wsl":
+        normalized = path.replace("\\", "/")
+        if re.match(r"^/mnt/[a-z](?:/|$)", normalized, re.IGNORECASE):
+            return "WSL worker workspace uses Windows-mounted drive"
+    if worker_platform == "windows":
+        normalized = path.replace("/", "\\").casefold()
+        if normalized.startswith((
+            "\\\\wsl$\\", "\\\\wsl.localhost\\",
+            "\\\\?\\unc\\wsl$\\", "\\\\?\\unc\\wsl.localhost\\",
+        )):
+            return "Windows worker workspace uses WSL network filesystem"
+    return None
+
+
+def validate_process_worker_workspace_locality(
+    workspace_root: Path,
+    *,
+    allow_cross_os_workspace: bool = False,
+) -> None:
+    """Reject the known slow crossing before packet claims, files, or processes."""
+    if allow_cross_os_workspace:
+        return
+    root = Path(workspace_root)
+    platform = _host_worker_platform()
+    # Check raw paths first: resolving a Windows WSL UNC path could itself
+    # touch the remote filesystem. Resolve only after passing that check.
+    reason = _cross_os_workspace_reason(str(root), worker_platform=platform)
+    if reason is None:
+        reason = _cross_os_workspace_reason(
+            str(root.resolve(strict=False)), worker_platform=platform
+        )
+    if reason:
+        raise ValueError(
+            reason
+            + "; choose a filesystem-local workspace, or explicitly set "
+            "allow_cross_os_workspace=true for this worker"
+        )
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -331,6 +394,10 @@ def run_process_worker(
     if packet.get("target_ref_mutation_authorized") is not False:
         raise ValueError("process worker packet must deny target ref mutation")
 
+    validate_process_worker_workspace_locality(
+        workspace_root,
+        allow_cross_os_workspace=spec.allow_cross_os_workspace,
+    )
     identity = _delivery_identity(packet)
     workspace = Path(workspace_root) / identity
     workspace.mkdir(parents=True, exist_ok=True)

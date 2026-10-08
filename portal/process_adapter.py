@@ -16,7 +16,10 @@ from .execution_router import CapabilityExecutionAdapter
 from .models import ExecutionNode
 from .route_resolver import PortalRouteAdvertisement, PortalRouteRequest
 from .wave_runtime import PortalWaveStore
-from .worker_backend import ProcessWorkerSpec
+from .worker_backend import (
+    ProcessWorkerSpec,
+    validate_process_worker_workspace_locality,
+)
 from .worker_runtime import run_wave_proposal_workers_once
 
 if TYPE_CHECKING:
@@ -67,6 +70,13 @@ class PortalProposalProcessAdapter:
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("duplicate execution node id")
 
+        # Fail before durable session placement/dispatch: all attached local
+        # process workers share this workspace root.
+        for spec in backends.values():
+            validate_process_worker_workspace_locality(
+                workspace_root,
+                allow_cross_os_workspace=spec.allow_cross_os_workspace,
+            )
         self.state_db = Path(state_db)
         self.nodes = tuple(nodes)
         self.backends = dict(backends)
