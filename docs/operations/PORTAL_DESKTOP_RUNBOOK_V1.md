@@ -153,3 +153,34 @@ Inspect `logs/install.log`, `logs/runtime.stdout.log`, and `logs/runtime.stderr.
 For upgrades, select a new installation ID and a new user-local runtime root, freeze the new four revisions, and dry-run first. A different source spec or cognition policy is rejected in an existing bound root. Stage and qualify the new runtime before making an explicit activation choice. Do not replace executing editable sources or silently copy/migrate existing Vera state into another qualified runtime.
 
 Cognition and portfolio admission carry no protected-effect authority. The pending-effects display is observable state, not an approval grant or automatic executor. Exact effect, target, and scope still require Patrick's explicit authority through the governed effect path. No merge, public deployment, credential/permission mutation, paid compute, destructive state change, or private publication is authorized by installing or operating this shell.
+
+## Windows/WSL process-worker filesystem locality
+
+Process-proposal workers default to a **filesystem-local workspace**. This is
+a local execution precondition, not a claim that P.O.R.T.A.L. itself has moved
+from Windows to Linux, or that WSL executors are installed or active.
+
+- Windows-native workers should use Windows-local workspace paths such as
+  `C:\\Users\\...\\P.O.R.T.A.L\\...` or `D:\\VERA\\...`. Windows
+  worker workspaces on `\\\\wsl$\\...` and `\\\\wsl.localhost\\...` are rejected.
+- WSL Linux workers should use Linux-native paths such as
+  `/home/<user>/portal-work`. WSL worker workspaces under
+  `/mnt/c/...`, `/mnt/d/...`, or other one-letter Windows mounts are
+  rejected. Ordinary Linux workers do not automatically inherit this
+  WSL-specific mounted-drive rule.
+- The check runs both when the local proposal adapter is constructed (before
+  dispatch) and before the per-delivery workspace is created. It checks the
+  supplied path and its resolved location to catch common symlink crossings.
+  It does **not** prove the underlying volume's type, prevent all custom
+  mounts, validate a remotely advertised worker, or measure performance.
+- When cross-filesystem work is deliberate, explicitly set
+  `allow_cross_os_workspace: true` **on the relevant worker** in a
+  `PORTAL_WORKER_BACKENDS_V1` manifest. This is an operator exception for
+  workspace placement, **not** execution, source mutation, publication,
+  protected-effect, or paid-compute authority. The default is false.
+
+This aligns workspace locality with Microsoft's [Windows/WSL file storage
+guidance](https://learn.microsoft.com/en-us/windows/wsl/filesystems#file-storage-and-performance-across-file-systems).
+P.O.R.T.A.L. still needs an appropriate attached worker/node, exact-head
+binding, collision control, real receipts, and verified completion; placing
+work on a local filesystem grants none of those by itself.
