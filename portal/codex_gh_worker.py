@@ -27,6 +27,7 @@ def _checked(
     result = runner(
         argv,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         timeout=timeout_seconds,
