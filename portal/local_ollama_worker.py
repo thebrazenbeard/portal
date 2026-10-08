@@ -22,6 +22,24 @@ def _safe_repository(value: object) -> bool:
     )
 
 
+def _checkout_from_index(index_path: Path, repository: str) -> Path:
+    if not _safe_repository(repository):
+        raise ValueError("invalid repository")
+    index = json.loads(index_path.read_text(encoding="utf-8-sig"))
+    if (not isinstance(index, dict) or
+            set(index) != {"schema", "repositories"} or
+            index["schema"] != "PORTAL_EXISTING_CHECKOUT_INDEX_V1" or
+            not isinstance(index["repositories"], dict)):
+        raise ValueError("invalid existing checkout index")
+    item = index["repositories"].get(repository)
+    if not isinstance(item, str) or not item.strip():
+        raise ValueError("repository has no registered local checkout")
+    path = Path(item)
+    if not path.is_absolute() or not path.is_dir() or path.is_symlink():
+        raise ValueError("registered checkout is not a local directory")
+    return path
+
+
 def _git(checkout: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(checkout), *args],
@@ -164,15 +182,19 @@ def main() -> int:
     checkout_group = parser.add_mutually_exclusive_group(required=True)
     checkout_group.add_argument("--checkout")
     checkout_group.add_argument("--checkout-root")
+    checkout_group.add_argument("--checkout-index")
     parser.add_argument("--model", default="qwen3:4b-instruct")
     args = parser.parse_args()
     try:
-        if args.checkout_root:
+        if args.checkout_root or args.checkout_index:
             packet = json.loads(Path(args.portal_packet).read_text(encoding="utf-8"))
             repository = packet.get("repository")
             if not _safe_repository(repository):
                 raise ValueError("invalid checkout repository")
-            checkout = Path(args.checkout_root) / repository
+            if args.checkout_index:
+                checkout = _checkout_from_index(Path(args.checkout_index), repository)
+            else:
+                checkout = Path(args.checkout_root) / repository
         else:
             checkout = Path(args.checkout)
         run(Path(args.portal_packet), Path(args.portal_receipt),
