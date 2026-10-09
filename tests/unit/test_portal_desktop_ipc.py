@@ -341,7 +341,7 @@ def test_transient_response_sharing_denial_keeps_same_request_polling(tmp_path, 
 
 
 def test_retry_recovers_submission_interrupted_before_request_publication(tmp_path: Path, monkeypatch) -> None:
-    client = FileBridgeClient(tmp_path, timeout_seconds=0.2, poll_seconds=0.002)
+    client = FileBridgeClient(tmp_path, timeout_seconds=2.0, poll_seconds=0.002)
     replace = os.replace
     request_path = tmp_path / "bridge/requests/interrupted.json"
     submission_path = tmp_path / "bridge/submissions/interrupted.json"
@@ -361,17 +361,22 @@ def test_retry_recovers_submission_interrupted_before_request_publication(tmp_pa
     observed = []
 
     def server():
-        deadline = time.monotonic() + 0.5
-        while not request_path.exists() and time.monotonic() < deadline:
-            time.sleep(0.002)
-        if request_path.exists():
-            observed.append(json.loads(request_path.read_text()))
-            request_path.replace(tmp_path / "bridge/claimed/interrupted.json")
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            try:
+                data = json.loads(request_path.read_text())
+                request_path.replace(tmp_path / "bridge/claimed/interrupted.json")
+            except (FileNotFoundError, PermissionError):
+                # Atomic rename and transient Windows sharing may race with a read.
+                time.sleep(0.002)
+                continue
+            observed.append(data)
             staged_response = response_path.with_suffix(".json.tmp")
             staged_response.write_text(json.dumps({
                 "request_id": "interrupted", "ok": True, "result": {"state": "ACTIVE"},
             }))
             staged_response.replace(response_path)
+            return
 
     thread = threading.Thread(target=server)
     thread.start()

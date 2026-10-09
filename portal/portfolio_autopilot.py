@@ -183,6 +183,9 @@ class PortfolioAutopilot:
                 action="continue", session_id="portfolio",
                 expected_generation=generation,
                 expected_holder=session["holder"],
+                expected_command_sha256=self.command_sha,
+                expected_interpreter_sha256=self.interpreter_sha,
+                expected_worker_sha256=self.worker_sha,
             )
             after = self.client.request(
                 "desktop_portfolio", action="inspect", session_id="portfolio"

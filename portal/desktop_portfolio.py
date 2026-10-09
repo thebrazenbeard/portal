@@ -26,8 +26,8 @@ from .process_adapter import (
     PortalProposalProcessAdapter,
     build_process_proposal_execution_adapter,
 )
+from .resident_worker_trust import load_resident_backends
 from .session import PortalCommandSession
-from .worker_registry import load_worker_backends
 
 
 ExecutableResolver = Callable[[str], str | None]
@@ -438,14 +438,22 @@ class DesktopPortfolioController:
         profile: dict,
         nodes,
         token: str | None,
+        *,
+        pins: dict | None = None,
     ):
         worker_backends = profile.get("worker_backends")
         if worker_backends is None:
             return None
+        backends = load_resident_backends(
+            Path(worker_backends),
+            nodes=tuple(nodes),
+            pins=pins,
+            live_auto=profile.get("mode") == "LIVE_AUTO_V1",
+        )
         driver = PortalProposalProcessAdapter(
             state_db=self.session.path,
             nodes=tuple(nodes),
-            backends=load_worker_backends(Path(worker_backends)),
+            backends=backends,
             workspace_root=Path(profile["workspace_root"]),
             holder_prefix=profile["worker_holder_prefix"],
             delivery_lease_ttl=float(profile["delivery_lease_ttl"]),
@@ -544,6 +552,7 @@ class DesktopPortfolioController:
                 profile,
                 nodes,
                 token,
+                pins=payload,
             )
             parallel = profile["max_parallel"]
             budget = WaveExecutionBudget(parallel, parallel, parallel)
