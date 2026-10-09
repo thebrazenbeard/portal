@@ -11,7 +11,9 @@ The supervisor only calls the existing resident `desktop_portfolio` continuation
 - The sole session is RUNNING, its holder equals its installed profile, and an *uncached* resident `inspect` returns the exact generation.
 - Profile declares LIVE_AUTO_V1, SOURCE_ONLY, one parallel slot, and a configured proposal-process adapter.
 - Exactly one execution node is enabled. Its backend is PROCESS_JSON_V1, not Codex.
-- The backend inherits no additional environment variables, invokes the approved local Ollama worker, and the worker's file SHA-256 matches an operator-supplied expected digest.
+- The backend inherits no additional environment variables. The **entire four-element argv** is operator-pinned via `--command-sha256`: [qualified interpreter, local_ollama_worker.py, --checkout-index or --checkout-root, absolute repository input path]. No extra flags, interpreter substitution, or input-path redirection is admitted.
+- The interpreter executable bytes and local worker source bytes independently match operator-pinned `--interpreter-sha256` and `--worker-sha256` digests. These three digests must come from a separate reviewed qualification receipt; never compute them automatically from the untrusted runtime backend manifest at admission time.
+- The selected checkout index file or checkout-root directory must exist and not be a symlink before any continuation.
 - The resident command receives expected_generation and expected_holder. The resident rejects stale generation/holder before refreshing GitHub or admitting a new wave.
 - The supervisor's SQLite journal reserves a unique attempt before IPC. An interrupted/ambiguous attempt becomes UNKNOWN and blocks all subsequent cycles until it is explicitly reconciled.
 
@@ -35,7 +37,7 @@ The worker accepts a prepopulated local repository index by `--checkout-root`, r
 
 > An attacker could replace an apparently local process worker with paid execution.
 
-**Partially addressed:** The one-node PROCESS_JSON_V1 manifest, empty pass-through environment and pinned local-worker digest are checked at every cycle. The local interpreter and host model service are still trust dependencies and require installation qualification.
+**Partially addressed:** The one-node PROCESS_JSON_V1 manifest, empty pass-through environment, complete argument-vector SHA-256, interpreter-byte SHA-256 and local-worker-byte SHA-256 are checked at every cycle. No extra flags or alternate executable can reuse the worker's digest. The three expected hashes must originate from an independently reviewed qualification receipt, not the manifest under inspection. There remains a check-to-use window if the backend manifest or executable is modified between the supervisor's admission check and the resident host's own backend load; an immutable staged installation or host-side digest revalidation is required before production activation.
 
 ## Current cutover boundary
 
