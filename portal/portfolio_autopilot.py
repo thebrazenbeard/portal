@@ -195,7 +195,10 @@ class PortfolioAutopilot:
         request_id = "portalautog" + str(generation) + "_"
         request_identity = (
             profile["holder"] if self.session_id == "portfolio"
-            else self.session_id + ":" + profile["holder"]
+            else json.dumps(
+                [self.session_id, profile["holder"]],
+                ensure_ascii=True, separators=(",", ":"),
+            )
         )
         request_id += hashlib.sha256(request_identity.encode()).hexdigest()[:20]
         with closing(_connect(self.journal)) as con:
