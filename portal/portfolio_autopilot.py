@@ -48,10 +48,16 @@ class PortfolioAutopilot:
         self, *, runtime_root: Path, journal: Path, expected_worker_sha256: str,
         expected_command_sha256: str, expected_interpreter_sha256: str,
         client: object | None = None, max_hourly_cycles: int = 4,
-        max_parallel_slots: int = 1,
+        max_parallel_slots: int = 1, session_id: str = "portfolio",
     ):
         if isinstance(max_hourly_cycles, bool) or not 1 <= max_hourly_cycles <= 60:
             raise ValueError("hourly cycle budget must be 1 to 60")
+        if (not isinstance(session_id, str)
+                or not 1 <= len(session_id) <= 128
+                or session_id != session_id.strip()
+                or any(ord(char) < 32 or ord(char) == 127 or char in "/\\" for char in session_id)):
+            raise ValueError("session_id must be a clean 1-to-128-character string")
+        self.session_id = session_id
         self.max_hourly_cycles = max_hourly_cycles
         if (type(max_parallel_slots) is not int
                 or not 1 <= max_parallel_slots <= 13):
@@ -73,6 +79,7 @@ class PortfolioAutopilot:
         self.client = client or FileBridgeClient(self.root, timeout_seconds=180)
         self.journal.parent.mkdir(parents=True, exist_ok=True)
         with closing(_connect(self.journal)) as con:
+            con.execute("BEGIN IMMEDIATE")
             con.execute(
                 "CREATE TABLE IF NOT EXISTS autopilot_attempts("
                 "generation INTEGER PRIMARY KEY, holder TEXT NOT NULL,"
@@ -81,6 +88,29 @@ class PortfolioAutopilot:
                 "('CALLING','VERIFIED','UNKNOWN')),"
                 "result_generation INTEGER, created_at REAL NOT NULL)"
             )
+            con.execute(
+                "CREATE TABLE IF NOT EXISTS autopilot_session_binding("
+                "binding_id INTEGER PRIMARY KEY CHECK(binding_id=1),"
+                "session_id TEXT NOT NULL)"
+            )
+            bound = con.execute(
+                "SELECT session_id FROM autopilot_session_binding WHERE binding_id=1"
+            ).fetchone()
+            if bound is not None:
+                if bound["session_id"] != self.session_id:
+                    raise ValueError("journal belongs to another portfolio session")
+            else:
+                legacy = con.execute(
+                    "SELECT COUNT(*) FROM autopilot_attempts"
+                ).fetchone()[0]
+                if legacy and self.session_id != "portfolio":
+                    raise ValueError(
+                        "legacy journal with attempts belongs to default portfolio session"
+                    )
+                con.execute(
+                    "INSERT INTO autopilot_session_binding VALUES (1, ?)",
+                    (self.session_id,),
+                )
             con.commit()
 
     def _eligible(self, snapshot: dict) -> tuple[dict, dict] | None:
@@ -147,7 +177,7 @@ class PortfolioAutopilot:
     def run_once(self) -> dict:
         """Run one host continuation or return a guarded no-dispatch status."""
         snapshot = self.client.request(
-            "desktop_portfolio", action="inspect", session_id="portfolio"
+            "desktop_portfolio", action="inspect", session_id=self.session_id
         )
         # A stopped session may have held or ambiguous deliveries. It must
         # never be restarted by a periodic controller or mistaken for a
@@ -163,7 +193,14 @@ class PortfolioAutopilot:
         if isinstance(generation, bool) or not isinstance(generation, int):
             raise ValueError("invalid session generation")
         request_id = "portalautog" + str(generation) + "_"
-        request_id += hashlib.sha256(profile["holder"].encode()).hexdigest()[:20]
+        request_identity = (
+            profile["holder"] if self.session_id == "portfolio"
+            else json.dumps(
+                [self.session_id, profile["holder"]],
+                ensure_ascii=True, separators=(",", ":"),
+            )
+        )
+        request_id += hashlib.sha256(request_identity.encode()).hexdigest()[:20]
         with closing(_connect(self.journal)) as con:
             con.execute("BEGIN IMMEDIATE")
             previous = con.execute(
@@ -191,7 +228,7 @@ class PortfolioAutopilot:
         try:
             result = self.client.request(
                 "desktop_portfolio", request_id=request_id,
-                action="continue", session_id="portfolio",
+                action="continue", session_id=self.session_id,
                 expected_generation=generation,
                 expected_holder=session["holder"],
                 expected_command_sha256=self.command_sha,
@@ -200,7 +237,7 @@ class PortfolioAutopilot:
                 expected_parallel_slots=self.max_parallel_slots,
             )
             after = self.client.request(
-                "desktop_portfolio", action="inspect", session_id="portfolio"
+                "desktop_portfolio", action="inspect", session_id=self.session_id
             )
             observed = (after.get("session") or {})
             if (result.get("session", {}).get("generation") != generation + 1
@@ -237,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval-seconds", type=float, default=60)
     parser.add_argument("--max-hourly-cycles", type=int, default=4)
     parser.add_argument("--max-parallel-slots", type=int, default=1)
+    parser.add_argument("--session-id", default="portfolio")
     parser.add_argument("--forever", action="store_true")
     args = parser.parse_args(argv)
     if not 10 <= args.interval_seconds <= 86400:
@@ -248,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_interpreter_sha256=args.interpreter_sha256,
         max_hourly_cycles=args.max_hourly_cycles,
         max_parallel_slots=args.max_parallel_slots,
+        session_id=args.session_id,
     )
     try:
         while True:
