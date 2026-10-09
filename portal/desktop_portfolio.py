@@ -505,7 +505,7 @@ class DesktopPortfolioController:
                 ),
                 max_parallel=int(payload.get("max_parallel", 1)),
             )
-        elif action not in {"status", "inspect", "run", "continue", "hold", "stop"}:
+        elif action not in {"status", "inspect", "inventory", "run", "continue", "hold", "stop"}:
             raise ValueError("unsupported portfolio control")
 
         session_id = str(
@@ -536,6 +536,40 @@ class DesktopPortfolioController:
             expected_holder = payload.get("expected_holder")
             if expected_holder is not None and current["holder"] != expected_holder:
                 raise ValueError("portfolio holder changed; no new work admitted")
+
+        repository_rows: list[dict[str, object]] | None = None
+        if action == "inventory":
+            # Inventory is not an execution wave and must never mutate it.
+            token = self.token_provider()
+            if not token or not token.strip():
+                raise ValueError(
+                    "authenticated GitHub access required to show all owned repositories; "
+                    "public-only listing would be incomplete"
+                )
+            source_wave = (
+                Path(profile["wave"]) if profile is not None
+                else self._source_root() / "portfolio" / "advancement_wave.public.json"
+            )
+            owner = (
+                str(profile.get("discover_owner") or self._infer_owner(source_wave))
+                if profile is not None else self._infer_owner(source_wave)
+            )
+            owned = GitHubRepositoryCatalog(token=token).list_owned_repositories(owner)
+            repository_rows = [
+                {
+                    "name": repo.name,
+                    "full_name": repo.full_name,
+                    "visibility": "PRIVATE" if repo.private else "PUBLIC",
+                    "archived": repo.archived,
+                    "default_branch": repo.default_branch,
+                }
+                for repo in owned
+            ]
+            self._last_inventory = {
+                "public": sum(not r.private for r in owned),
+                "private": sum(r.private for r in owned),
+                "archived": sum(r.archived for r in owned),
+            }
 
         if action in {"run", "continue"}:
             assert profile is not None
@@ -649,8 +683,9 @@ class DesktopPortfolioController:
             "profile_error": profile_error,
             "session": status,
             "sessions": [str(row[0]) for row in rows],
-            "portfolio_source": portfolio_source,
+            "portfolio_source": "LIVE_GITHUB" if action == "inventory" else portfolio_source,
             "inventory": self._last_inventory,
+            **({"repositories": repository_rows} if repository_rows is not None else {}),
             "dispatch_mode": dispatch_mode,
             "worker_state": worker_state,
             "missing_worker_tools": missing_tools,
