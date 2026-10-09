@@ -8,10 +8,11 @@ from __future__ import annotations
 import argparse
 from contextlib import closing
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import time
-from typing import Callable
+from typing import Sequence
 
 import yaml
 
@@ -26,23 +27,44 @@ def _connect(path: Path) -> sqlite3.Connection:
     return con
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def command_vector_sha256(command: Sequence[str]) -> str:
+    """Bind the entire executable, script, and argument vector."""
+    encoded = json.dumps(list(command), separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 class PortfolioAutopilot:
     """Durable at-most-once continuation admission for a verified local worker."""
 
     def __init__(
         self, *, runtime_root: Path, journal: Path, expected_worker_sha256: str,
+        expected_command_sha256: str, expected_interpreter_sha256: str,
         client: object | None = None, max_hourly_cycles: int = 4,
     ):
         if isinstance(max_hourly_cycles, bool) or not 1 <= max_hourly_cycles <= 60:
             raise ValueError("hourly cycle budget must be 1 to 60")
         self.max_hourly_cycles = max_hourly_cycles
-        if len(expected_worker_sha256) != 64 or any(
-            c not in "0123456789abcdef" for c in expected_worker_sha256
+        for label, digest in (
+            ("worker", expected_worker_sha256),
+            ("command", expected_command_sha256),
+            ("interpreter", expected_interpreter_sha256),
         ):
-            raise ValueError("expected worker SHA-256 must be lowercase hex")
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
+                raise ValueError(f"expected {label} SHA-256 must be lowercase hex")
         self.root = Path(runtime_root)
         self.journal = Path(journal)
         self.worker_sha = expected_worker_sha256
+        self.command_sha = expected_command_sha256
+        self.interpreter_sha = expected_interpreter_sha256
         self.client = client or FileBridgeClient(self.root, timeout_seconds=180)
         self.journal.parent.mkdir(parents=True, exist_ok=True)
         with closing(_connect(self.journal)) as con:
@@ -87,13 +109,31 @@ class PortfolioAutopilot:
             raise ValueError("worker node mismatch")
         configured = load_worker_backends(backend_config)[enabled[0].node_id]
         command = configured.command
-        if (len(command) < 2
-                or Path(command[1]).name != "local_ollama_worker.py"
-                or not Path(command[1]).is_file()):
+        if (len(command) != 4
+                or command[2] not in {"--checkout-index", "--checkout-root"}
+                or not Path(command[3]).is_absolute()):
+            raise ValueError("autopilot requires an exact four-argument local worker command")
+        if command_vector_sha256(command) != self.command_sha:
+            raise ValueError("worker command vector changed since qualification")
+        interpreter = Path(command[0])
+        worker = Path(command[1])
+        if (not interpreter.is_absolute() or not interpreter.is_file()
+                or interpreter.is_symlink()):
+            raise ValueError("interpreter is not a qualified absolute file")
+        if (worker.name != "local_ollama_worker.py"
+                or not worker.is_absolute() or not worker.is_file()
+                or worker.is_symlink()):
             raise ValueError("autopilot requires local Ollama worker")
-        digest = hashlib.sha256(Path(command[1]).read_bytes()).hexdigest()
-        if digest != self.worker_sha:
+        if _sha256_file(interpreter) != self.interpreter_sha:
+            raise ValueError("interpreter changed since qualification")
+        if _sha256_file(worker) != self.worker_sha:
             raise ValueError("worker changed since qualification")
+        source = Path(command[3])
+        if source.is_symlink() or (
+            not source.is_file() if command[2] == "--checkout-index"
+            else not source.is_dir()
+        ):
+            raise ValueError("worker repository input is unavailable")
         if session.get("holder") != profile["holder"]:
             raise ValueError("portfolio holder does not match profile")
         return session, profile
@@ -177,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--journal", type=Path, required=True)
     parser.add_argument("--worker-sha256", required=True)
+    parser.add_argument("--command-sha256", required=True)
+    parser.add_argument("--interpreter-sha256", required=True)
     parser.add_argument("--interval-seconds", type=float, default=60)
     parser.add_argument("--max-hourly-cycles", type=int, default=4)
     parser.add_argument("--forever", action="store_true")
@@ -186,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     pilot = PortfolioAutopilot(
         runtime_root=args.runtime_root, journal=args.journal,
         expected_worker_sha256=args.worker_sha256,
+        expected_command_sha256=args.command_sha256,
+        expected_interpreter_sha256=args.interpreter_sha256,
         max_hourly_cycles=args.max_hourly_cycles,
     )
     try:

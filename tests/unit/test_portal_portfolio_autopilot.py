@@ -7,7 +7,7 @@ import sys
 import pytest
 import yaml
 
-from portal.portfolio_autopilot import PortfolioAutopilot
+from portal.portfolio_autopilot import PortfolioAutopilot, command_vector_sha256
 
 
 class FakeBridge:
@@ -38,6 +38,11 @@ def fixture(tmp_path, *, dispatch="PROCESS_PROPOSAL", backend="PROCESS_JSON_V1")
     root.mkdir()
     source = root / "local_ollama_worker.py"
     source.write_text("# placeholder local worker\n", encoding="utf-8")
+    interpreter = root / "python.exe"
+    interpreter.write_bytes(b"qualified fake Python interpreter; never executed")
+    checkout_index = root / "checkouts.json"
+    checkout_index.write_text('{"schema":"PORTAL_EXISTING_CHECKOUT_INDEX_V1","repositories":{}}',
+                              encoding="utf-8")
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     nodes = root / "nodes.yaml"
     nodes.write_text(yaml.safe_dump({
@@ -49,7 +54,7 @@ def fixture(tmp_path, *, dispatch="PROCESS_PROPOSAL", backend="PROCESS_JSON_V1")
     backends.write_text(yaml.safe_dump({
         "schema": "PORTAL_WORKER_BACKENDS_V1",
         "workers": [{"node_id": "desktop-local", "kind": backend,
-                     "command": [sys.executable, str(source)] if backend == "PROCESS_JSON_V1" else None,
+                     "command": [str(interpreter), str(source), "--checkout-index", str(checkout_index)] if backend == "PROCESS_JSON_V1" else None,
                      "pass_env": [], "timeout_seconds": 90}],
     }), encoding="utf-8")
     profile = {
@@ -65,13 +70,25 @@ def fixture(tmp_path, *, dispatch="PROCESS_PROPOSAL", backend="PROCESS_JSON_V1")
     return root, digest, snapshot
 
 
+def _trusted_pins(root: Path) -> dict:
+    interpreter = root / "python.exe"
+    source = root / "local_ollama_worker.py"
+    index = root / "checkouts.json"
+    return {
+        "expected_command_sha256": command_vector_sha256(
+            (str(interpreter), str(source), "--checkout-index", str(index))
+        ),
+        "expected_interpreter_sha256": hashlib.sha256(interpreter.read_bytes()).hexdigest(),
+    }
+
+
 def test_one_authenticated_generation_is_durable(tmp_path):
     root, sha, snapshot = fixture(tmp_path)
     bridge = FakeBridge(snapshot)
     state = tmp_path / "pilot.sqlite3"
     pilot = PortfolioAutopilot(
         runtime_root=root, journal=state,
-        expected_worker_sha256=sha, client=bridge,
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
     )
     result = pilot.run_once()
     assert result == {"state": "VERIFIED_CONTINUATION", "admitted": True, "generation": 3}
@@ -85,7 +102,7 @@ def test_no_worker_never_dispatches(tmp_path):
     root, sha, snapshot = fixture(tmp_path, dispatch="ADMISSION_ONLY")
     bridge = FakeBridge(snapshot)
     pilot = PortfolioAutopilot(runtime_root=root, journal=tmp_path / "state.sqlite3",
-                               expected_worker_sha256=sha, client=bridge)
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root))
     assert pilot.run_once()["state"] == "HOLD_NO_QUALIFIED_WORKER"
     assert all(call["action"] == "inspect" for call in bridge.calls)
 
@@ -95,7 +112,7 @@ def test_unknown_outcome_blocks_replay(tmp_path):
     bridge = FakeBridge(snapshot, fail=True)
     state = tmp_path / "state.sqlite3"
     pilot = PortfolioAutopilot(runtime_root=root, journal=state,
-                               expected_worker_sha256=sha, client=bridge)
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root))
     with pytest.raises(RuntimeError, match="unknown"):
         pilot.run_once()
     bridge.fail = False
@@ -110,7 +127,7 @@ def test_modified_worker_is_rejected_before_dispatch(tmp_path):
     (root / "local_ollama_worker.py").write_text("changed", encoding="utf-8")
     bridge = FakeBridge(snapshot)
     pilot = PortfolioAutopilot(runtime_root=root, journal=tmp_path / "state.sqlite3",
-                               expected_worker_sha256=sha, client=bridge)
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root))
     with pytest.raises(ValueError, match="changed"):
         pilot.run_once()
     assert not any(x["action"] == "continue" for x in bridge.calls)
@@ -120,7 +137,7 @@ def test_paid_worker_is_rejected_before_dispatch(tmp_path):
     root, sha, snapshot = fixture(tmp_path, backend="CODEX_GH_PROPOSAL_V1")
     bridge = FakeBridge(snapshot)
     pilot = PortfolioAutopilot(runtime_root=root, journal=tmp_path / "state.sqlite3",
-                               expected_worker_sha256=sha, client=bridge)
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root))
     with pytest.raises(ValueError, match="paid or unsupported"):
         pilot.run_once()
     assert not any(x["action"] == "continue" for x in bridge.calls)
@@ -131,7 +148,7 @@ def test_stopped_or_holder_changed_cannot_admit(tmp_path):
     snapshot["session"]["control_state"] = "STOPPED"
     bridge = FakeBridge(snapshot)
     pilot = PortfolioAutopilot(runtime_root=root, journal=tmp_path / "state.sqlite3",
-                               expected_worker_sha256=sha, client=bridge)
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root))
     assert pilot.run_once()["admitted"] is False
     snapshot["session"]["control_state"] = "RUNNING"
     snapshot["session"]["holder"] = "another-owner"
@@ -143,7 +160,7 @@ def test_hourly_admission_budget_blocks_unbounded_refill(tmp_path):
     root, sha, snapshot = fixture(tmp_path)
     bridge = FakeBridge(snapshot)
     pilot = PortfolioAutopilot(runtime_root=root, journal=tmp_path / "state.sqlite3",
-                               expected_worker_sha256=sha, client=bridge,
+                               expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
                                max_hourly_cycles=1)
     assert pilot.run_once()["state"] == "VERIFIED_CONTINUATION"
     assert pilot.run_once()["state"] == "HOLD_HOURLY_BUDGET"
@@ -153,4 +170,85 @@ def test_hourly_admission_budget_blocks_unbounded_refill(tmp_path):
 def test_invalid_cycle_budget_fails_before_any_io(tmp_path):
     with pytest.raises(ValueError, match="cycle budget"):
         PortfolioAutopilot(runtime_root=tmp_path, journal=tmp_path / "state.sqlite3",
-                           expected_worker_sha256="a" * 64, max_hourly_cycles=0)
+                           expected_worker_sha256="a" * 64,
+                           expected_command_sha256="a" * 64,
+                           expected_interpreter_sha256="a" * 64,
+                           max_hourly_cycles=0)
+
+
+
+def _change_command(root: Path, transform) -> None:
+    path = root / "backends.yaml"
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    transform(payload["workers"][0]["command"])
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+
+def test_extra_arguments_cannot_pass_admission(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    _change_command(root, lambda argv: argv.append("--unqualified-extra"))
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    with pytest.raises(ValueError, match="four-argument"):
+        pilot.run_once()
+    assert not any(c["action"] == "continue" for c in bridge.calls)
+
+
+def test_unqualified_executable_cannot_reuse_worker_digest(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    malicious = root / "unqualified.exe"
+    malicious.write_bytes(b"not an approved interpreter")
+    _change_command(root, lambda argv: argv.__setitem__(0, str(malicious)))
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    with pytest.raises(ValueError, match="command vector changed"):
+        pilot.run_once()
+    assert not any(c["action"] == "continue" for c in bridge.calls)
+
+
+
+def test_interpreter_content_hash_is_pinned(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    (root / "python.exe").write_bytes(b"modified unqualified interpreter")
+    with pytest.raises(ValueError, match="interpreter changed"):
+        pilot.run_once()
+    assert not any(c["action"] == "continue" for c in bridge.calls)
+
+
+def test_checkout_index_argument_is_pinned(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    different = root / "alternate-checkouts.json"
+    different.write_text("{}", encoding="utf-8")
+    _change_command(root, lambda argv: argv.__setitem__(3, str(different)))
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    with pytest.raises(ValueError, match="command vector changed"):
+        pilot.run_once()
+    assert not any(c["action"] == "continue" for c in bridge.calls)
+
+
+def test_missing_index_fails_before_dispatch(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    (root / "checkouts.json").unlink()
+    with pytest.raises(ValueError, match="input is unavailable"):
+        pilot.run_once()
+    assert not any(c["action"] == "continue" for c in bridge.calls)
