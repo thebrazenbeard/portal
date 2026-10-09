@@ -318,3 +318,91 @@ def test_unqualified_autopilot_slot_cap_rejected_before_io(tmp_path, invalid):
             expected_interpreter_sha256="c" * 64,
             max_parallel_slots=invalid,
         )
+
+
+def test_distinct_explicit_session_id_is_used_for_all_ipc_calls(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "new-session.sqlite3",
+        expected_worker_sha256=sha, client=bridge,
+        session_id="bt2-wave4-clean", **_trusted_pins(root),
+    )
+    assert pilot.run_once()["state"] == "VERIFIED_CONTINUATION"
+    assert [call["session_id"] for call in bridge.calls] == [
+        "bt2-wave4-clean", "bt2-wave4-clean", "bt2-wave4-clean",
+    ]
+
+
+def test_journal_binding_cannot_be_reused_for_another_session(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    bridge = FakeBridge(snapshot)
+    journal = tmp_path / "bound.sqlite3"
+    first = PortfolioAutopilot(
+        runtime_root=root, journal=journal,
+        expected_worker_sha256=sha, client=bridge,
+        session_id="bt2-clean", **_trusted_pins(root),
+    )
+    assert first.run_once()["state"] == "VERIFIED_CONTINUATION"
+    before = len(bridge.calls)
+    with pytest.raises(ValueError, match="another portfolio session"):
+        PortfolioAutopilot(
+            runtime_root=root, journal=journal,
+            expected_worker_sha256=sha, client=bridge,
+            session_id="portfolio", **_trusted_pins(root),
+        )
+    assert len(bridge.calls) == before
+    with sqlite3.connect(journal) as db:
+        assert db.execute(
+            "SELECT session_id FROM autopilot_session_binding"
+        ).fetchone() == ("bt2-clean",)
+        assert db.execute("SELECT COUNT(*) FROM autopilot_attempts").fetchone()[0] == 1
+
+
+def test_existing_unbound_legacy_journal_is_for_default_session_only(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    journal = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(journal) as db:
+        db.execute(
+            "CREATE TABLE autopilot_attempts("
+            "generation INTEGER PRIMARY KEY, holder TEXT NOT NULL,"
+            "request_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,"
+            "result_generation INTEGER, created_at REAL NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO autopilot_attempts VALUES"
+            "(2, 'old-holder', 'legacy-attempt', 'UNKNOWN', NULL, 0.0)"
+        )
+    with pytest.raises(ValueError, match="legacy journal"):
+        PortfolioAutopilot(
+            runtime_root=root, journal=journal,
+            expected_worker_sha256=sha, session_id="new-session",
+            **_trusted_pins(root),
+        )
+    with sqlite3.connect(journal) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM autopilot_attempts"
+        ).fetchone()[0] == 1
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=journal,
+        expected_worker_sha256=sha, session_id="portfolio",
+        **_trusted_pins(root),
+    )
+    with sqlite3.connect(journal) as db:
+        assert db.execute(
+            "SELECT session_id FROM autopilot_session_binding"
+        ).fetchone() == ("portfolio",)
+    assert pilot.journal == journal
+
+
+@pytest.mark.parametrize("session_id", ["", "  ", " spaced", "tail ", "bad\\nline", "a" * 129])
+def test_invalid_session_id_rejected_before_journal_creation(tmp_path, session_id):
+    root, sha, _snapshot = fixture(tmp_path)
+    journal = tmp_path / "never.sqlite3"
+    with pytest.raises(ValueError, match="session_id"):
+        PortfolioAutopilot(
+            runtime_root=root, journal=journal,
+            expected_worker_sha256=sha,
+            session_id=session_id, **_trusted_pins(root),
+        )
+    assert not journal.exists()
