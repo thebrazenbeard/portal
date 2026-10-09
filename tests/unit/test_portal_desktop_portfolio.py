@@ -325,3 +325,56 @@ def test_autopilot_inspect_and_generation_cas_fail_closed(tmp_path, monkeypatch)
         assert controller.handle({"action": "inspect"})["session"]["generation"] == 2
     finally:
         session.close()
+
+
+def test_capacity_observation_never_conflates_13_slots_with_live_workers(tmp_path):
+    paths = {}
+    for name in ("wave", "corpus", "projects"):
+        path = tmp_path / f"{name}.json"
+        path.write_text("{}", encoding="utf-8")
+        paths[name] = str(path)
+    nodes = tmp_path / "nodes.yaml"
+    nodes.write_text(
+        "schema: PORTAL_EXECUTION_NODES_V1\nnodes:\n"
+        "  - id: desktop-local\n    enabled: true\n"
+        "    max_parallel: 13\n    allowed_lanes: []\n",
+        encoding="utf-8",
+    )
+    backend = tmp_path / "backends.yaml"
+    backend.write_text(
+        "schema: PORTAL_WORKER_BACKENDS_V1\nworkers: []\n",
+        encoding="utf-8",
+    )
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        **paths, "nodes": str(nodes), "worker_backends": str(backend),
+        "holder": "capacity-owner", "max_parallel": 13,
+    }), encoding="utf-8")
+    session = PortalCommandSession(tmp_path / "session.sqlite3")
+    try:
+        controller = DesktopPortfolioController(tmp_path, session=session)
+        configured = controller.handle({
+            "action": "configure", "profile_path": str(profile)
+        })
+        capacity = configured["capacity"]
+        assert capacity["advisory_slot_ceiling"] == 13
+        assert capacity["worker_execution_verified"] is False
+        assert capacity["preflight_blockers"] == ["NO_RUNNING_SESSION"]
+
+        session._ensure_session(
+            session_id="portfolio", holder="capacity-owner", now=0
+        )
+        running = controller.handle({"action": "inspect"})["capacity"]
+        assert running["advisory_slot_ceiling"] == 13
+        assert running["preflight_blockers"] == []
+        assert running["worker_execution_verified"] is False
+
+        session.stop(session_id="portfolio", holder="capacity-owner")
+        stopped = controller.handle({"action": "inspect"})["capacity"]
+        assert stopped["advisory_slot_ceiling"] == 13
+        assert stopped["preflight_blockers"] == [
+            "STOPPED_SESSION_REQUIRES_RECONCILIATION"
+        ]
+        assert stopped["worker_execution_verified"] is False
+    finally:
+        session.close()
