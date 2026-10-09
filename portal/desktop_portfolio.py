@@ -483,6 +483,44 @@ class DesktopPortfolioController:
                 raise
             return None, f"{type(exc).__name__}: {exc}"
 
+    @staticmethod
+    def _capacity_snapshot(
+        profile: dict | None, status: dict | None, worker_configured: bool,
+    ) -> dict:
+        """Read-only capacity diagnosis, not worker dispatch qualification."""
+        requested = profile["max_parallel"] if profile is not None else 0
+        enabled_slots = 0
+        reason = None
+        if profile is not None:
+            try:
+                nodes = load_execution_nodes(Path(profile["nodes"]))
+                enabled_slots = sum(
+                    node.max_parallel for node in nodes if node.enabled
+                )
+            except (OSError, ValueError, yaml.YAMLError):
+                reason = "NODE_CONFIG_UNQUALIFIED"
+        control = status.get("control_state") if status else None
+        blocked = []
+        if control != "RUNNING":
+            blocked.append(
+                "STOPPED_SESSION_REQUIRES_RECONCILIATION"
+                if control == "STOPPED" else "NO_RUNNING_SESSION"
+            )
+        if not worker_configured:
+            blocked.append("WORKER_NOT_CONFIGURED")
+        if enabled_slots == 0:
+            blocked.append(reason or "NO_ENABLED_NODE_SLOTS")
+        return {
+            "profile_max_parallel": requested,
+            "enabled_node_slots": enabled_slots,
+            "advisory_slot_ceiling": min(requested, enabled_slots),
+            "session_state": control,
+            "preflight_blockers": blocked,
+            # An inspection never certifies a worker or promotes effects.
+            "worker_execution_verified": False,
+            "protected_effect_authority": False,
+        }
+
     def handle(self, payload: dict) -> dict:
         action = payload.get("action", "status")
         if action == "configure":
@@ -653,6 +691,7 @@ class DesktopPortfolioController:
             "inventory": self._last_inventory,
             "dispatch_mode": dispatch_mode,
             "worker_state": worker_state,
+            "capacity": self._capacity_snapshot(profile, status, worker_configured),
             "missing_worker_tools": missing_tools,
             "protected_effect_authority": False,
             "message": message,
