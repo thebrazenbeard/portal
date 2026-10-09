@@ -62,7 +62,7 @@ class FakeReadOnlyTransport:
         raise AssertionError("automatic worker runtime must not mutate source")
 
 
-def _seed(db: Path):
+def _seed(db: Path, *, capacity: int = 2):
     corpus = load_portfolio_corpus(CORPUS, public_safe=True)
     repos = []
     curated = []
@@ -111,12 +111,12 @@ def _seed(db: Path):
         corpus_path=CORPUS,
         projects_path=projects,
         state_db=db,
-        nodes=(ExecutionNode(node_id="alpha", max_parallel=2),),
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=capacity),),
         budget=WaveExecutionBudget(
-            max_parallel=2,
-            max_per_identity=2,
-            max_per_family=2,
-            max_per_lane=2,
+            max_parallel=capacity,
+            max_per_identity=capacity,
+            max_per_family=capacity,
+            max_per_lane=capacity,
         ),
         run_id="auto-run",
         holder="vera",
@@ -125,7 +125,7 @@ def _seed(db: Path):
         transport=transport,
         clock=lambda: now,
     )
-    assert len(prepared.packets) == 2
+    assert len(prepared.packets) == capacity
 
     for packet in prepared.packets:
         review = sign_evidence(
@@ -313,3 +313,44 @@ def test_automatic_worker_pass_requires_backend_for_every_enabled_node(
             token=None,
             transport=transport,
         )
+
+
+def test_thirteen_source_only_process_slots_are_actually_exercised(
+    tmp_path: Path,
+) -> None:
+    """Exercise 13 real subprocess receipts, not a 13-row advisory plan."""
+    db = tmp_path / "portal.sqlite3"
+    transport, packets = _seed(db, capacity=13)
+    worker = tmp_path / "worker.py"
+    _worker(worker)
+    result = run_wave_workers_once(
+        state_db=db,
+        run_id="auto-run",
+        nodes=(ExecutionNode(node_id="alpha", max_parallel=13),),
+        backends={"alpha": ProcessWorkerSpec(
+            command=(sys.executable, str(worker)),
+            timeout_seconds=30.0,
+            pass_env=(),
+        )},
+        workspace_root=tmp_path / "workers",
+        holder_prefix="source-only-fixture",
+        delivery_lease_ttl=60.0,
+        verifier="vera-review",
+        token=None,
+        transport=transport,
+    )
+    assert result.claimed == result.verified_complete == 13
+    assert result.failed_or_unknown == 0
+    assert result.no_work == 0
+    assert len({slot.holder for slot in result.slots}) == 13
+    assert {slot.subject_id for slot in result.slots} == {
+        packet.subject_id for packet in packets
+    }
+    assert {slot.state for slot in result.slots} == {"VERIFIED_COMPLETE"}
+    store = PortalWaveStore(db)
+    try:
+        assert store.summary("auto-run")["delivery_states"] == {
+            "VERIFIED_COMPLETE": 13
+        }
+    finally:
+        store.close()

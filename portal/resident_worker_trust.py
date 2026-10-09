@@ -39,10 +39,16 @@ def load_resident_backends(
         raise ValueError("resident local worker requires one worker and node")
     node = nodes[0]
     entry = workers[0]
-    if (not node.enabled or node.max_parallel != 1
+    if (not node.enabled or not 1 <= node.max_parallel <= 13
             or entry.get("node_id") != node.node_id
             or entry.get("kind") != "PROCESS_JSON_V1"):
         raise ValueError("resident local worker node is unqualified")
+    if node.max_parallel > 1 and (
+        not isinstance(pins, dict)
+        or type(pins.get("expected_parallel_slots")) is not int
+        or pins["expected_parallel_slots"] != node.max_parallel
+    ):
+        raise ValueError("resident multi-slot worker requires exact slot count pin")
     configured = backends.get(node.node_id)
     if configured is None or configured.pass_env:
         raise ValueError("resident local worker must not inherit credentials")

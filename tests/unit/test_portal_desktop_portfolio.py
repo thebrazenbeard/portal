@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 from pathlib import Path
@@ -323,5 +324,72 @@ def test_autopilot_inspect_and_generation_cas_fail_closed(tmp_path, monkeypatch)
         controller.handle({"action": "continue", "session_id": "portfolio",
                            "expected_generation": 1, "expected_holder": holder})
         assert controller.handle({"action": "inspect"})["session"]["generation"] == 2
+    finally:
+        session.close()
+
+
+def test_capacity_observation_never_conflates_13_slots_with_live_workers(tmp_path):
+    paths = {}
+    for name in ("wave", "corpus", "projects"):
+        path = tmp_path / f"{name}.json"
+        path.write_text("{}", encoding="utf-8")
+        paths[name] = str(path)
+    nodes = tmp_path / "nodes.yaml"
+    nodes.write_text(
+        "schema: PORTAL_EXECUTION_NODES_V1\nnodes:\n"
+        "  - id: desktop-local\n    enabled: true\n"
+        "    max_parallel: 13\n    allowed_lanes: []\n",
+        encoding="utf-8",
+    )
+    backend = tmp_path / "backends.yaml"
+    backend.write_text(
+        "schema: PORTAL_WORKER_BACKENDS_V1\nworkers: []\n",
+        encoding="utf-8",
+    )
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps({
+        **paths, "nodes": str(nodes), "worker_backends": str(backend),
+        "holder": "capacity-owner", "max_parallel": 13,
+    }), encoding="utf-8")
+    session = PortalCommandSession(tmp_path / "session.sqlite3")
+    try:
+        controller = DesktopPortfolioController(tmp_path, session=session)
+        configured = controller.handle({
+            "action": "configure", "profile_path": str(profile)
+        })
+        capacity = configured["capacity"]
+        assert capacity["advisory_slot_ceiling"] == 13
+        assert capacity["worker_execution_verified"] is False
+        assert capacity["preflight_blockers"] == [
+            "NO_RUNNING_SESSION", "MISSING_ENABLED_WORKER_BACKEND"
+        ]
+
+        session._ensure_session(
+            session_id="portfolio", holder="capacity-owner", now=0
+        )
+        running = controller.handle({"action": "inspect"})["capacity"]
+        assert running["advisory_slot_ceiling"] == 13
+        assert running["preflight_blockers"] == ["MISSING_ENABLED_WORKER_BACKEND"]
+        backend.write_text(json.dumps({
+            "schema": "PORTAL_WORKER_BACKENDS_V1",
+            "workers": [{
+                "node_id": "desktop-local",
+                "kind": "PROCESS_JSON_V1",
+                "command": [sys.executable, str(tmp_path / "worker.py")],
+                "pass_env": [], "timeout_seconds": 90,
+            }],
+        }), encoding="utf-8")
+        configured_worker = controller.handle({"action": "inspect"})["capacity"]
+        assert configured_worker["preflight_blockers"] == []
+        assert configured_worker["worker_execution_verified"] is False
+        assert running["worker_execution_verified"] is False
+
+        session.stop(session_id="portfolio", holder="capacity-owner")
+        stopped = controller.handle({"action": "inspect"})["capacity"]
+        assert stopped["advisory_slot_ceiling"] == 13
+        assert stopped["preflight_blockers"] == [
+            "STOPPED_SESSION_REQUIRES_RECONCILIATION"
+        ]
+        assert stopped["worker_execution_verified"] is False
     finally:
         session.close()
