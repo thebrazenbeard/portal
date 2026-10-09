@@ -48,10 +48,15 @@ class PortfolioAutopilot:
         self, *, runtime_root: Path, journal: Path, expected_worker_sha256: str,
         expected_command_sha256: str, expected_interpreter_sha256: str,
         client: object | None = None, max_hourly_cycles: int = 4,
+        max_parallel_slots: int = 1,
     ):
         if isinstance(max_hourly_cycles, bool) or not 1 <= max_hourly_cycles <= 60:
             raise ValueError("hourly cycle budget must be 1 to 60")
         self.max_hourly_cycles = max_hourly_cycles
+        if (type(max_parallel_slots) is not int
+                or not 1 <= max_parallel_slots <= 13):
+            raise ValueError("autopilot slot cap must be between 1 and 13")
+        self.max_parallel_slots = max_parallel_slots
         for label, digest in (
             ("worker", expected_worker_sha256),
             ("command", expected_command_sha256),
@@ -91,14 +96,14 @@ class PortfolioAutopilot:
         profile = snapshot.get("profile") or {}
         if (profile.get("mode") != "LIVE_AUTO_V1"
             or profile.get("discovered_effect_ceiling") != "SOURCE_ONLY"
-            or profile.get("max_parallel") != 1):
-            raise ValueError("autopilot requires single-slot source-only profile")
+            or profile.get("max_parallel") != self.max_parallel_slots):
+            raise ValueError("autopilot requires exact source-only slot profile")
         node_config = Path(profile["nodes"])
         backend_config = Path(profile["worker_backends"])
         nodes = load_execution_nodes(node_config)
         enabled = [node for node in nodes if node.enabled]
-        if len(enabled) != 1 or enabled[0].max_parallel != 1:
-            raise ValueError("autopilot requires one enabled worker slot")
+        if len(enabled) != 1 or enabled[0].max_parallel != self.max_parallel_slots:
+            raise ValueError("autopilot requires one enabled node with exact pinned slot count")
         manifest = yaml.safe_load(backend_config.read_text(encoding="utf-8"))
         workers = manifest["workers"]
         if len(workers) != 1 or workers[0].get("kind") != "PROCESS_JSON_V1":
@@ -192,6 +197,7 @@ class PortfolioAutopilot:
                 expected_command_sha256=self.command_sha,
                 expected_interpreter_sha256=self.interpreter_sha,
                 expected_worker_sha256=self.worker_sha,
+                expected_parallel_slots=self.max_parallel_slots,
             )
             after = self.client.request(
                 "desktop_portfolio", action="inspect", session_id="portfolio"
@@ -230,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interpreter-sha256", required=True)
     parser.add_argument("--interval-seconds", type=float, default=60)
     parser.add_argument("--max-hourly-cycles", type=int, default=4)
+    parser.add_argument("--max-parallel-slots", type=int, default=1)
     parser.add_argument("--forever", action="store_true")
     args = parser.parse_args(argv)
     if not 10 <= args.interval_seconds <= 86400:
@@ -240,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_command_sha256=args.command_sha256,
         expected_interpreter_sha256=args.interpreter_sha256,
         max_hourly_cycles=args.max_hourly_cycles,
+        max_parallel_slots=args.max_parallel_slots,
     )
     try:
         while True:
