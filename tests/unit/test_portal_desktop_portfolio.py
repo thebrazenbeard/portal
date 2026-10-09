@@ -359,14 +359,28 @@ def test_capacity_observation_never_conflates_13_slots_with_live_workers(tmp_pat
         capacity = configured["capacity"]
         assert capacity["advisory_slot_ceiling"] == 13
         assert capacity["worker_execution_verified"] is False
-        assert capacity["preflight_blockers"] == ["NO_RUNNING_SESSION"]
+        assert capacity["preflight_blockers"] == [
+            "NO_RUNNING_SESSION", "MISSING_ENABLED_WORKER_BACKEND"
+        ]
 
         session._ensure_session(
             session_id="portfolio", holder="capacity-owner", now=0
         )
         running = controller.handle({"action": "inspect"})["capacity"]
         assert running["advisory_slot_ceiling"] == 13
-        assert running["preflight_blockers"] == []
+        assert running["preflight_blockers"] == ["MISSING_ENABLED_WORKER_BACKEND"]
+        backend.write_text(json.dumps({
+            "schema": "PORTAL_WORKER_BACKENDS_V1",
+            "workers": [{
+                "node_id": "desktop-local",
+                "kind": "PROCESS_JSON_V1",
+                "command": ["C:/python.exe", "worker.py"],
+                "pass_env": [], "timeout_seconds": 90,
+            }],
+        }), encoding="utf-8")
+        configured_worker = controller.handle({"action": "inspect"})["capacity"]
+        assert configured_worker["preflight_blockers"] == []
+        assert configured_worker["worker_execution_verified"] is False
         assert running["worker_execution_verified"] is False
 
         session.stop(session_id="portfolio", holder="capacity-owner")
