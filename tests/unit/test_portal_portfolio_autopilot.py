@@ -112,6 +112,21 @@ def test_no_worker_never_dispatches(tmp_path):
     assert all(call["action"] == "inspect" for call in bridge.calls)
 
 
+def test_stopped_session_is_explicit_hold_without_replay(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    snapshot["session"]["control_state"] = "STOPPED"
+    snapshot["session"]["summary"] = {"held": 1}
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    assert pilot.run_once() == {"state": "HOLD_STOPPED_SESSION", "admitted": False}
+    assert [call["action"] for call in bridge.calls] == ["inspect"]
+    with sqlite3.connect(tmp_path / "attempts.sqlite3") as db:
+        assert db.execute("SELECT COUNT(*) FROM autopilot_attempts").fetchone()[0] == 0
+
+
 def test_unknown_outcome_blocks_replay(tmp_path):
     root, sha, snapshot = fixture(tmp_path)
     bridge = FakeBridge(snapshot, fail=True)
