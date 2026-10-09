@@ -71,3 +71,13 @@ def test_untrusted_index_fails_closed_on_foreign_owner_or_case_duplicate(tmp_pat
     with pytest.raises(ValueError, match="duplicate"):
         inspect_registered_checkouts(duplicate, owner="thebrazenbeard",
                                      observed_subject_ids=set())
+
+
+def test_registered_checkout_cannot_alias_subdirectory_as_repository_root(tmp_path: Path):
+    repo = checkout(tmp_path, "example")
+    nested = repo / "src"
+    nested.mkdir()
+    path = index(tmp_path, {"thebrazenbeard/example": nested})
+    with pytest.raises(ValueError, match="Git worktree root"):
+        inspect_registered_checkouts(path, owner="thebrazenbeard",
+                                     observed_subject_ids=set())

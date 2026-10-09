@@ -73,6 +73,9 @@ def inspect_registered_checkouts(
             raise ValueError("registered checkout is not an absolute local directory")
         if not _matches_origin(_git(checkout, "remote", "get-url", "origin"), repository):
             raise ValueError("registered checkout origin mismatch")
+        root = Path(_git(checkout, "rev-parse", "--show-toplevel")).resolve()
+        if root != checkout.resolve():
+            raise ValueError("registered checkout path must be the Git worktree root")
         head = _git(checkout, "rev-parse", "HEAD")
         if not _HEAD.fullmatch(head):
             raise ValueError("invalid current checkout head")
