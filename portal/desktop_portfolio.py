@@ -27,6 +27,7 @@ from .process_adapter import (
     build_process_proposal_execution_adapter,
 )
 from .resident_worker_trust import load_resident_backends
+from .worker_registry import load_worker_backends
 from .session import PortalCommandSession
 
 
@@ -490,10 +491,14 @@ class DesktopPortfolioController:
         """Read-only capacity diagnosis, not worker dispatch qualification."""
         requested = profile["max_parallel"] if profile is not None else 0
         enabled_slots = 0
+        enabled_node_ids: tuple[str, ...] = ()
         reason = None
         if profile is not None:
             try:
                 nodes = load_execution_nodes(Path(profile["nodes"]))
+                enabled_node_ids = tuple(
+                    node.node_id for node in nodes if node.enabled
+                )
                 enabled_slots = sum(
                     node.max_parallel for node in nodes if node.enabled
                 )
@@ -510,6 +515,15 @@ class DesktopPortfolioController:
             blocked.append("WORKER_NOT_CONFIGURED")
         if enabled_slots == 0:
             blocked.append(reason or "NO_ENABLED_NODE_SLOTS")
+        if worker_configured and profile is not None:
+            try:
+                backends = load_worker_backends(
+                    Path(profile["worker_backends"])
+                )
+                if any(node_id not in backends for node_id in enabled_node_ids):
+                    blocked.append("MISSING_ENABLED_WORKER_BACKEND")
+            except (OSError, ValueError, yaml.YAMLError):
+                blocked.append("WORKER_BACKEND_CONFIG_UNQUALIFIED")
         return {
             "profile_max_parallel": requested,
             "enabled_node_slots": enabled_slots,
