@@ -272,3 +272,49 @@ def test_missing_index_fails_before_dispatch(tmp_path):
     with pytest.raises(ValueError, match="input is unavailable"):
         pilot.run_once()
     assert not any(c["action"] == "continue" for c in bridge.calls)
+
+
+def test_operator_pinned_thirteen_slot_autopilot_can_continue_source_only(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    node_path = root / "nodes.yaml"
+    raw = yaml.safe_load(node_path.read_text(encoding="utf-8"))
+    raw["nodes"][0]["max_parallel"] = 13
+    node_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    snapshot["profile"]["max_parallel"] = 13
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, max_parallel_slots=13,
+        **_trusted_pins(root),
+    )
+    result = pilot.run_once()
+    assert result["state"] == "VERIFIED_CONTINUATION"
+    forwarded = [call for call in bridge.calls if call["action"] == "continue"]
+    assert len(forwarded) == 1
+    assert forwarded[0]["expected_parallel_slots"] == 13
+    assert forwarded[0]["expected_worker_sha256"] == sha
+
+
+def test_autopilot_does_not_infer_multislot_authority_from_profile(tmp_path):
+    root, sha, snapshot = fixture(tmp_path)
+    snapshot["profile"]["max_parallel"] = 13
+    bridge = FakeBridge(snapshot)
+    pilot = PortfolioAutopilot(
+        runtime_root=root, journal=tmp_path / "attempts.sqlite3",
+        expected_worker_sha256=sha, client=bridge, **_trusted_pins(root),
+    )
+    with pytest.raises(ValueError, match="exact source-only slot profile"):
+        pilot.run_once()
+    assert [call["action"] for call in bridge.calls] == ["inspect"]
+
+
+@pytest.mark.parametrize("invalid", [0, 14, True, 1.5])
+def test_unqualified_autopilot_slot_cap_rejected_before_io(tmp_path, invalid):
+    with pytest.raises(ValueError, match="slot cap"):
+        PortfolioAutopilot(
+            runtime_root=tmp_path, journal=tmp_path / "attempts.sqlite3",
+            expected_worker_sha256="a" * 64,
+            expected_command_sha256="b" * 64,
+            expected_interpreter_sha256="c" * 64,
+            max_parallel_slots=invalid,
+        )
