@@ -186,7 +186,7 @@ def test_run_without_profile_bootstraps_live_runtime_profile(tmp_path, monkeypat
         monkeypatch.setattr(
             controller,
             "_execution_adapter",
-            lambda profile, nodes, token: "proposal-adapter",
+            lambda profile, nodes, token, *, pins=None: "proposal-adapter",
         )
 
         result = controller.handle(

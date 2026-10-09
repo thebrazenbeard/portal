@@ -16,6 +16,8 @@ The supervisor only calls the existing resident `desktop_portfolio` continuation
 - The selected checkout index file or checkout-root directory must exist and not be a symlink before any continuation.
 - The resident command receives expected_generation and expected_holder. The resident rejects stale generation/holder before refreshing GitHub or admitting a new wave.
 - The supervisor's SQLite journal reserves a unique attempt before IPC. An interrupted/ambiguous attempt becomes UNKNOWN and blocks all subsequent cycles until it is explicitly reconciled.
+- For `LIVE_AUTO_V1` with a `PROCESS_JSON_V1` backend, the resident now requires the supervisor's three explicit digests on `run` or `continue`, reloads the command manifest, checks it did not change during parsing, and rechecks the executable, script, input path and entire argv using the loaded backend objects before admitting the wave. A missing or mismatched pin fails closed. The ordinary Codex route remains a separate case.
+- These request-carried digests are **consistency constraints**, not independently authenticated trust roots. A caller able to rewrite both the backend and presented pins can still fabricate agreement. Immutable staged worker bytes / OS-enforced permissions, an independent pin-qualification receipt, and the check-to-subprocess-use window remain required for activation qualification.
 
 No paid-model invocation, GitHub publication, deployment or installation is authorized by an autopilot tick. Model analysis remains an unreviewed source proposal behind P.O.R.T.A.L.'s existing verification and promotion boundary.
 

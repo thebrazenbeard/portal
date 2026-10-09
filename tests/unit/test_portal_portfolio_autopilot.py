@@ -95,7 +95,12 @@ def test_one_authenticated_generation_is_durable(tmp_path):
     with sqlite3.connect(state) as db:
         assert db.execute("SELECT state,result_generation FROM autopilot_attempts").fetchone() == ("VERIFIED", 3)
     assert pilot.run_once()["generation"] == 4
-    assert len([x for x in bridge.calls if x["action"] == "continue"]) == 2
+    continuations = [x for x in bridge.calls if x["action"] == "continue"]
+    assert len(continuations) == 2
+    for call in continuations:
+        assert call["expected_worker_sha256"] == sha
+        assert call["expected_command_sha256"] == _trusted_pins(root)["expected_command_sha256"]
+        assert call["expected_interpreter_sha256"] == _trusted_pins(root)["expected_interpreter_sha256"]
 
 
 def test_no_worker_never_dispatches(tmp_path):
