@@ -150,3 +150,65 @@ def test_checkout_root_rejects_traversal_before_model(tmp_path, monkeypatch, nam
     ])
     assert worker.main() == 1
     assert json.loads(receipt.read_text(encoding="utf-8"))["receipt_class"] == "FAILED_DETERMINISTIC"
+
+
+def test_existing_checkout_index_maps_repo_without_clone(tmp_path, monkeypatch):
+    checkout, packet, packet_path = _seed(tmp_path)
+    index = tmp_path / "checkouts.json"
+    index.write_text(json.dumps({
+        "schema": "PORTAL_EXISTING_CHECKOUT_INDEX_V1",
+        "repositories": {"thebrazenbeard/firesafe": str(checkout)}
+    }), encoding="utf-8")
+    monkeypatch.setattr(worker, "_query_local_model", lambda *args: {
+        "observations": ["The README records a bounded source review."],
+        "suggested_check": "Validate the README at exact HEAD.",
+        "uncertainty": "Not an independent validation.",
+    })
+    receipt = tmp_path / "receipt.json"
+    monkeypatch.setattr("sys.argv", [
+        "local_ollama_worker", "--portal-packet", str(packet_path),
+        "--portal-receipt", str(receipt), "--checkout-index", str(index),
+    ])
+    assert worker.main() == 0
+    assert json.loads(receipt.read_text(encoding="utf-8"))[
+        "receipt_class"] == "PROPOSED_SOURCE_TREE"
+    assert _git(checkout, "status", "--porcelain") == ""
+
+
+def test_checkout_index_fails_closed_when_repo_not_registered(tmp_path, monkeypatch):
+    checkout, packet, packet_path = _seed(tmp_path)
+    index = tmp_path / "checkouts.json"
+    index.write_text(json.dumps({
+        "schema": "PORTAL_EXISTING_CHECKOUT_INDEX_V1",
+        "repositories": {"someone/other": str(checkout)}
+    }), encoding="utf-8")
+    monkeypatch.setattr(worker, "_query_local_model",
+                        lambda *args: pytest.fail("missing repo reached model"))
+    receipt = tmp_path / "receipt.json"
+    monkeypatch.setattr("sys.argv", [
+        "local_ollama_worker", "--portal-packet", str(packet_path),
+        "--portal-receipt", str(receipt), "--checkout-index", str(index),
+    ])
+    assert worker.main() == 1
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["receipt_class"] == "FAILED_DETERMINISTIC"
+
+
+def test_checkout_index_rejects_relative_or_mismatched_checkout(tmp_path, monkeypatch):
+    checkout, packet, packet_path = _seed(tmp_path)
+    index = tmp_path / "checkouts.json"
+    monkeypatch.setattr(worker, "_query_local_model",
+                        lambda *args: pytest.fail("bad index reached model"))
+    for path in ("relative", str(tmp_path)):
+        index.write_text(json.dumps({
+            "schema": "PORTAL_EXISTING_CHECKOUT_INDEX_V1",
+            "repositories": {"thebrazenbeard/firesafe": path}
+        }), encoding="utf-8")
+        receipt = tmp_path / ("receipt" + str(len(path)) + ".json")
+        monkeypatch.setattr("sys.argv", [
+            "local_ollama_worker", "--portal-packet", str(packet_path),
+            "--portal-receipt", str(receipt), "--checkout-index", str(index),
+        ])
+        assert worker.main() == 1
+        assert json.loads(receipt.read_text(encoding="utf-8"))[
+            "receipt_class"] == "FAILED_DETERMINISTIC"
