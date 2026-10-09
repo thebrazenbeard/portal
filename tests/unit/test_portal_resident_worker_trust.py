@@ -80,3 +80,33 @@ def test_host_rejects_credential_inheritance(tmp_path):
     manifest.write_text(json.dumps(payload),encoding="utf-8")
     with pytest.raises(ValueError,match="inherit credentials"):
         trust.load_resident_backends(manifest,nodes=nodes,pins=pins,live_auto=True)
+
+
+def test_resident_multislot_requires_exact_operator_capacity_pin(tmp_path):
+    manifest, _nodes, pins, _payload, _worker = _seed(tmp_path)
+    nodes = (ExecutionNode(node_id="desktop-local", max_parallel=13),)
+    with pytest.raises(ValueError, match="exact slot count pin"):
+        trust.load_resident_backends(
+            manifest, nodes=nodes, pins=pins, live_auto=True,
+        )
+    pins["expected_parallel_slots"] = 12
+    with pytest.raises(ValueError, match="exact slot count pin"):
+        trust.load_resident_backends(
+            manifest, nodes=nodes, pins=pins, live_auto=True,
+        )
+    pins["expected_parallel_slots"] = 13
+    backends = trust.load_resident_backends(
+        manifest, nodes=nodes, pins=pins, live_auto=True,
+    )
+    assert set(backends) == {"desktop-local"}
+
+
+def test_resident_refuses_slots_over_thirteen_even_with_matching_pin(tmp_path):
+    manifest, _nodes, pins, _payload, _worker = _seed(tmp_path)
+    pins["expected_parallel_slots"] = 14
+    with pytest.raises(ValueError, match="unqualified"):
+        trust.load_resident_backends(
+            manifest,
+            nodes=(ExecutionNode(node_id="desktop-local", max_parallel=14),),
+            pins=pins, live_auto=True,
+        )
