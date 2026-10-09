@@ -360,15 +360,15 @@ class PortalDesktopApp:
                        style="Primary.TButton" if action == "status" else "TButton",
                        command=lambda value=action: self.portfolio_action(value)
                        ).pack(side="left", padx=(0, 7))
-        self.portfolio_tree = ttk.Treeview(portfolio_frame, columns=("subject", "state", "route", "verification"), show="headings")
+        self.portfolio_tree = ttk.Treeview(portfolio_frame, columns=("subject", "state", "route", "verification"), show="headings", height=3)
         for key, label in (("subject", "Repository / work"), ("state", "State"), ("route", "Worker route"), ("verification", "Verified")):
             self.portfolio_tree.heading(key, text=label)
             self.portfolio_tree.column(key, width=220 if key == "subject" else 115)
-        self.portfolio_tree.pack(fill="both", expand=True, pady=8)
+        self.portfolio_tree.pack(fill="x", expand=False, pady=(5, 3))
         self._portfolio_subjects = {}
         self._portfolio_in_flight = False
         jobs_heading = ttk.Frame(portfolio_frame)
-        jobs_heading.pack(fill="x", pady=(14, 5))
+        jobs_heading.pack(fill="x", pady=(9, 5))
         ttk.Label(jobs_heading, text="SELECTED LOCAL PROPOSAL JOBS",
                   style="Status.TLabel").pack(side="left")
         self.local_job_run_button = ttk.Button(
