@@ -144,6 +144,12 @@ class PortfolioAutopilot:
         snapshot = self.client.request(
             "desktop_portfolio", action="inspect", session_id="portfolio"
         )
+        # A stopped session may have held or ambiguous deliveries. It must
+        # never be restarted by a periodic controller or mistaken for a
+        # merely missing worker; manual reconciliation is a separate effect.
+        session_state = (snapshot.get("session") or {}).get("control_state")
+        if session_state == "STOPPED":
+            return {"state": "HOLD_STOPPED_SESSION", "admitted": False}
         ready = self._eligible(snapshot)
         if ready is None:
             return {"state": "HOLD_NO_QUALIFIED_WORKER", "admitted": False}
@@ -241,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             print(result, flush=True)
             if not args.forever:
                 return 0
-            if result["state"] == "HOLD_UNRESOLVED_ATTEMPT":
+            if result["state"] in {"HOLD_UNRESOLVED_ATTEMPT", "HOLD_STOPPED_SESSION"}:
                 return 2
             time.sleep(args.interval_seconds)
     except Exception as exc:
