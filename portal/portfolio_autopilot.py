@@ -55,7 +55,7 @@ class PortfolioAutopilot:
         if (not isinstance(session_id, str)
                 or not 1 <= len(session_id) <= 128
                 or session_id != session_id.strip()
-                or any(ord(char) < 32 or ord(char) == 127 for char in session_id)):
+                or any(ord(char) < 32 or ord(char) == 127 or char in "/\\" for char in session_id)):
             raise ValueError("session_id must be a clean 1-to-128-character string")
         self.session_id = session_id
         self.max_hourly_cycles = max_hourly_cycles
