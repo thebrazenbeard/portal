@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 from pathlib import Path
@@ -374,7 +375,7 @@ def test_capacity_observation_never_conflates_13_slots_with_live_workers(tmp_pat
             "workers": [{
                 "node_id": "desktop-local",
                 "kind": "PROCESS_JSON_V1",
-                "command": ["C:/python.exe", "worker.py"],
+                "command": [sys.executable, str(tmp_path / "worker.py")],
                 "pass_env": [], "timeout_seconds": 90,
             }],
         }), encoding="utf-8")
