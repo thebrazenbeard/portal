@@ -1,0 +1,19 @@
+{
+  "schema": "BT2_CROSS_REPO_FRONTIER_V1",
+  "repository": "thebrazenbeard/portal",
+  "source_baseline": {
+    "observed_sha": "b13c53337977398c117f1d8331bb38893daff8ef",
+    "source_only": true
+  },
+  "lane": "portfolio-orchestration",
+  "objective": "Bind wave assignments to unique session journals and explicit worker capacity before resident execution.",
+  "acceptance_invariant": "Stopped work, unqualified backends and unverified workers must never be described as running.",
+  "release_gates": {
+    "source_test": "REQUIRED",
+    "exact_head_review": "REQUIRED",
+    "installed_runtime": "NOT_CLAIMED",
+    "protected_effect_authority": false
+  },
+  "kind": "ADVISORY_SOURCE_ONLY",
+  "observed_at": "2026-10-09"
+}
