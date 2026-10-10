@@ -406,3 +406,16 @@ def test_invalid_session_id_rejected_before_journal_creation(tmp_path, session_i
             session_id=session_id, **_trusted_pins(root),
         )
     assert not journal.exists()
+
+
+@pytest.mark.parametrize("budget", [True, 1.5, "3", None])
+def test_non_integral_hourly_budget_rejected_before_journal_creation(tmp_path, budget):
+    root, sha, _snapshot = fixture(tmp_path)
+    journal = tmp_path / "never.sqlite3"
+    with pytest.raises(ValueError, match="cycle budget"):
+        PortfolioAutopilot(
+            runtime_root=root, journal=journal,
+            expected_worker_sha256=sha,
+            max_hourly_cycles=budget, **_trusted_pins(root),
+        )
+    assert not journal.exists()

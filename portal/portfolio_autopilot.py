@@ -50,7 +50,7 @@ class PortfolioAutopilot:
         client: object | None = None, max_hourly_cycles: int = 4,
         max_parallel_slots: int = 1, session_id: str = "portfolio",
     ):
-        if isinstance(max_hourly_cycles, bool) or not 1 <= max_hourly_cycles <= 60:
+        if type(max_hourly_cycles) is not int or not 1 <= max_hourly_cycles <= 60:
             raise ValueError("hourly cycle budget must be 1 to 60")
         if (not isinstance(session_id, str)
                 or not 1 <= len(session_id) <= 128
