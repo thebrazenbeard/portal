@@ -72,7 +72,7 @@ Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB B
 
 ## Authenticated portfolio discovery
 
-For an operator intending to cover private repositories, run `portal discover --owner OWNER --require-authenticated --output LOCAL_PATH` with `PORTAL_GITHUB_TOKEN` or `PROJECT_RUNNER_GITHUB_TOKEN` available only to the local process. Without a credential, discovery can see only public owned repositories; the response now labels this `PUBLIC_ONLY_OWNER`. An authenticated request is labeled `AUTHENTICATED_OWNER_VISIBLE`, **not** proof of complete coverage: token access can still be restricted. Compare the returned count against an independently authenticated owner inventory before describing a run as whole-portfolio. Keep the resulting local private registry out of public logs and pull requests.
+For an operator intending to cover private repositories, run `portal discover --owner OWNER --require-authenticated --output LOCAL_PATH` with `PORTAL_GITHUB_TOKEN` or `PROJECT_RUNNER_GITHUB_TOKEN` available only to the local process. The same `--require-authenticated` guard also applies to live `portal run --discover-owner OWNER` and `portal continue --discover-owner OWNER` commands; it fails before public-only discovery if credentials are absent. Without a credential, discovery can see only public owned repositories; the response now labels this `PUBLIC_ONLY_OWNER`. An authenticated request is labeled `AUTHENTICATED_OWNER_VISIBLE`, **not** proof of complete coverage: token access can still be restricted. Compare the returned count against an independently authenticated owner inventory before describing a run as whole-portfolio. Keep the resulting local private registry out of public logs and pull requests.
 
 ## Quick start
 
