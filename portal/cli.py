@@ -112,6 +112,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     discover.add_argument("--owner", required=True)
     discover.add_argument(
+        "--require-authenticated", action="store_true",
+        help="fail closed if no GitHub owner credential is available; visibility still depends on credential access",
+    )
+    discover.add_argument(
         "--curated-projects",
         type=Path,
         default=ROOT / "registry" / "projects.yaml",
@@ -1073,11 +1077,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _discovery_payload(args: argparse.Namespace) -> dict[str, object]:
+    token = _github_token()
+    if args.require_authenticated and not token:
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     curated = load_project_snapshot(Path(args.curated_projects))
     snapshot = discover_live_project_registry(
         owner=args.owner,
         curated_projects=curated.projects,
-        token=_github_token(),
+        token=token,
     )
     write_project_registry(Path(args.output), snapshot)
     public = sum(project.visibility == "public" for project in snapshot.projects)
@@ -1089,6 +1096,8 @@ def _discovery_payload(args: argparse.Namespace) -> dict[str, object]:
     return {
         "mode": "PORTAL_DISCOVERY_V1",
         "owner": args.owner,
+        "discovery_scope": ("AUTHENTICATED_OWNER_VISIBLE" if token else "PUBLIC_ONLY_OWNER"),
+        "private_coverage_automatically_verified": False,
         "repositories": len(snapshot.projects),
         "public": public,
         "private": private,
