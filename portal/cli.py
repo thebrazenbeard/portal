@@ -158,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
             "using --projects only as curated metadata"
         ),
     )
+    run.add_argument("--require-authenticated", action="store_true",
+        help="require owner credentials for live discovery; private coverage must still be independently checked")
     run.add_argument(
         "--write-live-registry",
         type=Path,
@@ -365,6 +367,8 @@ def _parser() -> argparse.ArgumentParser:
         default=ROOT / "registry" / "projects.yaml",
     )
     continue_cmd.add_argument("--discover-owner")
+    continue_cmd.add_argument("--require-authenticated", action="store_true",
+        help="require owner credentials for live discovery; private coverage must still be independently checked")
     continue_cmd.add_argument("--write-live-registry", type=Path)
     continue_cmd.add_argument(
         "--static-projects",
@@ -1151,6 +1155,8 @@ def _run_project_snapshot(args: argparse.Namespace):
     if not args.discover_owner:
         return curated, "static-registry"
 
+    if getattr(args, "require_authenticated", False) and not _github_token():
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     snapshot = discover_live_project_registry(
         owner=args.discover_owner,
         curated_projects=curated.projects,
@@ -1339,8 +1345,11 @@ def _session_portfolio_paths(
     if not owner:
         raise ValueError("portfolio owner is required")
 
+    token = _github_token()
+    if getattr(args, "require_authenticated", False) and not token:
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     repositories = GitHubRepositoryCatalog(
-        token=_github_token(),
+        token=token,
     ).list_owned_repositories(owner)
     curated = load_project_snapshot(projects_path)
     registry = build_live_project_registry(

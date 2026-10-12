@@ -27,3 +27,19 @@ def test_discovery_scope_is_explicit_not_claim_of_completeness(monkeypatch, tmp_
     assert result["private_coverage_automatically_verified"] is False
     assert result["private"]==0
     assert (tmp_path/"live.yaml").is_file()
+
+def test_full_run_and_continue_live_discovery_require_token_before_network(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_github_token", lambda: None)
+    monkeypatch.setattr(cli, "GitHubRepositoryCatalog",
+                        lambda **kw: pytest.fail("discovery should fail before network"))
+    for command in ("run", "continue"):
+        args=cli._parser().parse_args([
+            command, "--session-id", "guard-test", "--discover-owner", "thebrazenbeard",
+            "--require-authenticated", "--state-db", str(tmp_path/"state.sqlite3")])
+        assert args.require_authenticated
+        with pytest.raises(ValueError, match="authenticated GitHub token required"):
+            cli._session_portfolio_paths(args)
+    args=cli._parser().parse_args([
+        "run", "--discover-owner", "thebrazenbeard", "--require-authenticated"])
+    with pytest.raises(ValueError, match="authenticated GitHub token required"):
+        cli._run_project_snapshot(args)
