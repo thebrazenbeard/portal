@@ -113,7 +113,7 @@ class CognitionLedger:
                 SELECT request_id, source, task, created_at, state,
                        response_text, error, evidence_id
                 FROM desktop_cognition_runs
-                WHERE source = 'HUMAN'
+                WHERE source = 'HUMAN' AND reason = 'desktop conversation message'
                 ORDER BY created_at DESC, request_id DESC
                 LIMIT ?
             )

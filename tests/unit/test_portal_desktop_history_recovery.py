@@ -15,7 +15,7 @@ def _store(ledger, rid: str, source: str, task: str,
     ledger.store(
         CognitionRequestEnvelope(
             request_id=rid, source=source,
-            reason="desktop", task=task, created_at=created,
+            reason="desktop conversation message", task=task, created_at=created,
         ),
         state="COMPLETED" if response is not None else "UNRESOLVED",
         retryable=False, now=created,
@@ -87,3 +87,23 @@ def test_desktop_restore_replays_each_saved_turn_once_and_does_not_invent_reply(
     app._restore_history(rows)
     assert shown.count(("Vera", "hi")) == 1
     assert shown.count(("Vera", "done")) == 1
+
+
+def test_desktop_history_excludes_installer_human_probes(tmp_path: Path) -> None:
+    db = CognitionLedger(tmp_path / "qualification-history.sqlite3")
+    try:
+        db.store(
+            CognitionRequestEnvelope(
+                request_id="qualification-human-123", source="HUMAN",
+                reason="staged runtime qualification", task="Reply with TOKEN",
+                created_at=1.0,
+            ),
+            state="COMPLETED", retryable=False, now=1.0,
+            response_text="TOKEN",
+        )
+        _store(db, "desktop-user", "HUMAN", "hello", "hi", 2.0)
+        assert [r["request_id"] for r in db.list_human_conversation(limit=50)] == [
+            "desktop-user",
+        ]
+    finally:
+        db.close()
