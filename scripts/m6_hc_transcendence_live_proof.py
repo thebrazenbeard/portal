@@ -45,6 +45,19 @@ TRANSCENDENCE_SUBJECT = ExactSubject(
 )
 
 
+def _current_transcendence_subject(reader: GitHubCurrentSubjectReader) -> ExactSubject:
+    """Bind the exact live consumer ref; the historical seed is not its head."""
+    observed = reader.read(TRANSCENDENCE_SUBJECT)
+    if (
+        observed is None
+        or observed.repository != TRANSCENDENCE_SUBJECT.repository
+        or observed.ref != TRANSCENDENCE_SUBJECT.ref
+        or not observed.commit
+    ):
+        raise RuntimeError("live Transcendence currentness snapshot is unavailable or misbound")
+    return observed
+
+
 def _budget() -> BudgetEnvelope:
     return BudgetEnvelope(
         lineage_id="m6-hc-transcendence-live-proof",
@@ -90,6 +103,7 @@ def main() -> int:
     live_hc = live_reader.read(hc_seed)
     if live_hc is None or live_hc.commit is None:
         raise RuntimeError("live HC currentness snapshot is unavailable")
+    live_transcendence = _current_transcendence_subject(live_reader)
     current = tuple(
         replace(
             observation,
@@ -128,7 +142,7 @@ def main() -> int:
 
         work = frontier_to_github_inspection_work(
             frontiers[0],
-            TRANSCENDENCE_SUBJECT,
+            live_transcendence,
             persisted_budget.depth,
             registry_digest=registry_snapshot.sha256,
         )
@@ -304,7 +318,7 @@ def main() -> int:
                 "status": "COMPLETE",
                 "reaction": frontiers[0].work_type,
                 "provider_head": frontiers[0].subject.commit,
-                "consumer_head": TRANSCENDENCE_SUBJECT.commit,
+                "consumer_head": live_transcendence.commit,
                 "budget_generation": new_generation,
                 "recursive_work_generation": recursive_generation,
                 "recursive_work_status": WorkUnitStatus.COMPLETE.value,
