@@ -383,3 +383,98 @@ def test_stale_queued_route_does_not_block_unrelated_safe_dispatch(
     assert store.load_dispatch(beta)["reconciliation_state"] == "VERIFIED_COMPLETE"
     store.close()
 
+
+
+def test_shared_pool_pulls_only_compatible_queued_work(tmp_path: Path) -> None:
+    store = PortalHostBridgeStore(tmp_path / "pool.sqlite3")
+    unavailable = _queue(store, run_id="portfolio::g1", subject_id="alpha", adapter_id="other")
+    claimed = _queue(store, run_id="portfolio::g2", subject_id="beta", adapter_id="github")
+    seen = []
+
+    class Driver:
+        def execute(self, dispatch, *, attempt_id):
+            assert store.load_dispatch(dispatch["dispatch_id"])["state"] == "ATTEMPTED"
+            seen.append(dispatch["dispatch_id"])
+            return PortalHostDriverResult("VERIFIED_COMPLETE", "evidence:beta")
+
+    pump = PortalHostPump(store=store, drivers={"github": Driver()})
+    result = pump.run_shared_pool_once(session_id="portfolio", max_dispatches=2)
+    assert result.attempted == result.verified_complete == 1
+    assert seen == [claimed]
+    assert store.load_dispatch(unavailable)["state"] == "QUEUED"
+    assert store.load_dispatch(claimed)["reconciliation_state"] == "VERIFIED_COMPLETE"
+    store.close()
+
+
+def test_shared_pool_never_replays_ambiguous_attempt(tmp_path: Path) -> None:
+    store = PortalHostBridgeStore(tmp_path / "pool.sqlite3")
+    dispatch = _queue(store, run_id="portfolio::g1", subject_id="alpha")
+    calls = []
+
+    class Driver:
+        def execute(self, envelope, *, attempt_id):
+            calls.append(attempt_id)
+            raise RuntimeError("ambiguous host timeout")
+
+    pump = PortalHostPump(store=store, drivers={"github": Driver()})
+    first = pump.run_shared_pool_once(session_id="portfolio", max_dispatches=2)
+    second = pump.run_shared_pool_once(session_id="portfolio", max_dispatches=2)
+    assert first.attempted == first.outcome_unknown == 1
+    assert second.attempted == 0
+    assert len(calls) == 1
+    assert store.load_dispatch(dispatch)["state"] == "ATTEMPTED"
+    assert store.load_dispatch(dispatch)["reconciliation_state"] is None
+    store.close()
+
+
+def test_two_shared_pool_workers_atomically_claim_distinct_jobs(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+
+    path = tmp_path / "shared.sqlite3"
+    seed = PortalHostBridgeStore(path)
+    all_ids = {
+        _queue(seed, run_id=f"portfolio::g{i}", subject_id=f"repo{i}", queued_at=float(i+100))
+        for i in range(6)
+    }
+    seed.close()
+    gate = Barrier(2)
+    lock = Lock()
+    executed: list[str] = []
+
+    def worker():
+        store = PortalHostBridgeStore(path)
+
+        class Driver:
+            def execute(self, dispatch, *, attempt_id):
+                with lock:
+                    executed.append(dispatch["dispatch_id"])
+                return PortalHostDriverResult("VERIFIED_COMPLETE", "evidence:" + attempt_id)
+
+        try:
+            gate.wait(timeout=5)
+            return PortalHostPump(store=store, drivers={"github": Driver()}).run_shared_pool_once(
+                session_id="portfolio", max_dispatches=6
+            )
+        finally:
+            store.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(worker) for _ in range(2)]
+        results = [future.result(timeout=10) for future in futures]
+    assert {len(executed), len(set(executed))} == {6}
+    assert set(executed) == all_ids
+    assert sum(result.verified_complete for result in results) == 6
+    verify = PortalHostBridgeStore(path)
+    assert all(verify.load_dispatch(item)["reconciliation_state"] == "VERIFIED_COMPLETE" for item in all_ids)
+    verify.close()
+
+
+def test_shared_pool_rejects_invalid_budget_and_stays_inert_without_drivers(tmp_path: Path) -> None:
+    store = PortalHostBridgeStore(tmp_path / "pool.sqlite3")
+    pump = PortalHostPump(store=store, drivers={})
+    from pytest import raises
+    with raises(ValueError, match="positive"):
+        pump.run_shared_pool_once(max_dispatches=0)
+    assert pump.run_shared_pool_once(max_dispatches=1).attempted == 0
+    store.close()
