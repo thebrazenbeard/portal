@@ -1,12 +1,12 @@
-# P.O.R.T.A.L. Portfolio Coordinator Design
+# PORTAL Portfolio Coordinator Design
 
-**P.O.R.T.A.L.** means **Portfolio Orchestration & Repository Tracking Access Layer**.
+**PORTAL** means **Portfolio Orchestration & Repository Tracking Access Layer**.
 
 ## Purpose
 
-P.O.R.T.A.L. is the whole-portfolio coordinator built around a single P.O.R.T.A.L. chat control surface.
+PORTAL is the whole-portfolio coordinator built around a single PORTAL chat control surface.
 
-The mission is to keep every eligible active project advancing in maximal safe parallelism. The chat is not a sequential project worker; it is the operator surface for a durable portfolio scheduler. Vera coordinates cross-project ownership/collisions. P.O.R.T.A.L. schedules lanes and nodes. Project Runner remains the governed execution engine.
+The mission is to keep every eligible active project advancing in maximal safe parallelism. The chat is not a sequential project worker; it is the operator surface for a durable portfolio scheduler. Vera coordinates cross-project ownership/collisions. PORTAL schedules lanes and nodes. Project Runner remains the governed execution engine.
 
 The repository was seeded from `thebrazenbeard/project-runner@04702abbf51aa2920b7d054275619253ea6fa748`.
 

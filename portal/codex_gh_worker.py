@@ -164,7 +164,7 @@ def _prompt(packet: Mapping[str, object]) -> str:
         else "Inspect the exact-head repository and make the smallest useful source proposal."
     )
     return (
-        "You are a proposal-only coding worker for P.O.R.T.A.L. "
+        "You are a proposal-only coding worker for PORTAL "
         "Work only inside this detached checkout at the exact supplied head. "
         "Implement the smallest coherent source-only change that advances the frontier. "
         "Do not commit, push, create or update remote branches, merge, deploy, install, "
