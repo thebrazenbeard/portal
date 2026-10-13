@@ -312,6 +312,22 @@ def _parser() -> argparse.ArgumentParser:
         help="execute exactly one bounded durable Portal cycle",
     )
 
+    advance = subcommands.add_parser(
+        "advance",
+        help="advance a preconfigured portfolio session from one semantic objective",
+    )
+    advance.add_argument(
+        "goal", nargs="?", default="advance portfolio",
+        help="portfolio intent; target and authority come only from the durable session",
+    )
+    advance.add_argument("--session-id", default="portfolio")
+    advance.add_argument("--state-db", type=Path, default=Path(".portal/portal.sqlite3"))
+    advance.add_argument("--dry-run", action="store_true", help="inspect without dispatch")
+    advance.add_argument(
+        "--continuous", action="store_true",
+        help="use the session's guarded refill loop instead of a single cycle",
+    )
+
     status = subcommands.add_parser(
         "status",
         help="show durable P.O.R.T.A.L. run state",
@@ -1755,6 +1771,59 @@ def _apply_session_resume_spec(
     )
 
 
+def _advance_payload(args: argparse.Namespace) -> dict[str, object]:
+    # Natural-language intent is descriptive, not target or effect authority.
+    normalized = " ".join(args.goal.lower().split())
+    accepted = {
+        "advance portfolio", "advance my portfolio", "advance the portfolio",
+        "continue portfolio", "continue my portfolio", "move my portfolio forward",
+        "advance repositories", "advance all repos",
+    }
+    if normalized not in accepted:
+        raise ValueError(
+            "unsupported semantic goal: a named project or new objective needs "
+            "an exact scoped mission, not an inferred portfolio-wide dispatch"
+        )
+    state_db = Path(args.state_db)
+    if not state_db.is_file():
+        raise ValueError("no durable portfolio session exists; initialize a session first")
+    controller = PortalCommandSession(state_db)
+    try:
+        status = controller.status(args.session_id)
+        holder = str(status["holder"])
+        # A recorded resume spec binds targets, routes and ceilings; never guess.
+        controller.load_resume_spec(session_id=args.session_id, holder=holder)
+    finally:
+        controller.close()
+    if args.dry_run:
+        return {
+            "mode": "PORTAL_ADVANCE_PREVIEW_V1",
+            "semantic_goal": "ADVANCE_EXISTING_PORTFOLIO",
+            "session_id": args.session_id,
+            "status": status,
+            "dispatched": False,
+        }
+
+    run_args = _parser().parse_args([
+        "run" if args.continuous else "continue",
+        "--session-id", args.session_id,
+        "--state-db", str(state_db),
+        "--holder", holder, "--resume",
+    ])
+    # A one-cycle continuation can pump the saved host driver before refill.
+    result = (
+        _session_run_payload(run_args)
+        if args.continuous
+        else _continue_payload(run_args)
+    )
+    return {
+        "mode": "PORTAL_ADVANCE_EXISTING_SESSION_V1",
+        "semantic_goal": "ADVANCE_EXISTING_PORTFOLIO",
+        "bounded_cycle": not args.continuous,
+        "result": result,
+    }
+
+
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
     controller = PortalCommandSession(Path(args.state_db))
     execution_adapter = None
@@ -2968,6 +3037,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
             payload = _plan_payload(args)
         elif args.command == "run":
             payload = _run_payload(args)
+        elif args.command == "advance":
+            payload = _advance_payload(args)
         elif args.command == "status":
             payload = _status_payload(args)
         elif args.command == "continue":
