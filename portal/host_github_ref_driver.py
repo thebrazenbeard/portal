@@ -1,4 +1,4 @@
-"""Exact-target, read-only GitHub ref verification driver for P.O.R.T.A.L.
+"""Exact-target, read-only GitHub ref verification driver for PORTAL
 
 Use through PortalCommandHostDriver after a durable host attempt has been
 recorded. This module cannot grant its own authority or perform source writes.

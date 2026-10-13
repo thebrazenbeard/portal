@@ -1,4 +1,4 @@
-# P.O.R.T.A.L. — Bounded read-only GitHub ref host driver V1
+# PORTAL — Bounded read-only GitHub ref host driver V1
 
 Status: source candidate. This module is a constrained **external process driver**, not a resident scheduler or an independently qualified execution route.
 
@@ -14,12 +14,12 @@ When the live GitHub ref matches, the response is `VERIFIED_COMPLETE`; a changed
 python -m portal.host_github_ref_driver --allowed-repository thebrazenbeard/portal --allowed-repository thebrazenbeard/vera-mono --adapter-id lappy-local-readonly-gh
 ```
 
-The operator must configure the outer P.O.R.T.A.L. `PortalCommandHostDriver` argv and the exact `lappy-local-readonly-gh` adapter route. Requests must bind `route_id=local-gh:SUBJECT:main`, `action=VERIFY_EXACT_HEAD`, and `effect_ceiling=SOURCE_ONLY`. The driver is only a verification workload; it does not grant SOURCE_ONLY authority to mutate source. Do not grant an external source-writing route based on this driver.
+The operator must configure the outer PORTAL `PortalCommandHostDriver` argv and the exact `lappy-local-readonly-gh` adapter route. Requests must bind `route_id=local-gh:SUBJECT:main`, `action=VERIFY_EXACT_HEAD`, and `effect_ceiling=SOURCE_ONLY`. The driver is only a verification workload; it does not grant SOURCE_ONLY authority to mutate source. Do not grant an external source-writing route based on this driver.
 
 ## Qualification ceiling
 
 The owning GitHub ref is fetched by an installed authenticated `gh` CLI through one read-only GitHub REST endpoint. A host should independently read the same ref after the driver result, preserve the exact attempt and ref evidence, and reconcile through the durable host bridge. A successful driver result is not a substitute for a qualified route, production resident host, independent reviewer, or proof that a subsequent write is authorized.
 
-This component is intentionally constrained to default `main` refs; it is not a general task runner. Tests cover malicious/disallowed subjects, error transport, stale refs, duplicated input fields, and bound result identities. The one-process CLI must be invoked only after P.O.R.T.A.L. has atomically marked the dispatch attempted; otherwise the local operator can bypass host scheduling invariants.
+This component is intentionally constrained to default `main` refs; it is not a general task runner. Tests cover malicious/disallowed subjects, error transport, stale refs, duplicated input fields, and bound result identities. The one-process CLI must be invoked only after PORTAL has atomically marked the dispatch attempted; otherwise the local operator can bypass host scheduling invariants.
 
 On Windows the executable `python` must be an actual installed interpreter, and `gh` must be authenticated with repository read access. Neither discovery nor CLI presence establishes runtime qualification. No secrets are embedded in this source.

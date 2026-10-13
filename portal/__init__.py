@@ -1,4 +1,4 @@
-"""P.O.R.T.A.L. — Portfolio Orchestration & Repository Tracking Access Layer."""
+"""PORTAL — Portfolio Orchestration & Repository Tracking Access Layer."""
 
 from .adapters import (
     PortalDispatchRecord,

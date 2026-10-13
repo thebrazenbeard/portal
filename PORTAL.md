@@ -1,10 +1,10 @@
-# P.O.R.T.A.L. Coordination Contract
+# PORTAL Coordination Contract
 
-**P.O.R.T.A.L. � Portfolio Orchestration & Repository Tracking Access Layer**
+**PORTAL � Portfolio Orchestration & Repository Tracking Access Layer**
 
-P.O.R.T.A.L. is Vera's **whole-portfolio orchestration and host interface layer**. A chat can be **one interaction surface**, but it is not the runtime, not canonical persistence, and not the architectural center. P.O.R.T.A.L. coordinates the **whole portfolio** through independent **parallel** execution lanes while durable state, execution, verification, and recovery remain outside any one interface.
+PORTAL is Vera's **whole-portfolio orchestration and host interface layer**. A chat can be **one interaction surface**, but it is not the runtime, not canonical persistence, and not the architectural center. PORTAL coordinates the **whole portfolio** through independent **parallel** execution lanes while durable state, execution, verification, and recovery remain outside any one interface.
 
-Project Runner remains the governed execution substrate. P.O.R.T.A.L. composes its currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics rather than replacing them.
+Project Runner remains the governed execution substrate. PORTAL composes its currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics rather than replacing them.
 
 ## Mission and implemented coordinator core
 
@@ -41,7 +41,7 @@ Implemented coordinator core:
 - a built-in advisory process-proposal adapter that can be explicitly enabled from command-session `run` / `continue` with a worker-backend manifest, while retaining only `NO_PROTECTED_EFFECT` authority;
 - CLI surfaces for discovery, command sessions, bounded runs, wave preparation, worker delivery, source-proposal promotion/execution/reconciliation, ecosystem refill and status.
 
-This is no longer a planning-only implementation. The command-session path can dispatch configured advisory process-proposal work and can queue arbitrary semantic work through a capability-qualified external-host boundary. The repository now contains the host-side pump/attempt/reconciliation contract as well. What remains host-specific is supplying concrete live drivers for the routes actually available in that environment (for example repo-native connectors, Executor, WorkBridge, or Lappy V2) and running the resident loop. Source presence and passing tests do not prove an installed, selected, or continuously running P.O.R.T.A.L. runtime.
+This is no longer a planning-only implementation. The command-session path can dispatch configured advisory process-proposal work and can queue arbitrary semantic work through a capability-qualified external-host boundary. The repository now contains the host-side pump/attempt/reconciliation contract as well. What remains host-specific is supplying concrete live drivers for the routes actually available in that environment (for example repo-native connectors, Executor, WorkBridge, or Lappy V2) and running the resident loop. Source presence and passing tests do not prove an installed, selected, or continuously running PORTAL runtime.
 
 ## Existing execution-loop substrate
 
@@ -59,13 +59,13 @@ The command-session/refill layer composes those mechanisms rather than replacing
 
 ## Interaction/control boundary
 
-A P.O.R.T.A.L. chat, P.O.R.T.A.L. Desktop, CLI, or another qualified host can be an operator/control surface. No one interaction surface is canonical persistence.
+A PORTAL chat, PORTAL Desktop, CLI, or another qualified host can be an operator/control surface. No one interaction surface is canonical persistence.
 
 A fresh interaction surface must be able to reconstruct the run from durable state and continue without requiring the prior transcript.
 
 Vera coordinates project/lane ownership and collisions. Portal schedules. Project Runner executes/fences/verifies. Execution routes are selected per target/effect from currently qualified repository, workstation, or service adapters. Discovery or connector presence is not capability, attachment, currentness, or authority. No workstation or repository is permanently married to one transport.
 
-After dispatch, a timeout/disconnect or otherwise ambiguous effect remains bound to that attempted route/effect until reconciled. P.O.R.T.A.L. must not silently replay the same semantic effect through another adapter.
+After dispatch, a timeout/disconnect or otherwise ambiguous effect remains bound to that attempted route/effect until reconciled. PORTAL must not silently replay the same semantic effect through another adapter.
 
 ## Command-session semantics
 
@@ -124,7 +124,7 @@ Portal must mine Patrick-owned repositories before adopting external mechanisms.
 
 ## Authority ceiling
 
-P.O.R.T.A.L. scheduling does not grant execution authority.
+PORTAL scheduling does not grant execution authority.
 
 Whole-portfolio operation does not imply merge, deploy, install, provider mutation, credential change, spend, protected evaluation-bank access, canonical-memory mutation, publication, or other protected effects.
 

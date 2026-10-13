@@ -121,7 +121,7 @@ class PortalDesktopApp:
 
         self._tk = tk
         self.root = tk.Tk()
-        self.root.title("P.O.R.T.A.L. Desktop — Vera")
+        self.root.title("PORTAL Desktop — Vera")
         self.root.geometry("1120x760")
         self.root.minsize(900, 620)
 

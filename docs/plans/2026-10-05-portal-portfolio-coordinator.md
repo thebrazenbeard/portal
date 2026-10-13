@@ -1,8 +1,8 @@
-# P.O.R.T.A.L. Portfolio Coordinator Implementation Plan
+# PORTAL Portfolio Coordinator Implementation Plan
 
 > **For agentic workers:** Use the host's available task-by-task implementation workflow. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a deterministic P.O.R.T.A.L. coordination layer that assigns Project Runner-approved portfolio work to bounded execution nodes without manufacturing authority.
+**Goal:** Add a deterministic PORTAL coordination layer that assigns Project Runner-approved portfolio work to bounded execution nodes without manufacturing authority.
 
 **Architecture:** Preserve `runner/` as the inherited Project Runner execution kernel. Add a separate `portal/` package that composes `plan_wave_admission`, applies node eligibility/capacity routing, and exposes a read-only planning CLI before any live multi-machine dispatch is attempted.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- P.O.R.T.A.L. means Portfolio Orchestration & Repository Tracking Access Layer.
+- PORTAL means Portfolio Orchestration & Repository Tracking Access Layer.
 - Inherited Project Runner exact-subject, collision, authority, currentness, lease, fencing, and verification semantics remain authoritative.
 - Portal node placement is scheduling metadata, not authority.
 - No protected effect is introduced by this slice.
@@ -140,7 +140,7 @@ Expected: non-zero exit because Portal identity documentation has not yet replac
 
 - [ ] **Step 3: Implement the minimum behavior**
 
-Rewrite the landing section around P.O.R.T.A.L., clearly label `runner/` as inherited execution substrate, document `portal plan`, and preserve the exact bootstrap source commit/tree.
+Rewrite the landing section around PORTAL, clearly label `runner/` as inherited execution substrate, document `portal plan`, and preserve the exact bootstrap source commit/tree.
 
 - [ ] **Step 4: Verify the focused pass**
 
@@ -156,7 +156,7 @@ Expected: both repository-contract suites pass, with inherited Project Runner co
 
 - [ ] **Step 6: Commit the passing deliverable**
 
-`git add README.md PORTAL.md .portal-bootstrap.json tests/integration/test_portal_repository_contract.py && git commit -m "docs: establish P.O.R.T.A.L. repository identity"`
+`git add README.md PORTAL.md .portal-bootstrap.json tests/integration/test_portal_repository_contract.py && git commit -m "docs: establish PORTAL repository identity"`
 
 ### Task 4: Full qualification and frozen handoff
 
