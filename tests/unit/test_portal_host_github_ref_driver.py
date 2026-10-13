@@ -100,7 +100,7 @@ def test_github_command_is_argv_only_and_read_only(monkeypatch):
     def gh(args, **kwargs):
         observed["args"] = args
         observed["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout=json.dumps({"object":{"sha":"c"*40}}))
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"ref":"refs/heads/main","object":{"type":"commit","sha":"c"*40}}))
     monkeypatch.setattr(subprocess, "run", gh)
     assert driver.read_live_head("thebrazenbeard/portal", "main") == "c"*40
     assert observed["args"] == [
@@ -135,3 +135,21 @@ def test_process_cli_does_not_emit_success_on_wrong_target(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "HELD" in captured.err
+@pytest.mark.parametrize("ref,kind", [
+    ("refs/heads/other", "commit"),
+    ("refs/heads/main", "tag"),
+    ("refs/tags/main", "commit"),
+])
+def test_github_ref_response_rejects_wrong_target_or_object_type(monkeypatch, ref, kind):
+    def gh(*_args, **_kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "ref": ref,
+                "object": {"type": kind, "sha": "c" * 40},
+            }),
+        )
+
+    monkeypatch.setattr(subprocess, "run", gh)
+    with pytest.raises(driver.ReadOnlyDriverError):
+        driver.read_live_head("thebrazenbeard/portal", "main")

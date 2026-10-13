@@ -75,9 +75,14 @@ def read_live_head(repository: str, ref: str) -> str:
         raise ReadOnlyDriverError("GitHub ref lookup failed")
     try:
         payload = json.loads(p.stdout)
-        observed = payload["object"]["sha"]
-    except (ValueError, KeyError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         raise ReadOnlyDriverError("invalid GitHub ref response") from exc
+    if not isinstance(payload, dict) or payload.get("ref") != f"refs/heads/{ref}":
+        raise ReadOnlyDriverError("GitHub ref response does not match requested branch")
+    value = payload.get("object")
+    if not isinstance(value, dict) or value.get("type") != "commit":
+        raise ReadOnlyDriverError("GitHub ref must resolve to a commit")
+    observed = value.get("sha")
     if not isinstance(observed, str) or not _SHA40.fullmatch(observed):
         raise ReadOnlyDriverError("invalid GitHub ref head")
     return observed
