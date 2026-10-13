@@ -94,6 +94,7 @@ def verify_dispatch(
     dispatch: Mapping[str, object],
     allowed_repositories: frozenset[str],
     required_adapter_id: str,
+    required_node_id: str,
     required_ref: str = "main",
 ) -> dict[str, str]:
     repository = _required(dispatch.get("repository"), "repository")
@@ -102,6 +103,7 @@ def verify_dispatch(
     ref = _required(dispatch.get("ref"), "ref")
     subject = _required(dispatch.get("subject_id"), "subject_id")
     route = _required(dispatch.get("route_id"), "route_id")
+    node = _required(dispatch.get("node_id"), "node_id")
     if repository not in allowed_repositories:
         raise ReadOnlyDriverError("repository not allowlisted")
     if not _REPOSITORY.fullmatch(repository):
@@ -112,6 +114,8 @@ def verify_dispatch(
         raise ReadOnlyDriverError("subject/repository mismatch")
     if adapter != required_adapter_id or route != f"local-gh:{subject}:{required_ref}":
         raise ReadOnlyDriverError("bound adapter or route mismatch")
+    if node != required_node_id:
+        raise ReadOnlyDriverError("bound node does not match configured host")
     if ref != required_ref or ref != "main":
         raise ReadOnlyDriverError("ref not allowed")
     if not _SHA40.fullmatch(expected):
@@ -137,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allowed-repository", action="append", required=True)
     parser.add_argument("--adapter-id", default="lappy-local-readonly-gh")
+    parser.add_argument("--node-id", default="lappy")
     args = parser.parse_args(argv)
     allowlist = frozenset(args.allowed_repository)
     if not allowlist or any(not _REPOSITORY.fullmatch(x) for x in allowlist):
@@ -148,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             dispatch=dispatch,
             allowed_repositories=allowlist,
             required_adapter_id=args.adapter_id,
+            required_node_id=args.node_id,
         )
     except ReadOnlyDriverError as exc:
         print(f"READONLY_HOST_DRIVER_HELD: {exc}", file=sys.stderr)

@@ -16,6 +16,7 @@ def dispatch():
         "dispatch_id": "dispatch-1",
         "adapter_id": "lappy-local-readonly-gh",
         "route_id": "local-gh:portal:main",
+        "node_id": "lappy",
         "subject_kind": "repository",
         "subject_id": "portal",
         "repository": "thebrazenbeard/portal",
@@ -32,6 +33,7 @@ def verify(row, monkeypatch, live="a" * 40):
         attempt_id="attempt-1", dispatch=row,
         allowed_repositories=frozenset({"thebrazenbeard/portal"}),
         required_adapter_id="lappy-local-readonly-gh",
+        required_node_id="lappy",
     )
 
 
@@ -57,6 +59,7 @@ def test_head_movement_is_explicitly_held(monkeypatch):
     ("subject_kind", "process"),
     ("adapter_id", "someone-else"),
     ("route_id", "other:route"),
+    ("node_id", "unqualified-other-node"),
     ("ref", "refs/heads/develop"),
     ("exact_head", "not-a-hash"),
     ("effect_ceiling", "SOURCE_WRITE"),
@@ -120,7 +123,7 @@ def test_process_cli_returns_strict_result(monkeypatch, capsys):
            "attempt_id":"attempt-1","dispatch":dispatch()}
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(req).encode())))
     monkeypatch.setattr(driver, "read_live_head", lambda *_: "a"*40)
-    assert driver.main(["--allowed-repository","thebrazenbeard/portal"]) == 0
+    assert driver.main(["--allowed-repository","thebrazenbeard/portal","--node-id","lappy"]) == 0
     response = json.loads(capsys.readouterr().out)
     assert response["state"] == "VERIFIED_COMPLETE"
 
@@ -131,7 +134,7 @@ def test_process_cli_does_not_emit_success_on_wrong_target(monkeypatch, capsys):
     req = {"schema":"PORTAL_HOST_DRIVER_REQUEST_V1",
            "attempt_id":"attempt-1","dispatch":row}
     monkeypatch.setattr(sys,"stdin",io.TextIOWrapper(io.BytesIO(json.dumps(req).encode())))
-    assert driver.main(["--allowed-repository","thebrazenbeard/portal"]) == 2
+    assert driver.main(["--allowed-repository","thebrazenbeard/portal","--node-id","lappy"]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "HELD" in captured.err
