@@ -1,12 +1,12 @@
-# P.O.R.T.A.L. Host Bridge Runbook V1
+# PORTAL Host Bridge Runbook V1
 
 Status: source-level operating procedure for the durable command-session / external-host boundary.
 
-This runbook does not prove that P.O.R.T.A.L. is installed, resident, selected, or continuously running on any workstation or ChatGPT route. It describes how a qualified host should use the repository implementation once the relevant runtime, state database, routes, and execution tools are actually available.
+This runbook does not prove that PORTAL is installed, resident, selected, or continuously running on any workstation or ChatGPT route. It describes how a qualified host should use the repository implementation once the relevant runtime, state database, routes, and execution tools are actually available.
 
 ## Purpose
 
-Use this procedure when one P.O.R.T.A.L. command session is coordinating work that will be executed through a ChatGPT/plugin/workstation host rather than only through the built-in advisory process-proposal worker.
+Use this procedure when one PORTAL command session is coordinating work that will be executed through a ChatGPT/plugin/workstation host rather than only through the built-in advisory process-proposal worker.
 
 The safety rule is:
 
@@ -38,7 +38,7 @@ Queued work that has not crossed the effect boundary is visible separately:
 
 ## 2. Refresh node occupancy
 
-P.O.R.T.A.L. can consume occupancy from three sources:
+PORTAL can consume occupancy from three sources:
 
 - manual snapshots: `--occupied-node NODE=COUNT`;
 - local Project Runner task state: `--project-runner-tasks NODE=PATH`;
@@ -127,7 +127,7 @@ A host that can already inspect its available adapters may instead emit one tran
 
 The snapshot is host-supplied evidence, not self-authorizing discovery. Every route must explicitly contain `authorized_effects`; an empty list is valid and means the host observed technical capability without granting effect authority. The entire document is validated before mutation, and route/occupancy members are written in one transaction so a stale or conflicting member rolls back the whole snapshot.
 
-For resident hosts that can expose their own live state through commands, P.O.R.T.A.L. can build that snapshot from observation-only probes while keeping authority in a separate file.
+For resident hosts that can expose their own live state through commands, PORTAL can build that snapshot from observation-only probes while keeping authority in a separate file.
 
 Probe manifest:
 
@@ -158,7 +158,7 @@ Refresh:
       --authority path/to/authority.yaml \
       --ttl-seconds 300
 
-The authority key is the full exact route identity: adapter, route, node, target kind, and target ID. An unmatched grant does not create a route. A grant cannot authorize an effect the live probe did not report as technically supported. All probes complete before P.O.R.T.A.L. writes the new observation, so a failed later probe cannot partially publish an earlier probe's state. Duplicate node-wide occupancy sources fail closed instead of being summed or guessed.
+The authority key is the full exact route identity: adapter, route, node, target kind, and target ID. An unmatched grant does not create a route. A grant cannot authorize an effect the live probe did not report as technically supported. All probes complete before PORTAL writes the new observation, so a failed later probe cannot partially publish an earlier probe's state. Duplicate node-wide occupancy sources fail closed instead of being summed or guessed.
 
 The command-session path can refresh these probes automatically:
 
@@ -194,9 +194,9 @@ Run the command session with the host bridge:
 
     portal run       --session-id portfolio       --nodes path/to/nodes.yaml       --state-db .portal/portal.sqlite3       --host-bridge       --host-node-occupancy       --max-parallel 8
 
-When live membership refresh is enabled by `--discover-owner`, or by the safe host-live path `--host-bridge --host-frontier-currentness`, P.O.R.T.A.L. builds a local runtime corpus/wave that may contain exact private repository names. Those private names stay in local runtime artifacts and the local project registry; the privacy-safe public overlay still records private membership by count only. Newly discovered private repositories enter as `NO_EFFECT` currentness audits, so authenticated visibility never manufactures mutation authority.
+When live membership refresh is enabled by `--discover-owner`, or by the safe host-live path `--host-bridge --host-frontier-currentness`, PORTAL builds a local runtime corpus/wave that may contain exact private repository names. Those private names stay in local runtime artifacts and the local project registry; the privacy-safe public overlay still records private membership by count only. Newly discovered private repositories enter as `NO_EFFECT` currentness audits, so authenticated visibility never manufactures mutation authority.
 
-P.O.R.T.A.L. performs admission and node placement first. The host adapter then selects an exact qualified route for each admitted packet.
+PORTAL performs admission and node placement first. The host adapter then selects an exact qualified route for each admitted packet.
 
 The session durably binds `adapter_id + route_id` before the adapter queues the host dispatch.
 
@@ -260,7 +260,7 @@ After reconciliation:
 
     portal continue       --session-id portfolio       --nodes path/to/nodes.yaml       --state-db .portal/portal.sqlite3       --host-bridge       --host-node-occupancy       --verifier vera-review
 
-P.O.R.T.A.L. reconciles the owning adapter first, recomputes active/excluded subjects and live node occupancy, then admits the next collision-safe work into freed capacity.
+PORTAL reconciles the owning adapter first, recomputes active/excluded subjects and live node occupancy, then admits the next collision-safe work into freed capacity.
 
 For a resident run, `portal run --session-id ...` performs reconcile/refill generations by default. The source loop supports `max_cycles=0` and `max_idle_cycles=0` for polling until STOP or verified idle; use `--once` for one generation. Source-level integration coverage verifies the closed loop through host queue, durable attempt, owning-driver verification, capacity release, next-subject refill and final verified idle.
 
@@ -284,7 +284,7 @@ A route-bound subject cannot fall back to the legacy wave verifier merely becaus
 
 ## 10. Fresh-chat checklist
 
-Before a new P.O.R.T.A.L. chat advances work:
+Before a new PORTAL chat advances work:
 
 1. read `portal status --host-details`;
 2. if `reconciliation_required > 0`, inspect `portal host unresolved` and reconcile those exact attempted effects before any semantic retry;
@@ -300,7 +300,7 @@ If any required currentness, route attachment, capability, authority, or effect 
 
 ## Protected-effect boundary
 
-P.O.R.T.A.L. scheduling does not itself grant authority to merge, mutate protected branches, deploy, install/activate, change credentials or permissions, spend money, publish private material, perform destructive state changes, or take any other protected effect.
+PORTAL scheduling does not itself grant authority to merge, mutate protected branches, deploy, install/activate, change credentials or permissions, spend money, publish private material, perform destructive state changes, or take any other protected effect.
 
 `SCHEDULABLE != AUTHORIZED`
 

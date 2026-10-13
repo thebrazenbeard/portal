@@ -1,44 +1,44 @@
 > **License:** Source-visible, not open source. Original material is proprietary. Commercial use, redistribution, hosted-service use, and commercial derivative products require written permission. See [LICENSE](LICENSE) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md). Separately identified third-party components retain their own licenses.
 
-# P.O.R.T.A.L.
+# PORTAL
 
 **Portfolio Orchestration & Repository Tracking Access Layer**
 
-P.O.R.T.A.L. is Vera's **whole-portfolio orchestration and host interface layer**. It coordinates bounded work across repositories, exposes a durable CLI/host bridge, and provides P.O.R.T.A.L. Desktop as a local human interface to the resident Vera runtime.
+PORTAL is Vera's **whole-portfolio orchestration and host interface layer**. It coordinates bounded work across repositories, exposes a durable CLI/host bridge, and provides PORTAL Desktop as a local human interface to the resident Vera runtime.
 
-ChatGPT can be one interaction surface, but it is not a runtime dependency and is no longer the architectural center of P.O.R.T.A.L. Vera acts as the cross-project coordinator; P.O.R.T.A.L. discovers and schedules executable frontiers across active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane can be refilled with the next eligible frontier.
+ChatGPT can be one interaction surface, but it is not a runtime dependency and is no longer the architectural center of PORTAL Vera acts as the cross-project coordinator; PORTAL discovers and schedules executable frontiers across active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane can be refilled with the next eligible frontier.
 
 The original single-chat design remains a supported interaction pattern and historical architecture input; see [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
 
 ## Architecture
 
 - `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
-- `portal/` is the P.O.R.T.A.L. portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
+- `portal/` is the PORTAL portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
 - Vera owns cross-project coordination and collision/ownership arbitration.
 - Durable state lives outside any one UI or chat context so CLI, Desktop, chat, or another qualified host can reconstruct and resume the portfolio.
 - Node placement and schedulability do not create protected-effect authority.
 
-P.O.R.T.A.L. was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
+PORTAL was seeded from Project Runner because the required execution loops largely already exist. The architectural task is to compose them into one whole-portfolio control surface, not to reinvent a second runner.
 
 ## Current implementation state
 
 The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
 
-The durable command session is the preferred operator/control surface for portfolio orchestration. P.O.R.T.A.L. Desktop is the preferred local human interface to the resident Vera runtime. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+The durable command session is the preferred operator/control surface for portfolio orchestration. PORTAL Desktop is the preferred local human interface to the resident Vera runtime. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
 
-This source implementation does not by itself prove that a resident P.O.R.T.A.L. process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
+This source implementation does not by itself prove that a resident PORTAL process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
 
-## P.O.R.T.A.L. Desktop and resident Vera runtime
+## PORTAL Desktop and resident Vera runtime
 
-The repository also contains the source for **P.O.R.T.A.L. Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
+The repository also contains the source for **PORTAL Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
 
 The resident-host source composes:
 
 - `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;
 - Pre-Active scheduler/observer state and `autonomous.turn` admission;
 - the current Pre-Active `VolitionBridge`, where validated `volition.signal` events can produce endogenous cognition requests without effect authority;
-- P.O.R.T.A.L. cognition-route discovery and deterministic route selection;
+- PORTAL cognition-route discovery and deterministic route selection;
 - durable cognition provenance and Vera host-acceptance receipts;
 - the same IPC path for human and autonomous cognition.
 
@@ -108,7 +108,7 @@ That form performs durable admission/reconciliation/refill but does not invent a
 
 The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
 
-For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, P.O.R.T.A.L. queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
+For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, PORTAL queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
 
 Seed one identical host capability across every exact repository target in a project registry without inventing wildcard authority:
 
@@ -173,4 +173,4 @@ This repository was bootstrapped from:
 
 The machine-readable binding is in [`.portal-bootstrap.json`](.portal-bootstrap.json).
 
-Project Runner's inherited operator documentation remains in [`PROJECT_RUNNER.md`](PROJECT_RUNNER.md). P.O.R.T.A.L.'s coordination contract is in [`PORTAL.md`](PORTAL.md).
+Project Runner's inherited operator documentation remains in [`PROJECT_RUNNER.md`](PROJECT_RUNNER.md). PORTAL's coordination contract is in [`PORTAL.md`](PORTAL.md).

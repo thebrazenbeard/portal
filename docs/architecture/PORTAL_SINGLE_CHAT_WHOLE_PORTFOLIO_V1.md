@@ -1,11 +1,11 @@
-# P.O.R.T.A.L. Single-Chat Whole-Portfolio Architecture V1
+# PORTAL Single-Chat Whole-Portfolio Architecture V1
 
 Status: MISSION-LEVEL ARCHITECTURE
 Date: 2026-10-05
 
 ## Mission invariant
 
-P.O.R.T.A.L. — Portfolio Orchestration & Repository Tracking Access Layer — exists so a **single P.O.R.T.A.L. chat** can coordinate and advance the **whole portfolio** in maximal safe parallelism.
+PORTAL — Portfolio Orchestration & Repository Tracking Access Layer — exists so a **single PORTAL chat** can coordinate and advance the **whole portfolio** in maximal safe parallelism.
 
 The chat is not expected to manually visit repositories one by one. It is the human-facing control surface for a durable portfolio scheduler.
 
@@ -27,9 +27,9 @@ It does **not** mean unlimited concurrency. Dependencies, shared mutable subject
 
 ## Control-surface model
 
-### Single P.O.R.T.A.L. chat
+### Single PORTAL chat
 
-Patrick should be able to use one P.O.R.T.A.L. chat to:
+Patrick should be able to use one PORTAL chat to:
 - start or resume a portfolio-wide run;
 - see active, blocked, verifying, and completed lanes;
 - change portfolio priorities;
@@ -52,9 +52,9 @@ Vera owns:
 
 Vera coordination does not manufacture protected authority.
 
-### P.O.R.T.A.L.
+### PORTAL
 
-P.O.R.T.A.L. is the portfolio-level orchestration layer.
+PORTAL is the portfolio-level orchestration layer.
 
 It owns:
 - whole-portfolio discovery/intake;
@@ -69,7 +69,7 @@ It owns:
 
 Project Runner remains the governed execution engine embedded in this repository under `runner/`.
 
-P.O.R.T.A.L. must compose Project Runner's existing durable primitives rather than replacing them with a second unrelated execution engine.
+PORTAL must compose Project Runner's existing durable primitives rather than replacing them with a second unrelated execution engine.
 
 Existing primitives include:
 - `portfolio-cycle` — refresh durable portfolio currentness/frontiers;
@@ -85,7 +85,7 @@ Existing primitives include:
 ## Whole-portfolio control loop
 
 ```text
-Patrick -> single P.O.R.T.A.L. chat
+Patrick -> single PORTAL chat
                 |
                 v
           Vera coordination
@@ -106,7 +106,7 @@ Patrick -> single P.O.R.T.A.L. chat
   admit maximal safe parallel wave
                 |
                 v
- P.O.R.T.A.L. lane/node assignment
+ PORTAL lane/node assignment
                 |
                 v
  exact claim/fence + worker routing
@@ -158,7 +158,7 @@ The architecture must not depend on one chat remaining open.
 
 Durable state comes from Project Runner state, repository state, Bus/CCB coordination, WIP/checkpoints, execution receipts, and other governed stores.
 
-A fresh P.O.R.T.A.L. chat reconstructs:
+A fresh PORTAL chat reconstructs:
 - portfolio membership;
 - current exact frontiers;
 - lane ownership;
@@ -171,7 +171,7 @@ It then resumes from evidence.
 
 ## Composition rule
 
-Before inventing a new orchestration mechanism, P.O.R.T.A.L. must mine Patrick-owned repositories for a qualified existing mechanism. External repositories are secondary research inputs.
+Before inventing a new orchestration mechanism, PORTAL must mine Patrick-owned repositories for a qualified existing mechanism. External repositories are secondary research inputs.
 
 The current internal donor map is recorded in:
 `docs/research/PORTAL_LOOP_DONOR_MINING_V1.md`.
@@ -198,7 +198,7 @@ The repository-level coordinator core is now implemented beyond planning:
 
 Execution routing is capability-based and target-bound. Repository-native connectors, Executor, WorkBridge Commander/Relay, Lappy Desktop Commander and future adapters may all be candidate routes when they are live, current, capable and authorized for the exact target/effect. Discovery or plugin presence does not establish any of those facts. A post-dispatch ambiguous outcome remains bound to the attempted route/effect and must be reconciled before any replay or route substitution.
 
-The remaining mission gap is execution-adapter breadth and live host qualification, not another scheduler: arbitrary semantic work still needs qualified adapters/backends, and multi-repository workstream execution needs first-class binding. Source presence alone does not establish an installed/resident P.O.R.T.A.L. runtime or continuous off-turn activity.
+The remaining mission gap is execution-adapter breadth and live host qualification, not another scheduler: arbitrary semantic work still needs qualified adapters/backends, and multi-repository workstream execution needs first-class binding. Source presence alone does not establish an installed/resident PORTAL runtime or continuous off-turn activity.
 
 ## Protected-effect boundary
 

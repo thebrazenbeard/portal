@@ -97,7 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="portal",
         description=(
-            "P.O.R.T.A.L. — Portfolio Orchestration & Repository Tracking "
+            "PORTAL — Portfolio Orchestration & Repository Tracking "
             "Access Layer"
         ),
     )
@@ -305,7 +305,7 @@ def _parser() -> argparse.ArgumentParser:
 
     status = subcommands.add_parser(
         "status",
-        help="show durable P.O.R.T.A.L. run state",
+        help="show durable PORTAL run state",
     )
     status.add_argument(
         "--state-db",
