@@ -46,6 +46,14 @@ def test_live_exact_head_verification_echoes_original_binding(monkeypatch):
     assert r["attempt_id"] == "attempt-1"
 
 
+def test_native_currentness_audit_is_read_only_and_exact(monkeypatch):
+    row = dispatch()
+    row["action"] = "CURRENTNESS_AUDIT"
+    verified = verify(row, monkeypatch)
+    assert verified["state"] == "VERIFIED_COMPLETE"
+    assert verified["attempt_id"] == "attempt-1"
+
+
 def test_head_movement_is_explicitly_held(monkeypatch):
     r = verify(dispatch(), monkeypatch, "b" * 40)
     assert r["state"] == "VERIFIED_HELD"

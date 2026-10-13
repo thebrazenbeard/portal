@@ -120,7 +120,7 @@ def verify_dispatch(
         raise ReadOnlyDriverError("ref not allowed")
     if not _SHA40.fullmatch(expected):
         raise ReadOnlyDriverError("invalid exact head")
-    if dispatch.get("action") != "VERIFY_EXACT_HEAD":
+    if dispatch.get("action") not in ("VERIFY_EXACT_HEAD", "CURRENTNESS_AUDIT"):
         raise ReadOnlyDriverError("unsupported work action")
     if dispatch.get("effect_ceiling") != "SOURCE_ONLY":
         raise ReadOnlyDriverError("unsupported effect ceiling")
