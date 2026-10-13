@@ -114,6 +114,67 @@ class DesktopViewModel:
         )
 
 
+def resolve_desktop_runtime_root(
+    *,
+    configured: str | None = None,
+    installations_root: Path | None = None,
+    process_alive: object | None = None,
+    now: float | None = None,
+) -> Path:
+    """Choose a single live, installed Desktop host; never guess from recency.
+
+    An explicit VERA_RUNTIME_ROOT remains an operator override, including for
+    nonstandard layouts. Automatic selection uses installation identity,
+    heartbeat freshness, component health and actual process liveness.
+    """
+    if configured is not None:
+        if not configured.strip():
+            raise ValueError("VERA_RUNTIME_ROOT must not be blank")
+        return Path(configured).expanduser()
+
+    from .desktop_supervisor import (
+        RuntimeState,
+        RuntimeSupervisor,
+        RuntimeSupervisorConfig,
+    )
+
+    base = (
+        Path(installations_root)
+        if installations_root is not None
+        else Path.home() / "AppData" / "Local" / "VeraDesktopRuntime"
+    )
+    active: list[Path] = []
+    if base.is_dir():
+        for candidate in sorted(base.iterdir()):
+            if (
+                not candidate.is_dir()
+                or not (candidate / "RUNTIME_INSTALL_SPEC.json").is_file()
+            ):
+                continue
+            options = (
+                {"process_alive": process_alive}
+                if process_alive is not None
+                else {}
+            )
+            status = RuntimeSupervisor(
+                RuntimeSupervisorConfig(candidate), **options,
+            ).status(now=now)
+            if status.state is RuntimeState.ACTIVE:
+                active.append(candidate)
+
+    if len(active) == 1:
+        return active[0]
+    if len(active) > 1:
+        raise RuntimeError(
+            "multiple active PORTAL desktop runtimes; set "
+            "VERA_RUNTIME_ROOT to the intended installation"
+        )
+    raise RuntimeError(
+        "no active installed PORTAL desktop runtime found; start a "
+        "qualified installed host or set VERA_RUNTIME_ROOT explicitly"
+    )
+
+
 class PortalDesktopApp:
     def __init__(self, *, runtime_root: Path) -> None:
         import tkinter as tk
@@ -127,6 +188,7 @@ class PortalDesktopApp:
 
         self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
         self.view_model = DesktopViewModel(self.client)
+        self._refresh_lock = threading.Lock()
 
         shell = ttk.Frame(self.root, padding=10)
         shell.pack(fill="both", expand=True)
@@ -194,7 +256,7 @@ class PortalDesktopApp:
             anchor="w"
         )
         self.effects_var = tk.StringVar(
-            value="None. Cognition carries no protected-effect authority."
+            value="Pending protected effects not reported by Desktop IPC."
         )
         ttk.Label(
             operations_frame,
@@ -253,26 +315,39 @@ class PortalDesktopApp:
         ) or "No cognition activity recorded."
         self._set_text(self.activity_text, activity)
         self.effects_var.set(
-            "None. Cognition carries no protected-effect authority."
+            "Pending protected effects not reported by Desktop IPC."
             if not snapshot.pending_effects
             else f"{len(snapshot.pending_effects)} pending exact effect request(s)."
         )
 
     def refresh_async(self) -> None:
+        # The file bridge may take minutes to time out. A timer must never
+        # multiply in-flight IPC refreshes while the host is unresponsive.
+        if not self._refresh_lock.acquire(blocking=False):
+            return
+
         def work() -> None:
             try:
-                snapshot = self.view_model.refresh()
-            except Exception as exc:
-                self.root.after(
-                    0,
-                    lambda: self.health_var.set(
-                        f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
-                    ),
-                )
-                return
-            self.root.after(0, lambda: self._render_snapshot(snapshot))
+                try:
+                    snapshot = self.view_model.refresh()
+                except Exception as exc:
+                    # Python clears exception variables after the except
+                    # block; capture rendered text before scheduling Tk work.
+                    error = f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
+                    self.root.after(
+                        0,
+                        lambda text=error: self.health_var.set(text),
+                    )
+                    return
+                self.root.after(0, lambda: self._render_snapshot(snapshot))
+            finally:
+                self._refresh_lock.release()
 
-        threading.Thread(target=work, daemon=True).start()
+        try:
+            threading.Thread(target=work, daemon=True).start()
+        except BaseException:
+            self._refresh_lock.release()
+            raise
 
     def _scheduled_refresh(self) -> None:
         self.refresh_async()
@@ -328,14 +403,8 @@ class PortalDesktopApp:
 def main() -> None:
     import os
 
-    configured = os.environ.get("VERA_RUNTIME_ROOT")
-    runtime_root = Path(
-        configured
-        or Path.home()
-        / "AppData"
-        / "Local"
-        / "VeraUnifiedRuntime"
-        / "20261006"
+    runtime_root = resolve_desktop_runtime_root(
+        configured=os.environ.get("VERA_RUNTIME_ROOT"),
     )
     PortalDesktopApp(runtime_root=runtime_root).run()
 
