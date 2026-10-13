@@ -239,6 +239,9 @@ def _parser() -> argparse.ArgumentParser:
             "refill generations; requires --host-bridge"
         ),
     )
+    run.add_argument("--host-shared-pool", action="store_true", help=(
+        "atomically pull compatible queued host work without reassigning attempts"
+    ))
     run.add_argument(
         "--host-max-dispatches",
         type=int,
@@ -413,6 +416,9 @@ def _parser() -> argparse.ArgumentParser:
             "requires --host-bridge"
         ),
     )
+    continue_cmd.add_argument("--host-shared-pool", action="store_true", help=(
+        "atomically pull compatible queued host work without reassigning attempts"
+    ))
     continue_cmd.add_argument(
         "--host-max-dispatches",
         type=int,
@@ -817,6 +823,10 @@ def _parser() -> argparse.ArgumentParser:
     host_pump.add_argument("--drivers", type=Path, required=True)
     host_pump.add_argument("--session-id")
     host_pump.add_argument("--max-dispatches", type=int)
+    host_pump.add_argument("--shared-pool", action="store_true", help=(
+        "atomically pull qualified queued work across compatible adapters; "
+        "never reassign already-attempted work"
+    ))
 
     wave = subcommands.add_parser(
         "wave",
@@ -1451,6 +1461,8 @@ def _session_host_pump(
 ) -> PortalHostPump | None:
     host_drivers = getattr(args, "host_drivers", None)
     if host_drivers is None:
+        if getattr(args, "host_shared_pool", False):
+            raise ValueError("--host-shared-pool requires --host-drivers and --host-bridge")
         return None
     if not isinstance(execution_adapter, PortalHostExecutionAdapter):
         raise ValueError("--host-drivers requires --host-bridge")
@@ -1519,6 +1531,7 @@ def _session_resume_spec(
             else None
         ),
         "host_max_dispatches": getattr(args, "host_max_dispatches", None),
+        "host_shared_pool": bool(getattr(args, "host_shared_pool", False)),
         "host_probes": (
             str(Path(args.host_probes))
             if getattr(args, "host_probes", None) is not None
@@ -1685,6 +1698,9 @@ def _apply_session_resume_spec(
             "resume spec host_max_dispatches must be null or a positive integer"
         )
     args.host_max_dispatches = host_max_dispatches
+    if type(spec.get("host_shared_pool", False)) is not bool:
+        raise ValueError("resume spec host_shared_pool must be a boolean")
+    args.host_shared_pool = spec.get("host_shared_pool", False)
     host_probes = spec.get("host_probes")
     if host_probes is not None and (
         not isinstance(host_probes, str) or not host_probes.strip()
@@ -1813,9 +1829,16 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 before_cycle=host_refresh,
                 between_cycles=(
                     (
-                        lambda: host_pump.run_once(
-                            session_id=args.session_id,
-                            max_dispatches=args.host_max_dispatches,
+                        lambda: (
+                            host_pump.run_shared_pool_once(
+                                session_id=args.session_id,
+                                max_dispatches=(args.host_max_dispatches or 1),
+                            )
+                            if args.host_shared_pool
+                            else host_pump.run_once(
+                                session_id=args.session_id,
+                                max_dispatches=args.host_max_dispatches,
+                            )
                         )
                     )
                     if host_pump is not None
@@ -1862,10 +1885,16 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         if host_refresh is not None:
             host_refresh()
         if host_pump is not None:
-            host_pump.run_once(
-                session_id=args.session_id,
-                max_dispatches=args.host_max_dispatches,
-            )
+            if args.host_shared_pool:
+                host_pump.run_shared_pool_once(
+                    session_id=args.session_id,
+                    max_dispatches=(args.host_max_dispatches or 1),
+                )
+            else:
+                host_pump.run_once(
+                    session_id=args.session_id,
+                    max_dispatches=args.host_max_dispatches,
+                )
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
             args,
             nodes,
@@ -2891,13 +2920,17 @@ def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
     drivers = load_host_command_drivers(Path(args.drivers))
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
-        result = PortalHostPump(
-            store=store,
-            drivers=drivers,
-        ).run_once(
-            session_id=args.session_id,
-            max_dispatches=args.max_dispatches,
-        )
+        pump = PortalHostPump(store=store, drivers=drivers)
+        if args.shared_pool:
+            result = pump.run_shared_pool_once(
+                session_id=args.session_id,
+                max_dispatches=(args.max_dispatches if args.max_dispatches is not None else 1),
+            )
+        else:
+            result = pump.run_once(
+                session_id=args.session_id,
+                max_dispatches=args.max_dispatches,
+            )
     finally:
         store.close()
     return {
