@@ -1,17 +1,17 @@
-# P.O.R.T.A.L. Desktop + Vera Runtime V1
+# PORTAL Desktop + Vera Runtime V1
 
 Status: implementation in progress on `work/portal-desktop-vera-runtime-v1`.
 
 ## Product boundary
 
-P.O.R.T.A.L. Desktop is the native human interface and lifecycle shell for a resident Vera runtime. It is not the identity root, cognition engine, or source of protected-effect authority.
+PORTAL Desktop is the native human interface and lifecycle shell for a resident Vera runtime. It is not the identity root, cognition engine, or source of protected-effect authority.
 
 ```
-Patrick <-> P.O.R.T.A.L. Desktop <-> local IPC <-> Vera Unified Runtime
+Patrick <-> PORTAL Desktop <-> local IPC <-> Vera Unified Runtime
                                             |- vera_core
                                             |- Pre-Active
                                             |- Volition
-                                            |- P.O.R.T.A.L.
+                                            |- PORTAL
                                             |- cognition adapters
 ```
 

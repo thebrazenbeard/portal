@@ -18,13 +18,13 @@ def test_portal_identity_and_bootstrap_provenance_are_explicit() -> None:
         (ROOT / ".portal-bootstrap.json").read_text(encoding="utf-8")
     )
 
-    assert "# P.O.R.T.A.L." in readme
+    assert "# PORTAL" in readme
     assert EXPANSION in readme
     assert EXPANSION in portal_doc
     assert "Project Runner remains the governed execution substrate" in portal_doc
     assert "does not grant execution authority" in portal_doc
 
-    assert bootstrap["name"] == "P.O.R.T.A.L."
+    assert bootstrap["name"] == "PORTAL"
     assert bootstrap["expansion"] == EXPANSION
     assert bootstrap["source_repository"] == "thebrazenbeard/project-runner"
     assert bootstrap["source_commit"] == SOURCE_COMMIT
@@ -56,7 +56,7 @@ def test_whole_portfolio_host_interface_mission_is_architectural() -> None:
     assert "not canonical persistence" in portal_doc
     assert "parallel" in portal_doc.lower()
 
-    assert "single P.O.R.T.A.L. chat" in architecture
+    assert "single PORTAL chat" in architecture
     assert "whole portfolio" in architecture
     assert "parallel" in architecture.lower()
 

@@ -1,13 +1,13 @@
-# P.O.R.T.A.L. Loop Donor Mining V1
+# PORTAL Loop Donor Mining V1
 
 Status: ACTIVE ARCHITECTURE RESEARCH
 Date: 2026-10-05
 
 ## Governing rule
 
-P.O.R.T.A.L. must **mine Patrick-owned repositories before adopting external mechanisms**.
+PORTAL must **mine Patrick-owned repositories before adopting external mechanisms**.
 
-The portfolio already contains durable execution, recovery, transport, queueing, checkpoint, verification, and autonomous-loop machinery. P.O.R.T.A.L. should compose proven mechanisms and preserve their boundaries instead of creating a parallel implementation lineage without need.
+The portfolio already contains durable execution, recovery, transport, queueing, checkpoint, verification, and autonomous-loop machinery. PORTAL should compose proven mechanisms and preserve their boundaries instead of creating a parallel implementation lineage without need.
 
 External repositories are used to challenge and improve the internal design, not to displace it automatically.
 
@@ -65,7 +65,7 @@ Reusable mechanisms:
 - explicit do-not-repeat state;
 - recovery from evidence rather than transcript replay.
 
-Portal action: use WIP-style checkpointing for P.O.R.T.A.L. chat/run recovery and unresolved effects.
+Portal action: use WIP-style checkpointing for PORTAL chat/run recovery and unresolved effects.
 
 ### ccb-core + chat-communication-bus
 
