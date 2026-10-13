@@ -26,8 +26,14 @@ class DesktopSnapshot:
 
 
 class DesktopViewModel:
-    def __init__(self, client: RuntimeClient) -> None:
+    def __init__(
+        self,
+        client: RuntimeClient,
+        *,
+        messaging_client: RuntimeClient | None = None,
+    ) -> None:
         self.client = client
+        self.messaging_client = messaging_client or client
 
     @staticmethod
     def _preferred_route(
@@ -93,6 +99,25 @@ class DesktopViewModel:
             pending_effects=(),
         )
 
+    def fetch_conversation_history(
+        self,
+    ) -> tuple[dict[str, object], ...] | None:
+        """None means this host does not implement history (not an empty chat)."""
+        try:
+            payload = self.client.request(
+                "desktop_conversation_history", limit=50,
+            )
+        except RuntimeError as exc:
+            if "unsupported command" in str(exc).lower():
+                return None
+            raise
+        if payload.get("schema") != "PORTAL_DESKTOP_CONVERSATION_HISTORY_V1":
+            raise ValueError("invalid conversation history response schema")
+        raw = payload.get("items")
+        if not isinstance(raw, list):
+            raise ValueError("conversation history items must be a list")
+        return tuple(dict(item) for item in raw if isinstance(item, dict))
+
     def send_message(
         self,
         message: str,
@@ -103,15 +128,19 @@ class DesktopViewModel:
         task = message.strip()
         if not task:
             raise ValueError("message is required")
-        return self.client.request(
+        bound_request_id = request_id or uuid.uuid4().hex
+        outcome = self.messaging_client.request(
             "desktop_cognize",
-            request_id=request_id or uuid.uuid4().hex,
+            request_id=bound_request_id,
             source="HUMAN",
             reason="desktop conversation message",
             task=task,
             created_at=float(time.time() if created_at is None else created_at),
             required_capabilities=["text"],
         )
+        if outcome.get("request_id") not in (None, bound_request_id):
+            raise ValueError("cognition result request_id mismatch")
+        return outcome
 
 
 def resolve_desktop_runtime_root(
@@ -186,9 +215,17 @@ class PortalDesktopApp:
         self.root.geometry("1120x760")
         self.root.minsize(900, 620)
 
-        self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
-        self.view_model = DesktopViewModel(self.client)
+        # Short liveness/telemetry timeouts keep a disconnected window usable.
+        # Cognition can legitimately run much longer, on a separate client.
+        self.client = FileBridgeClient(runtime_root, timeout_seconds=8.0)
+        self.message_client = FileBridgeClient(
+            runtime_root, timeout_seconds=180.0,
+        )
+        self.view_model = DesktopViewModel(
+            self.client, messaging_client=self.message_client,
+        )
         self._refresh_lock = threading.Lock()
+        self._displayed_turns: dict[str, str] = {}
 
         shell = ttk.Frame(self.root, padding=10)
         shell.pack(fill="both", expand=True)
@@ -290,6 +327,38 @@ class PortalDesktopApp:
         self.conversation.see("end")
         self.conversation.configure(state="disabled")
 
+    def _restore_history(
+        self, history: tuple[dict[str, object], ...] | list[dict[str, object]],
+    ) -> None:
+        """Replay only newly observed pieces of each exact request identity."""
+        for row in history:
+            request_id = row.get("request_id")
+            task = row.get("task")
+            if not isinstance(request_id, str) or not request_id:
+                continue
+            if not isinstance(task, str) or not task.strip():
+                continue
+            existing = self._displayed_turns.get(request_id)
+            if existing is None:
+                self._append_conversation("You", task)
+                self._displayed_turns[request_id] = "USER"
+            if self._displayed_turns[request_id] != "USER":
+                continue
+            state = row.get("state")
+            answer = row.get("response_text")
+            if state == "COMPLETED" and isinstance(answer, str) and answer.strip():
+                self._append_conversation("Vera", answer)
+                self._displayed_turns[request_id] = "FINAL"
+            elif state == "FAILED":
+                reason = row.get("error")
+                self._append_conversation(
+                    "System",
+                    "Cognition failed: " + (
+                        str(reason) if reason else "no diagnostic returned"
+                    ),
+                )
+                self._displayed_turns[request_id] = "FINAL"
+
     def _render_snapshot(self, snapshot: DesktopSnapshot) -> None:
         runtime_id = (
             snapshot.runtime_id[:12] + "…"
@@ -330,6 +399,12 @@ class PortalDesktopApp:
             try:
                 try:
                     snapshot = self.view_model.refresh()
+                    history_loader = getattr(
+                        self.view_model, "fetch_conversation_history", None
+                    )
+                    history = (
+                        history_loader() if callable(history_loader) else None
+                    )
                 except Exception as exc:
                     # Python clears exception variables after the except
                     # block; capture rendered text before scheduling Tk work.
@@ -339,7 +414,12 @@ class PortalDesktopApp:
                         lambda text=error: self.health_var.set(text),
                     )
                     return
-                self.root.after(0, lambda: self._render_snapshot(snapshot))
+                def update() -> None:
+                    self._render_snapshot(snapshot)
+                    if history is not None:
+                        self._restore_history(history)
+
+                self.root.after(0, update)
             finally:
                 self._refresh_lock.release()
 
@@ -361,32 +441,53 @@ class PortalDesktopApp:
         message = self.message_var.get().strip()
         if not message:
             return
+        request_id = uuid.uuid4().hex
         self.message_var.set("")
-        self._append_conversation("Patrick", message)
-        self.status_var.set("Vera is thinking…")
+        self._append_conversation("You", message)
+        self._displayed_turns[request_id] = "USER"
+        self.status_var.set("Awaiting runtime response...")
         self.send_button.configure(state="disabled")
 
         def work() -> None:
+            from .desktop_ipc import BridgeOutcomeUnknownError
+
             try:
-                result = self.view_model.send_message(message)
-                response = str(
-                    result.get("response_text")
-                    or result.get("error")
-                    or result.get("state")
-                    or "No response text."
+                outcome = self.view_model.send_message(
+                    message, request_id=request_id,
                 )
-                route = result.get("route_id")
-                state = result.get("state", "UNKNOWN")
+            except BridgeOutcomeUnknownError:
+                # The host has taken custody. A duplicate send may repeat work.
+                outcome = {
+                    "state": "OUTCOME_UNKNOWN",
+                    "error": "The host claimed this message but did not "
+                    "return a response. Check the recovered history before "
+                    "sending it again.",
+                }
             except Exception as exc:
-                response = f"{type(exc).__name__}: {exc}"
-                route = None
-                state = "FAILED"
+                outcome = {
+                    "state": "CLIENT_ERROR",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
 
             def finish() -> None:
-                self._append_conversation("Vera", response)
+                state = str(outcome.get("state", "UNKNOWN"))
+                if state in {"COMPLETED", "FAILED"}:
+                    self._restore_history((
+                        {
+                            **outcome,
+                            "request_id": request_id,
+                            "task": message,
+                        },
+                    ))
+                elif state not in {"RUNNING", "UNRESOLVED"}:
+                    self._append_conversation(
+                        "System",
+                        str(outcome.get("error") or
+                            f"Runtime outcome was {state}; no verified reply."),
+                    )
+                route = outcome.get("route_id")
                 self.status_var.set(
-                    f"{state}"
-                    + (f" via {route}" if route else "")
+                    state + (f" via {route}" if route else "")
                 )
                 self.send_button.configure(state="normal")
                 self.refresh_async()

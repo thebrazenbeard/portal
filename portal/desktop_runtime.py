@@ -101,6 +101,28 @@ class CognitionLedger:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_human_conversation(self, *, limit: int = 50) -> list[dict[str, object]]:
+        """Return recent human turns in chronological order from durable state."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("conversation limit must be between 1 and 100")
+        rows = self.connection.execute(
+            """
+            SELECT request_id, source, task, created_at, state,
+                   response_text, error, evidence_id
+            FROM (
+                SELECT request_id, source, task, created_at, state,
+                       response_text, error, evidence_id
+                FROM desktop_cognition_runs
+                WHERE source = 'HUMAN'
+                ORDER BY created_at DESC, request_id DESC
+                LIMIT ?
+            )
+            ORDER BY created_at ASC, request_id ASC
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def store(
         self,
         request: CognitionRequestEnvelope,
