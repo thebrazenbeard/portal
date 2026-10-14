@@ -1,0 +1,25 @@
+{
+  "schema": "PORTAL_DESKTOP_RUN_PROFILE_V1",
+  "profiles": [
+    {
+      "id": "physica-oscillator-smoke",
+      "repository": "thebrazenbeard/physica",
+      "expected_head": "a33e3a8c94787cc884dd7c668b709ff1ec945551",
+      "module": "physica",
+      "args": [
+        "simulate",
+        "oscillator",
+        "--initial",
+        "1",
+        "0",
+        "--t1",
+        "0.1",
+        "--dt",
+        "0.01",
+        "--summary-only"
+      ],
+      "local_simulation_only": true,
+      "description": "Bounded oscillator numerical smoke; no training or hardware"
+    }
+  ]
+}

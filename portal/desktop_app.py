@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import queue
 import threading
 import time
 from typing import Protocol
 import uuid
 
 from .desktop_ipc import FileBridgeClient
+from .desktop_project_runs import (
+    list_project_run_receipts,
+    load_project_run_profile,
+    run_selected_local_project,
+)
 from .desktop_portfolio import (
     DesktopProject,
     discover_github_portfolio,
@@ -249,6 +255,7 @@ class PortalDesktopApp:
             self.client, messaging_client=self.message_client,
         )
         self._refresh_lock = threading.Lock()
+        self._ui_queue: queue.SimpleQueue[object] = queue.SimpleQueue()
         self._displayed_turns: dict[str, str] = {}
 
         # Deliberately use only native Tk widgets: no dependency on a web
@@ -590,13 +597,33 @@ class PortalDesktopApp:
             relief="flat", padx=12, pady=10, font=("Segoe UI", 9, "bold"),
         )
         self.project_inspect_button.pack(side="left", padx=(8, 0))
+        run_actions = tk.Frame(self._portfolio_panel, bg=c["surface"])
+        run_actions.pack(fill="x", padx=22, pady=(8, 0))
         self.portfolio_run_button = tk.Button(
-            actions, text="Run curated cycle",
+            run_actions, text="Run curated cycle",
             command=self._run_portfolio_cycle,
             bg=c["accent"], fg=c["accent_text"], borderwidth=0,
             relief="flat", padx=12, pady=10, font=("Segoe UI", 9, "bold"),
         )
-        self.portfolio_run_button.pack(side="left", padx=(8, 0))
+        self.portfolio_run_button.pack(side="left")
+        # The selected-project launch button is available only for an
+        # exact-source approved profile, never for arbitrary GitHub entries.
+        self.project_run_button = tk.Button(
+            run_actions, text="Run selected",
+            command=self._run_selected_project,
+            bg=c["surface_raised"], fg=c["text"], borderwidth=0,
+            relief="flat", padx=12, pady=10, font=("Segoe UI", 9, "bold"),
+            state="disabled",
+        )
+        self.project_run_button.pack(side="left", padx=(8, 0))
+        self.project_receipts_button = tk.Button(
+            run_actions, text="Recent runs",
+            command=self._open_project_runs,
+            bg=c["surface_raised"], fg=c["text"],
+            borderwidth=0, relief="flat", padx=12, pady=10,
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.project_receipts_button.pack(side="left", padx=(8, 0))
         self.portfolio_action_var = tk.StringVar(
             value="No execution started. Work requires a qualified route."
         )
@@ -625,8 +652,34 @@ class PortalDesktopApp:
             font=("Segoe UI", 8, "bold"),
         ).pack(side="right")
 
+        self.root.after(80, self._drain_ui_queue)
         self.root.after(100, self.refresh_async)
         self.root.after(3000, self._scheduled_refresh)
+
+    def _post_to_ui(self, callback: object) -> None:
+        # In a real Desktop instance, worker threads never call any Tk API.
+        # The fallback is for legacy isolated tests constructing __new__ stubs.
+        pending = getattr(self, "_ui_queue", None)
+        if pending is None:
+            self.root.after(0, callback)
+            return
+        pending.put(callback)
+
+    def _drain_ui_queue(self) -> None:
+        # Called exclusively by the Tk owner thread.
+        for _ in range(20):
+            try:
+                callback = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback()
+            except Exception as exc:
+                self.status_var.set(
+                    f"Display update failed: {type(exc).__name__}: {exc}"
+                )
+        if self.root.winfo_exists():
+            self.root.after(80, self._drain_ui_queue)
 
     def _show_workspace(self, workspace: str) -> None:
         if workspace not in {"portfolio", "vera"}:
@@ -713,7 +766,7 @@ class PortalDesktopApp:
                 if projects:
                     self.project_listbox.selection_set(0)
                     self._project_selected(None)
-            self.root.after(0, finish)
+            self._post_to_ui(finish)
         try:
             threading.Thread(target=worker, daemon=True).start()
         except BaseException:
@@ -726,11 +779,25 @@ class PortalDesktopApp:
             return
         project = self._project_items[int(selection[0])]
         targets = ", ".join(project.targets) if project.targets else "None configured"
+        try:
+            profile = load_project_run_profile(
+                self._source_root, project.repository,
+            )
+        except Exception as exc:
+            profile = None
+            profile_note = f"Run profile invalid: {type(exc).__name__}: {exc}"
+        else:
+            profile_note = (
+                f"Local profile: {profile['id']} (exact source required)"
+                if profile else "No qualified local run profile"
+            )
+        self.project_run_button.configure(
+            state="normal" if profile else "disabled",
+        )
         self.project_detail_var.set(
             f"{project.repository}\n"
             f"Visibility: {project.visibility} · Scheduling: {project.scheduling_state}\n"
-            f"Declared execution targets: {targets}. "
-            "No arbitrary project launch command is configured."
+            f"Declared execution targets: {targets}. {profile_note}."
         )
 
     def _start_portfolio_action(self, title: str, operation: object) -> None:
@@ -747,8 +814,8 @@ class PortalDesktopApp:
                 message = f"{title} unavailable: {type(exc).__name__}: {exc}"
             finally:
                 self._portfolio_action_lock.release()
-            self.root.after(
-                0, lambda value=message: self.portfolio_action_var.set(value),
+            self._post_to_ui(
+                lambda value=message: self.portfolio_action_var.set(value),
             )
 
         try:
@@ -766,6 +833,66 @@ class PortalDesktopApp:
         self._start_portfolio_action(
             "Exact main-head inspection",
             lambda: f"{repository}@{inspect_repository_head(repository)}",
+        )
+
+    def _open_project_runs(self) -> None:
+        # Pure readback of existing local custody receipts. No retry.
+        from tkinter import Text, Toplevel
+        c = PORTAL_PALETTE
+        items = list_project_run_receipts(self._runtime_root)
+        window = Toplevel(self.root)
+        window.title("PORTAL | Project run receipts")
+        window.geometry("900x480")
+        window.configure(bg=c["surface"])
+        detail = Text(
+            window, wrap="word", bg=c["editor"], fg=c["text"],
+            font=("Consolas", 10), padx=18, pady=18, borderwidth=0,
+        )
+        detail.pack(fill="both", expand=True, padx=16, pady=16)
+        if not items:
+            detail.insert("end", "No local project-run receipts yet.\n")
+        for item in items:
+            detail.insert(
+                "end",
+                f"{item['repository']}  |  {item['state']}\n"
+                f"Run {item['run_id']}  |  "
+                f"source {item['source_sha'][:12]}\n"
+                f"Receipt: {item['receipt_file']}\n\n",
+            )
+        detail.configure(state="disabled")
+
+    def _run_selected_project(self) -> None:
+        selection = self.project_listbox.curselection()
+        if not selection:
+            self.portfolio_action_var.set("Select a project first.")
+            return
+        repository = self._project_items[int(selection[0])].repository
+        try:
+            profile = load_project_run_profile(self._source_root, repository)
+        except Exception as exc:
+            self.portfolio_action_var.set(
+                f"Invalid profile: {type(exc).__name__}: {exc}"
+            )
+            return
+        if profile is None:
+            self.portfolio_action_var.set(
+                "No qualified local execution profile for this repository."
+            )
+            return
+
+        def operation() -> str:
+            receipt = run_selected_local_project(
+                repository, self._source_root, self._runtime_root,
+            )
+            return (
+                f"{repository} · {receipt['state']} · "
+                f"run {receipt['run_id'][:12]} · "
+                f"receipt: {receipt['evidence_path']}"
+            )
+
+        self._start_portfolio_action(
+            f"Run {profile['id']} (bounded local simulation)",
+            operation,
         )
 
     def _run_portfolio_cycle(self) -> None:
@@ -886,8 +1013,7 @@ class PortalDesktopApp:
                     # Python clears exception variables after the except
                     # block; capture rendered text before scheduling Tk work.
                     error = f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
-                    self.root.after(
-                        0,
+                    self._post_to_ui(
                         lambda text=error: self.health_var.set(text),
                     )
                     return
@@ -896,7 +1022,7 @@ class PortalDesktopApp:
                     if history is not None:
                         self._restore_history(history)
 
-                self.root.after(0, update)
+                self._post_to_ui(update)
             finally:
                 self._refresh_lock.release()
 
@@ -969,7 +1095,7 @@ class PortalDesktopApp:
                 self.send_button.configure(state="normal")
                 self.refresh_async()
 
-            self.root.after(0, finish)
+            self._post_to_ui(finish)
 
         threading.Thread(target=work, daemon=True).start()
 
