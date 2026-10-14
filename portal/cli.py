@@ -112,6 +112,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     discover.add_argument("--owner", required=True)
     discover.add_argument(
+        "--require-authenticated", action="store_true",
+        help="fail closed if no GitHub owner credential is available; visibility still depends on credential access",
+    )
+    discover.add_argument(
         "--curated-projects",
         type=Path,
         default=ROOT / "registry" / "projects.yaml",
@@ -154,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
             "using --projects only as curated metadata"
         ),
     )
+    run.add_argument("--require-authenticated", action="store_true",
+        help="require owner credentials for live discovery; private coverage must still be independently checked")
     run.add_argument(
         "--write-live-registry",
         type=Path,
@@ -233,6 +239,9 @@ def _parser() -> argparse.ArgumentParser:
             "refill generations; requires --host-bridge"
         ),
     )
+    run.add_argument("--host-shared-pool", action="store_true", help=(
+        "atomically pull compatible queued host work without reassigning attempts"
+    ))
     run.add_argument(
         "--host-max-dispatches",
         type=int,
@@ -303,6 +312,22 @@ def _parser() -> argparse.ArgumentParser:
         help="execute exactly one bounded durable Portal cycle",
     )
 
+    advance = subcommands.add_parser(
+        "advance",
+        help="advance a preconfigured portfolio session from one semantic objective",
+    )
+    advance.add_argument(
+        "goal", nargs="?", default="advance portfolio",
+        help="portfolio intent; target and authority come only from the durable session",
+    )
+    advance.add_argument("--session-id", default="portfolio")
+    advance.add_argument("--state-db", type=Path, default=Path(".portal/portal.sqlite3"))
+    advance.add_argument("--dry-run", action="store_true", help="inspect without dispatch")
+    advance.add_argument(
+        "--continuous", action="store_true",
+        help="use the session's guarded refill loop instead of a single cycle",
+    )
+
     status = subcommands.add_parser(
         "status",
         help="show durable PORTAL run state",
@@ -361,6 +386,8 @@ def _parser() -> argparse.ArgumentParser:
         default=ROOT / "registry" / "projects.yaml",
     )
     continue_cmd.add_argument("--discover-owner")
+    continue_cmd.add_argument("--require-authenticated", action="store_true",
+        help="require owner credentials for live discovery; private coverage must still be independently checked")
     continue_cmd.add_argument("--write-live-registry", type=Path)
     continue_cmd.add_argument(
         "--static-projects",
@@ -405,6 +432,9 @@ def _parser() -> argparse.ArgumentParser:
             "requires --host-bridge"
         ),
     )
+    continue_cmd.add_argument("--host-shared-pool", action="store_true", help=(
+        "atomically pull compatible queued host work without reassigning attempts"
+    ))
     continue_cmd.add_argument(
         "--host-max-dispatches",
         type=int,
@@ -809,6 +839,10 @@ def _parser() -> argparse.ArgumentParser:
     host_pump.add_argument("--drivers", type=Path, required=True)
     host_pump.add_argument("--session-id")
     host_pump.add_argument("--max-dispatches", type=int)
+    host_pump.add_argument("--shared-pool", action="store_true", help=(
+        "atomically pull qualified queued work across compatible adapters; "
+        "never reassign already-attempted work"
+    ))
 
     wave = subcommands.add_parser(
         "wave",
@@ -1073,11 +1107,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _discovery_payload(args: argparse.Namespace) -> dict[str, object]:
+    token = _github_token()
+    if args.require_authenticated and not token:
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     curated = load_project_snapshot(Path(args.curated_projects))
     snapshot = discover_live_project_registry(
         owner=args.owner,
         curated_projects=curated.projects,
-        token=_github_token(),
+        token=token,
     )
     write_project_registry(Path(args.output), snapshot)
     public = sum(project.visibility == "public" for project in snapshot.projects)
@@ -1089,6 +1126,8 @@ def _discovery_payload(args: argparse.Namespace) -> dict[str, object]:
     return {
         "mode": "PORTAL_DISCOVERY_V1",
         "owner": args.owner,
+        "discovery_scope": ("AUTHENTICATED_OWNER_VISIBLE" if token else "PUBLIC_ONLY_OWNER"),
+        "private_coverage_automatically_verified": False,
         "repositories": len(snapshot.projects),
         "public": public,
         "private": private,
@@ -1142,6 +1181,8 @@ def _run_project_snapshot(args: argparse.Namespace):
     if not args.discover_owner:
         return curated, "static-registry"
 
+    if getattr(args, "require_authenticated", False) and not _github_token():
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     snapshot = discover_live_project_registry(
         owner=args.discover_owner,
         curated_projects=curated.projects,
@@ -1330,8 +1371,11 @@ def _session_portfolio_paths(
     if not owner:
         raise ValueError("portfolio owner is required")
 
+    token = _github_token()
+    if getattr(args, "require_authenticated", False) and not token:
+        raise ValueError("authenticated GitHub token required for requested owned-portfolio scope")
     repositories = GitHubRepositoryCatalog(
-        token=_github_token(),
+        token=token,
     ).list_owned_repositories(owner)
     curated = load_project_snapshot(projects_path)
     registry = build_live_project_registry(
@@ -1433,6 +1477,8 @@ def _session_host_pump(
 ) -> PortalHostPump | None:
     host_drivers = getattr(args, "host_drivers", None)
     if host_drivers is None:
+        if getattr(args, "host_shared_pool", False):
+            raise ValueError("--host-shared-pool requires --host-drivers and --host-bridge")
         return None
     if not isinstance(execution_adapter, PortalHostExecutionAdapter):
         raise ValueError("--host-drivers requires --host-bridge")
@@ -1501,6 +1547,7 @@ def _session_resume_spec(
             else None
         ),
         "host_max_dispatches": getattr(args, "host_max_dispatches", None),
+        "host_shared_pool": bool(getattr(args, "host_shared_pool", False)),
         "host_probes": (
             str(Path(args.host_probes))
             if getattr(args, "host_probes", None) is not None
@@ -1667,6 +1714,9 @@ def _apply_session_resume_spec(
             "resume spec host_max_dispatches must be null or a positive integer"
         )
     args.host_max_dispatches = host_max_dispatches
+    if type(spec.get("host_shared_pool", False)) is not bool:
+        raise ValueError("resume spec host_shared_pool must be a boolean")
+    args.host_shared_pool = spec.get("host_shared_pool", False)
     host_probes = spec.get("host_probes")
     if host_probes is not None and (
         not isinstance(host_probes, str) or not host_probes.strip()
@@ -1719,6 +1769,59 @@ def _apply_session_resume_spec(
     args.host_frontier_currentness = boolean(
         "host_frontier_currentness"
     )
+
+
+def _advance_payload(args: argparse.Namespace) -> dict[str, object]:
+    # Natural-language intent is descriptive, not target or effect authority.
+    normalized = " ".join(args.goal.lower().split())
+    accepted = {
+        "advance portfolio", "advance my portfolio", "advance the portfolio",
+        "continue portfolio", "continue my portfolio", "move my portfolio forward",
+        "advance repositories", "advance all repos",
+    }
+    if normalized not in accepted:
+        raise ValueError(
+            "unsupported semantic goal: a named project or new objective needs "
+            "an exact scoped mission, not an inferred portfolio-wide dispatch"
+        )
+    state_db = Path(args.state_db)
+    if not state_db.is_file():
+        raise ValueError("no durable portfolio session exists; initialize a session first")
+    controller = PortalCommandSession(state_db)
+    try:
+        status = controller.status(args.session_id)
+        holder = str(status["holder"])
+        # A recorded resume spec binds targets, routes and ceilings; never guess.
+        controller.load_resume_spec(session_id=args.session_id, holder=holder)
+    finally:
+        controller.close()
+    if args.dry_run:
+        return {
+            "mode": "PORTAL_ADVANCE_PREVIEW_V1",
+            "semantic_goal": "ADVANCE_EXISTING_PORTFOLIO",
+            "session_id": args.session_id,
+            "status": status,
+            "dispatched": False,
+        }
+
+    run_args = _parser().parse_args([
+        "run" if args.continuous else "continue",
+        "--session-id", args.session_id,
+        "--state-db", str(state_db),
+        "--holder", holder, "--resume",
+    ])
+    # A one-cycle continuation can pump the saved host driver before refill.
+    result = (
+        _session_run_payload(run_args)
+        if args.continuous
+        else _continue_payload(run_args)
+    )
+    return {
+        "mode": "PORTAL_ADVANCE_EXISTING_SESSION_V1",
+        "semantic_goal": "ADVANCE_EXISTING_PORTFOLIO",
+        "bounded_cycle": not args.continuous,
+        "result": result,
+    }
 
 
 def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
@@ -1795,9 +1898,16 @@ def _session_run_payload(args: argparse.Namespace) -> dict[str, object]:
                 before_cycle=host_refresh,
                 between_cycles=(
                     (
-                        lambda: host_pump.run_once(
-                            session_id=args.session_id,
-                            max_dispatches=args.host_max_dispatches,
+                        lambda: (
+                            host_pump.run_shared_pool_once(
+                                session_id=args.session_id,
+                                max_dispatches=(args.host_max_dispatches or 1),
+                            )
+                            if args.host_shared_pool
+                            else host_pump.run_once(
+                                session_id=args.session_id,
+                                max_dispatches=args.host_max_dispatches,
+                            )
                         )
                     )
                     if host_pump is not None
@@ -1844,10 +1954,16 @@ def _continue_payload(args: argparse.Namespace) -> dict[str, object]:
         if host_refresh is not None:
             host_refresh()
         if host_pump is not None:
-            host_pump.run_once(
-                session_id=args.session_id,
-                max_dispatches=args.host_max_dispatches,
-            )
+            if args.host_shared_pool:
+                host_pump.run_shared_pool_once(
+                    session_id=args.session_id,
+                    max_dispatches=(args.host_max_dispatches or 1),
+                )
+            else:
+                host_pump.run_once(
+                    session_id=args.session_id,
+                    max_dispatches=args.host_max_dispatches,
+                )
         occupied_node_slots, node_occupancy_provider = _session_occupancy(
             args,
             nodes,
@@ -2873,13 +2989,17 @@ def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
     drivers = load_host_command_drivers(Path(args.drivers))
     store = PortalHostBridgeStore(Path(args.state_db))
     try:
-        result = PortalHostPump(
-            store=store,
-            drivers=drivers,
-        ).run_once(
-            session_id=args.session_id,
-            max_dispatches=args.max_dispatches,
-        )
+        pump = PortalHostPump(store=store, drivers=drivers)
+        if args.shared_pool:
+            result = pump.run_shared_pool_once(
+                session_id=args.session_id,
+                max_dispatches=(args.max_dispatches if args.max_dispatches is not None else 1),
+            )
+        else:
+            result = pump.run_once(
+                session_id=args.session_id,
+                max_dispatches=args.max_dispatches,
+            )
     finally:
         store.close()
     return {
@@ -2917,6 +3037,8 @@ def entrypoint(argv: Sequence[str] | None = None) -> int:
             payload = _plan_payload(args)
         elif args.command == "run":
             payload = _run_payload(args)
+        elif args.command == "advance":
+            payload = _advance_payload(args)
         elif args.command == "status":
             payload = _status_payload(args)
         elif args.command == "continue":

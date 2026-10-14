@@ -19,6 +19,15 @@ from .desktop_runtime import CognitionLedger, ResidentCognitionEngine
 from .desktop_vera_acceptance import VeraRuntimeAcceptance
 
 
+
+_DESKTOP_IPC_COMMANDS = frozenset({
+    "desktop_status",
+    "desktop_discover_routes",
+    "desktop_recent_activity",
+    "desktop_conversation_history",
+    "desktop_cognize",
+})
+
 def _atomic_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -265,12 +274,7 @@ def run_host(runtime_root: Path) -> int:
     def handle(payload: dict[str, object]) -> dict[str, object]:
         nonlocal running
         command = payload.get("command")
-        if command in {
-            "desktop_status",
-            "desktop_discover_routes",
-            "desktop_recent_activity",
-            "desktop_cognize",
-        }:
+        if command in _DESKTOP_IPC_COMMANDS:
             return handler.handle(payload)
         if command in {"status", "ping"}:
             return status()

@@ -89,6 +89,22 @@ class DesktopRuntimeCommandHandler:
                     for row in items
                 ],
             }
+        if command == "desktop_conversation_history":
+            limit = payload.get("limit", 50)
+            if type(limit) is not int or not 1 <= limit <= 100:
+                raise ValueError("conversation limit must be between 1 and 100")
+            return {
+                "schema": "PORTAL_DESKTOP_CONVERSATION_HISTORY_V1",
+                "items": [
+                    {
+                        **entry,
+                        "protected_effect_authority": False,
+                    }
+                    for entry in self.engine.ledger.list_human_conversation(
+                        limit=limit,
+                    )
+                ],
+            }
         if command == "desktop_cognize":
             request_id = self._required_text(payload, "request_id")
             supplied_source = payload.get("source")
