@@ -120,25 +120,36 @@ def discover_github_portfolio(
 def inspect_repository_head(
     repository: str, *, timeout_seconds: float = 15.0,
 ) -> str:
-    """Read a selected repository's current public main ref; no work launch."""
+    """Inspect an authenticated repository's actual default branch HEAD."""
     if not _REPO.fullmatch(repository):
         raise ValueError("invalid repository name")
     if timeout_seconds <= 0:
         raise ValueError("timeout must be positive")
+    metadata = subprocess.run(
+        ["gh", "api", f"repos/{repository}"],
+        capture_output=True, text=True, timeout=timeout_seconds, check=False,
+    )
+    if metadata.returncode:
+        raise RuntimeError(
+            "authenticated repository read unavailable: " + metadata.stderr.strip()[:260]
+        )
+    payload = json.loads(metadata.stdout)
+    if not isinstance(payload, dict) or str(payload.get("full_name","")).casefold() != repository.casefold():
+        raise RuntimeError("GitHub repository identity mismatch")
+    branch = payload.get("default_branch")
+    if not isinstance(branch, str) or not re.fullmatch(r"[A-Za-z0-9_./-]{1,100}",branch):
+        raise RuntimeError("repository default branch is unqualified")
     result = subprocess.run(
-        ["git", "ls-remote", f"https://github.com/{repository}.git", "refs/heads/main"],
-        text=True, capture_output=True, timeout=timeout_seconds,
-        check=False,
+        ["gh","api",f"repos/{repository}/branches/{branch}"],
+        text=True,capture_output=True,timeout=timeout_seconds,check=False,
     )
     if result.returncode:
-        raise RuntimeError(
-            f"repository currentness unavailable (exit {result.returncode}): "
-            + result.stderr.strip()[:300]
-        )
-    fields = result.stdout.strip().split()
-    if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{40}", fields[0]):
-        raise RuntimeError("repository has no verifiable main ref")
-    return fields[0]
+        raise RuntimeError("default-branch read unavailable: " + result.stderr.strip()[:260])
+    body = json.loads(result.stdout)
+    sha = body.get("commit",{}).get("sha") if isinstance(body,dict) else None
+    if not isinstance(sha,str) or not re.fullmatch(r"[0-9a-f]{40}",sha):
+        raise RuntimeError("repository has no verifiable default-branch ref")
+    return sha
 
 
 def run_governed_portfolio_cycle(
@@ -157,10 +168,17 @@ def run_governed_portfolio_cycle(
         raise ValueError("timeout must be positive")
     source_root = Path(source_root).resolve()
     runtime_root = Path(runtime_root).resolve()
-    fixture = source_root / "tests" / "fixtures" / "portal-nodes-valid.yaml"
+    # An installed workstation cannot inherit capacity from a test fixture.
+    nodes = runtime_root / "state" / "portal" / "qualified-nodes.yaml"
     projects = source_root / "registry" / "projects.yaml"
-    if not fixture.is_file() or not projects.is_file():
-        raise RuntimeError("PORTAL runner source configuration unavailable")
+    if not nodes.is_file():
+        raise RuntimeError(
+            "No qualified live node manifest installed. "
+            "PORTAL will not dispatch from tests/fixtures; configure "
+            "state/portal/qualified-nodes.yaml after route qualification."
+        )
+    if not projects.is_file():
+        raise RuntimeError("PORTAL curated project registry unavailable")
     db = runtime_root / "state" / "portal" / "desktop-portfolio.sqlite3"
     db.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -169,7 +187,7 @@ def run_governed_portfolio_cycle(
         "--state-db", str(db),
         "--static-projects",
         "--projects", str(projects),
-        "--nodes", str(fixture),
+        "--nodes", str(nodes),
         "--host-bridge",
         "--once",
         "--max-parallel", "1",

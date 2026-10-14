@@ -9,6 +9,8 @@ from typing import Protocol
 import uuid
 
 from .desktop_ipc import FileBridgeClient
+from .portfolio_relationships import relationship_hint, role_counts
+from .portfolio_readonly_batch import qualify_portfolio
 from .desktop_project_runs import (
     list_project_run_receipts,
     load_project_run_profile,
@@ -597,6 +599,12 @@ class PortalDesktopApp:
             relief="flat", padx=12, pady=10, font=("Segoe UI", 9, "bold"),
         )
         self.project_inspect_button.pack(side="left", padx=(8, 0))
+        self.qualify_button = tk.Button(
+            actions, text="Qualify 8 lanes", command=self._qualify_live_portfolio,
+            bg=c["surface_raised"], fg=c["text"], borderwidth=0,
+            relief="flat", padx=12, pady=10, font=("Segoe UI", 9, "bold"),
+        )
+        self.qualify_button.pack(side="left", padx=(8, 0))
         run_actions = tk.Frame(self._portfolio_panel, bg=c["surface"])
         run_actions.pack(fill="x", padx=22, pady=(8, 0))
         self.portfolio_run_button = tk.Button(
@@ -633,6 +641,7 @@ class PortalDesktopApp:
             justify="left", font=("Segoe UI", 9),
         ).pack(anchor="w", padx=22, pady=(12, 18))
         self._project_items: tuple[DesktopProject, ...] = ()
+        self._live_inventory_loaded = False
         self._portfolio_action_lock = threading.Lock()
         self._reload_portfolio()
         self._show_workspace("portfolio")
@@ -654,6 +663,7 @@ class PortalDesktopApp:
 
         self.root.after(80, self._drain_ui_queue)
         self.root.after(100, self.refresh_async)
+        self.root.after(250, self._sync_github_portfolio)
         self.root.after(3000, self._scheduled_refresh)
 
     def _post_to_ui(self, callback: object) -> None:
@@ -708,6 +718,7 @@ class PortalDesktopApp:
         )
 
     def _reload_portfolio(self) -> None:
+        self._live_inventory_loaded = False
         try:
             projects = load_curated_portfolio(self._source_root)
         except Exception as exc:
@@ -750,14 +761,18 @@ class PortalDesktopApp:
                     self.portfolio_action_var.set(error)
                     return
                 self._project_items = projects
+                self._live_inventory_loaded = True
                 self.project_listbox.delete(0, "end")
                 for project in projects:
                     self.project_listbox.insert(
                         "end", f"  {project.name}  ·  {project.repository}"
                     )
+                counts = role_counts([item.repository for item in projects])
                 self.portfolio_count_var.set(
-                    f"{len(projects)} authenticated live, nonarchived GitHub "
-                    "repositories. Uncurated entries have no execution target."
+                    f"{len(projects)} live nonarchived repositories · "
+                    f"{counts['known_role']} public role hints · "
+                    f"{counts['needs_source_review']} need relationship review. "
+                    "Discovery does not grant execution."
                 )
                 self.portfolio_action_var.set(
                     "Live membership refreshed. This alone does not grant "
@@ -796,6 +811,7 @@ class PortalDesktopApp:
         )
         self.project_detail_var.set(
             f"{project.repository}\n"
+            f"Portfolio relationship: {relationship_hint(project.repository)}\n"
             f"Visibility: {project.visibility} · Scheduling: {project.scheduling_state}\n"
             f"Declared execution targets: {targets}. {profile_note}."
         )
@@ -823,6 +839,37 @@ class PortalDesktopApp:
         except BaseException:
             self._portfolio_action_lock.release()
             raise
+
+    def _qualify_live_portfolio(self) -> None:
+        # Only authenticated live scope is accepted; no curated/offline
+        # registry is promoted into current owner membership.
+        if not self._live_inventory_loaded:
+            self.portfolio_action_var.set(
+                "Sync GitHub before qualifying current portfolio membership."
+            )
+            return
+        names = [p.repository for p in self._project_items]
+        profile = "thebrazenbeard/thebrazenbeard"
+        expected = len(names) - (1 if profile in names else 0)
+        if expected < 1:
+            self.portfolio_action_var.set("No live projects to qualify.")
+            return
+
+        def operation() -> str:
+            from uuid import uuid4
+            output = (
+                self._runtime_root / "state" / "portal"
+                / "readonly-qualifications" / uuid4().hex
+            )
+            result = qualify_portfolio(
+                "thebrazenbeard", expected, output, max_parallel=8,
+            )
+            return (
+                f"{result['completed']}/{result['expected_count']} "
+                f"read-only assessments, 8 lanes, "
+                f"0 projects executed. Receipts: {output}"
+            )
+        self._start_portfolio_action("Portfolio qualification", operation)
 
     def _inspect_selected_project(self) -> None:
         selection = self.project_listbox.curselection()

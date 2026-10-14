@@ -51,24 +51,46 @@ def test_authenticated_live_inventory_includes_uncurated_active_and_excludes_arc
         discover_github_portfolio(ROOT, owner="../malicious")
 
 
-def test_exact_head_inspection_is_read_only_and_validated(monkeypatch) -> None:
+def test_exact_head_inspection_uses_authenticated_default_branch(monkeypatch) -> None:
     from portal import desktop_portfolio as mod
-
+    calls = []
     def fake_run(cmd, **kwargs):
-        assert cmd == [
-            "git","ls-remote","https://github.com/thebrazenbeard/physica.git",
-            "refs/heads/main",
-        ]
-        return SimpleNamespace(returncode=0,stdout="a"*40+"\trefs/heads/main\n",stderr="")
+        calls.append(cmd)
+        if len(calls)==1:
+            assert cmd == ["gh","api","repos/thebrazenbeard/physica"]
+            payload = {"full_name": "thebrazenbeard/physica", "default_branch": "stable"}
+        else:
+            assert cmd == ["gh","api","repos/thebrazenbeard/physica/branches/stable"]
+            payload = {"commit":{"sha":"a"*40}}
+        return SimpleNamespace(returncode=0,stdout=json.dumps(payload),stderr="")
     monkeypatch.setattr(mod.subprocess,"run",fake_run)
     assert inspect_repository_head("thebrazenbeard/physica") == "a"*40
+    assert len(calls)==2
     with pytest.raises(ValueError):
         inspect_repository_head("--upload-pack=malicious")
+
+
+def test_authenticated_head_refuses_cross_identity_and_invalid_branch(monkeypatch):
+    from portal import desktop_portfolio as mod
+    for identity,branch in (
+        ("thebrazenbeard/other","main"),
+        ("thebrazenbeard/physica","../steal"),
+    ):
+        def fake_run(cmd,**kwargs):
+            return SimpleNamespace(returncode=0,stdout=json.dumps({
+                "full_name":identity,"default_branch":branch
+            }),stderr="")
+        monkeypatch.setattr(mod.subprocess,"run",fake_run)
+        with pytest.raises(RuntimeError):
+            inspect_repository_head("thebrazenbeard/physica")
 
 
 def test_bounded_cycle_executes_true_cli_no_effects_and_isolated_db(monkeypatch,tmp_path):
     from portal import desktop_portfolio as mod
 
+    nodes=tmp_path/"state"/"portal"/"qualified-nodes.yaml"
+    nodes.parent.mkdir(parents=True)
+    nodes.write_text("nodes: []\n", encoding="utf-8")
     called={}
     def fake_run(command, **kwargs):
         called["command"] = command
@@ -92,6 +114,11 @@ def test_bounded_cycle_executes_true_cli_no_effects_and_isolated_db(monkeypatch,
 
 def test_bounded_cycle_refuses_unqualified_route_and_false_authority(monkeypatch,tmp_path):
     from portal import desktop_portfolio as mod
+    with pytest.raises(RuntimeError,match="No qualified live node manifest"):
+        run_governed_portfolio_cycle(ROOT,tmp_path)
+    nodes=tmp_path/"state"/"portal"/"qualified-nodes.yaml"
+    nodes.parent.mkdir(parents=True,exist_ok=True)
+    nodes.write_text("nodes: []\n", encoding="utf-8")
 
     def denied(cmd, **kwargs):
         return SimpleNamespace(returncode=1,stdout="",stderr="portal: no qualified execution route")
