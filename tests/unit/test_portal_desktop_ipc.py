@@ -255,3 +255,84 @@ def test_file_bridge_client_surfaces_host_error(tmp_path: Path) -> None:
             client.request("desktop_status", request_id="bad")
     finally:
         thread.join(timeout=2)
+
+
+def test_response_file_partial_write_reassembles_without_resending(
+    tmp_path: Path,
+) -> None:
+    requests = tmp_path / "bridge" / "requests"
+    claimed = tmp_path / "bridge" / "claimed"
+    responses = tmp_path / "bridge" / "responses"
+    for folder in (requests, claimed, responses):
+        folder.mkdir(parents=True)
+    observed = []
+    errors = []
+
+    def server() -> None:
+        try:
+            deadline = time.monotonic() + 2
+            inbound = requests / "partial.json"
+            while not inbound.is_file() and time.monotonic() < deadline:
+                time.sleep(.002)
+            observed.append(json.loads(inbound.read_text())["request_id"])
+            inbound.replace(claimed / inbound.name)
+            output = responses / inbound.name
+            output.write_text("", encoding="utf-8")
+            time.sleep(.025)
+            output.write_text('{"schema":"VERA_UNIFIED_BRIDGE_RESPONSE_V1",',
+                              encoding="utf-8")
+            time.sleep(.025)
+            output.write_text(json.dumps({
+                "schema": "VERA_UNIFIED_BRIDGE_RESPONSE_V1",
+                "request_id": "partial", "ok": True,
+                "result": {"state": "ACTIVE"},
+            }), encoding="utf-8")
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=server)
+    thread.start()
+    try:
+        result = FileBridgeClient(
+            tmp_path, timeout_seconds=1, poll_seconds=.002,
+        ).request("desktop_status", request_id="partial")
+    finally:
+        thread.join(timeout=3)
+    assert not errors
+    assert not thread.is_alive()
+    assert result == {"state": "ACTIVE"}
+    assert observed == ["partial"]
+    assert not (responses / "partial.json").exists()
+
+
+def test_incomplete_response_deadline_is_unknown_and_preserves_evidence(
+    tmp_path: Path,
+) -> None:
+    requests = tmp_path / "bridge" / "requests"
+    claimed = tmp_path / "bridge" / "claimed"
+    responses = tmp_path / "bridge" / "responses"
+    for folder in (requests, claimed, responses):
+        folder.mkdir(parents=True)
+
+    def server() -> None:
+        inbound = requests / "torn.json"
+        deadline = time.monotonic() + 2
+        while not inbound.is_file() and time.monotonic() < deadline:
+            time.sleep(.002)
+        inbound.replace(claimed / inbound.name)
+        (responses / "torn.json").write_text('{"request_id":',
+                                              encoding="utf-8")
+
+    thread = threading.Thread(target=server)
+    thread.start()
+    try:
+        with pytest.raises(BridgeOutcomeUnknownError, match="incomplete"):
+            FileBridgeClient(
+                tmp_path, timeout_seconds=.14, poll_seconds=.005,
+            ).request("desktop_status", request_id="torn")
+    finally:
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert (responses / "torn.json").read_text() == '{"request_id":'
+    assert (claimed / "torn.json").exists()
+    assert not (requests / "torn.json").exists()

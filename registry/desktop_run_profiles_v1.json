@@ -4,7 +4,7 @@
     {
       "id": "physica-oscillator-smoke",
       "repository": "thebrazenbeard/physica",
-      "expected_head": "a33e3a8c94787cc884dd7c668b709ff1ec945551",
+      "expected_head": "9cc1ae9c04f728c10d6bdd9f3b277083eb46a834",
       "module": "physica",
       "args": [
         "simulate",

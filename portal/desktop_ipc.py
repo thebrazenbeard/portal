@@ -203,9 +203,17 @@ class FileBridgeClient:
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             if response_path.is_file():
-                response = json.loads(
-                    response_path.read_text(encoding="utf-8-sig")
-                )
+                try:
+                    # Some existing hosts publish the .json path before the
+                    # write is complete. The file's presence is not proof
+                    # that its JSON envelope is ready. Never resend the
+                    # already-issued request while waiting for completion.
+                    response = json.loads(
+                        response_path.read_text(encoding="utf-8-sig")
+                    )
+                except (json.JSONDecodeError, UnicodeDecodeError, FileNotFoundError):
+                    time.sleep(self.poll_seconds)
+                    continue
                 response_path.unlink(missing_ok=True)
                 if not isinstance(response, dict):
                     raise RuntimeError("bridge response is not an object")
@@ -221,6 +229,12 @@ class FileBridgeClient:
                 return result
             time.sleep(self.poll_seconds)
 
+        if response_path.is_file():
+            # Preserve the incomplete host evidence. The command may already
+            # have executed; a timeout here must not invite a retry.
+            raise BridgeOutcomeUnknownError(
+                f"bridge response remained incomplete at deadline: {request_id}"
+            )
         try:
             request_path.unlink()
         except FileNotFoundError:
