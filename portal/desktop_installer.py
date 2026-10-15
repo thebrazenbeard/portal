@@ -162,6 +162,26 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
     value = json.loads(completed.stdout)
     if not isinstance(value, dict):
         raise RuntimeError("import verification did not return an object")
+    expected_origins = {
+        "portal": "sources/portal/portal/__init__.py",
+        "pre_active": "sources/pre-active/src/pre_active/__init__.py",
+        "volition": "sources/volition/src/volition/__init__.py",
+        "vera_core": "sources/vera-mono/packages/vera_core/src/vera_core/__init__.py",
+    }
+    resolved_root = runtime_root.resolve()
+    for module, relative_path in expected_origins.items():
+        origin = value.get(module)
+        expected_path = (runtime_root / relative_path).resolve()
+        if (
+            not isinstance(origin, str)
+            or not Path(origin).is_absolute()
+            or not expected_path.is_relative_to(resolved_root)
+            or not expected_path.is_file()
+            or Path(origin).resolve() != expected_path
+        ):
+            raise RuntimeError(f"{module} import origin did not match exact staged source")
+    if set(value) != set(expected_origins):
+        raise RuntimeError("import verification returned unexpected modules")
     return {str(key): str(path) for key, path in value.items()}
 
 
