@@ -11,7 +11,7 @@ from portal import desktop_project_runs as mod
 
 SOURCE = Path(__file__).resolve().parents[2]
 REPO = "thebrazenbeard/physica"
-HEAD = "a33e3a8c94787cc884dd7c668b709ff1ec945551"
+HEAD = "9cc1ae9c04f728c10d6bdd9f3b277083eb46a834"
 
 
 def _fake_checkout(tmp_path: Path) -> Path:
@@ -19,6 +19,20 @@ def _fake_checkout(tmp_path: Path) -> Path:
     (checkout / "src" / "physica").mkdir(parents=True)
     (checkout / "src" / "physica" / "__main__.py").write_text("")
     return checkout
+
+
+def test_profile_tracks_reviewed_physica_source_without_widening_effects() -> None:
+    # The reviewed 2026-10-15 main source executes the exact approved
+    # oscillator command, producing physica.simulation.v1 with 10 steps.
+    profile = mod.load_project_run_profile(SOURCE, REPO)
+    assert profile is not None
+    assert profile["expected_head"] == "9cc1ae9c04f728c10d6bdd9f3b277083eb46a834"
+    assert profile["module"] == "physica"
+    assert profile["args"] == [
+        "simulate", "oscillator", "--initial", "1", "0",
+        "--t1", "0.1", "--dt", "0.01", "--summary-only",
+    ]
+    assert profile["local_simulation_only"] is True
 
 
 def test_specific_approved_profile_only() -> None:
