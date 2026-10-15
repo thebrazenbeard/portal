@@ -11,6 +11,7 @@ import uuid
 from .desktop_ipc import FileBridgeClient
 from .portfolio_relationships import relationship_hint, role_counts
 from .portfolio_readonly_batch import qualify_portfolio
+from .desktop_wave_history import list_governed_wave_receipts
 from .desktop_project_runs import (
     list_project_run_receipts,
     load_project_run_profile,
@@ -632,6 +633,14 @@ class PortalDesktopApp:
             font=("Segoe UI", 9, "bold"),
         )
         self.project_receipts_button.pack(side="left", padx=(8, 0))
+        self.wave_history_button = tk.Button(
+            run_actions, text="Wave evidence",
+            command=self._open_governed_waves,
+            bg=c["surface_raised"], fg=c["text"],
+            borderwidth=0, relief="flat", padx=12, pady=10,
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.wave_history_button.pack(side="left", padx=(8, 0))
         self.portfolio_action_var = tk.StringVar(
             value="No execution started. Work requires a qualified route."
         )
@@ -881,6 +890,38 @@ class PortalDesktopApp:
             "Exact main-head inspection",
             lambda: f"{repository}@{inspect_repository_head(repository)}",
         )
+
+    def _open_governed_waves(self) -> None:
+        # Local custody inspection only; nothing is started or promoted.
+        from tkinter import Text, Toplevel
+        items = list_governed_wave_receipts(self._runtime_root)
+        c = PORTAL_PALETTE
+        window = Toplevel(self.root)
+        window.title("PORTAL | Governed wave evidence (read only)")
+        window.geometry("980x510")
+        window.configure(bg=c["surface"])
+        detail = Text(
+            window, wrap="word", bg=c["editor"], fg=c["text"],
+            font=("Consolas", 10), padx=18, pady=18, borderwidth=0,
+        )
+        detail.pack(fill="both", expand=True, padx=16, pady=16)
+        if not items:
+            detail.insert("end", "No consistent governed wave receipts found.\n")
+        for item in items:
+            detail.insert(
+                "end",
+                f"{item['wave']}  |  {item['status']}\n"
+                f"Repository inspections: {item['inspected']}/{item['subjects']}\n"
+                f"Logical lanes observed: {item['logical_lanes']} "
+                f"(queue limit {item['logical_queue_limit']}); "
+                f"physical worker ceiling: {item['physical_workers_limit']}\n"
+                f"Project applications executed: {item['projects_executed']}; "
+                f"repositories modified: {item['repositories_modified']}\n"
+                f"PORTAL source {item['source_sha'][:12]}\n"
+                f"Local evidence: {item['evidence_directory']}\n"
+                "Not independently attested; inspection != project execution.\n\n",
+            )
+        detail.configure(state="disabled")
 
     def _open_project_runs(self) -> None:
         # Pure readback of existing local custody receipts. No retry.
