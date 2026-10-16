@@ -112,3 +112,16 @@ def test_route_assessment_is_not_execution_and_returns_no_execution_receipt():
         "request_digest","state","route","reason","assessment_digest",
     }
     assert "dispatch_id" not in advisory
+
+
+def test_independent_golden_wire_vector():
+    """Can assess a task without importing any Vera Mono package."""
+    from pathlib import Path
+
+    fixture=json.loads(
+        (Path(__file__).resolve().parents[1]/"fixtures/vera_portal_task_route_v1.json").read_text(encoding="utf-8")
+    )
+    request=fixture["request"]
+    assert validate_vera_task_route_request(request)==request
+    assert assess_vera_task_route(request,[advertised()])==fixture["proposed"]
+    assert assess_vera_task_route(request,[])==fixture["held"]

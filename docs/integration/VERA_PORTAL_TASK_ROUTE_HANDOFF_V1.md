@@ -60,3 +60,16 @@ return of durable execution receipt -> Vera task/dependency reconciliation ->
 restart/ambiguous-outcome test, with the original authorization/fence held
 at every step. Do not infer installation, runtime selection, behavioral success,
 or protected-effect rights from these source tests.
+
+## Independent wire vectors
+
+Each repository includes the byte-identical
+	ests/fixtures/vera_portal_task_route_v1.json
+Golden request, proposed-route, and held-route records are generated from
+a REAL opened Vera task and the existing PORTAL resolver. Each repo's own
+tests consume this fixture without importing the other repository, so a
+future contract drift is detected even if the paired checkout is absent.
+The optional Vera Mono test 	est_portal_task_route_cross_repo.py can also
+be run with PORTAL_SOURCE_ROOT set to the exact separate PORTAL checkout;
+it opens/reopens SQLite and confirms a subsequent task event invalidates a
+previous assessment. Passing those source tests is not a host route install.

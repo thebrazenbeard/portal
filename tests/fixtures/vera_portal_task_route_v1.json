@@ -1,0 +1,77 @@
+{
+  "held": {
+    "assessment_digest": "b58b5c3cf687f4c062264dee2862feeeb88e81c62922a6f683693fcdfe8eb389",
+    "reason": "NO_QUALIFIED_ADVISORY_ROUTE",
+    "request_digest": "6fb5d476e7390fff87ef61d819c7169731681f1e988f99353edb4ba3ca58bd27",
+    "route": null,
+    "schema": "VERA_PORTAL_TASK_ROUTE_ASSESSMENT_V1",
+    "state": "HELD",
+    "task_id": "task-001",
+    "task_journal_head": "e29a672c5a02dd3da1e9c17211a2e8d4d926a07c4bae77ae6c5e992a8e32de83",
+    "task_packet_digest": "89774d79372bea2d6da81d2faf52b3acb0383092249b39b32253018da8583ad5"
+  },
+  "lifecycle_evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "proposed": {
+    "assessment_digest": "eff81a5fdf02e8dd2b34de8059523d3c2c83ea2d4132a99f2996d9c4029b8dae",
+    "reason": null,
+    "request_digest": "6fb5d476e7390fff87ef61d819c7169731681f1e988f99353edb4ba3ca58bd27",
+    "route": {
+      "adapter_id": "github",
+      "route_id": "read-only"
+    },
+    "schema": "VERA_PORTAL_TASK_ROUTE_ASSESSMENT_V1",
+    "state": "ROUTE_PROPOSED",
+    "task_id": "task-001",
+    "task_journal_head": "e29a672c5a02dd3da1e9c17211a2e8d4d926a07c4bae77ae6c5e992a8e32de83",
+    "task_packet_digest": "89774d79372bea2d6da81d2faf52b3acb0383092249b39b32253018da8583ad5"
+  },
+  "request": {
+    "request_digest": "6fb5d476e7390fff87ef61d819c7169731681f1e988f99353edb4ba3ca58bd27",
+    "requested_effect": "NO_PROTECTED_EFFECT",
+    "route": {
+      "node_id": "repo-native",
+      "required_capabilities": [
+        "repository_read"
+      ],
+      "target_id": "thebrazenbeard/portal",
+      "target_kind": "repository"
+    },
+    "schema": "VERA_PORTAL_TASK_ROUTE_REQUEST_V1",
+    "subject": "thebrazenbeard/portal@main",
+    "task_id": "task-001",
+    "task_journal_head": "e29a672c5a02dd3da1e9c17211a2e8d4d926a07c4bae77ae6c5e992a8e32de83",
+    "task_packet_digest": "89774d79372bea2d6da81d2faf52b3acb0383092249b39b32253018da8583ad5"
+  },
+  "schema": "VERA_PORTAL_TASK_ROUTE_GOLDEN_V1",
+  "task_id": "task-001",
+  "task_packet": {
+    "completion_state": "A verified receipt is recorded by Vera",
+    "evidence_requirements": [
+      "route currentness"
+    ],
+    "forbidden_shortcuts_or_effects": [
+      "no effect permission"
+    ],
+    "non_targets": [
+      "no deployment"
+    ],
+    "priority_order": [
+      "recovery",
+      "correctness"
+    ],
+    "purpose": "Recover the integration handoff after worker restart",
+    "relevant_surfaces": [
+      "current route",
+      "workspace/coordination"
+    ],
+    "return_shape": [
+      "route",
+      "evidence"
+    ],
+    "subject": "thebrazenbeard/portal@main",
+    "unknowns": [
+      "live route is not installed"
+    ],
+    "writable_scope": []
+  }
+}
