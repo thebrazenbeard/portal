@@ -1,0 +1,7 @@
+# Staged: disabled until host route, effect authority and occupancy qualify.
+schema: PORTAL_EXECUTION_NODES_V1
+nodes:
+  - id: vn1
+    max_parallel: 1
+    allowed_lanes: []
+    enabled: false
