@@ -34,10 +34,13 @@ An observed commit differing from the expected head emits `current=false`.
 The route's `effect_capabilities=[]` deliberately prevents dispatch even
 when `available=true`, `attached=true`, and `current=true`.
 
-`evidence_id=github-head:<observed-sha>` is an **untrusted observation ID**
-from the CLI/API response, not an authenticated GitHub attestation, a local
-checkout verification, or a claim that the current process consumed the
-repository. PORTAL must still bind current TTL and any effect permission
+`evidence_id=github-head:<repository>:<ref>:<expected-sha>:<observed-sha>`
+is an **untrusted, request-scoped observation ID**. Distinct repositories,
+refs, or expected heads must not reuse one evidence identifier merely because
+the GitHub API returns the same observed SHA. Unsupported Git ref syntax is
+rejected before CLI invocation. This is NOT an authenticated GitHub attestation,
+a local checkout verification, or a claim that the current process consumed
+the repository. PORTAL must still bind current TTL and any effect permission
 through its existing independent host authority and route/attempt gates.
 Do not use this source observer to authorize a GitHub write: a different,
 explicitly qualified execution driver and grant are required.
