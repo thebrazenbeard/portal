@@ -161,7 +161,60 @@ def claim_bridge_request(
     return claimed_path
 
 
+def _windows_state_mutex_name(state_root: Path) -> str:
+    """Key ownership to canonical state bytes, not the package manifest."""
+    normalized = os.path.normcase(str(Path(state_root).resolve()))
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return "Local\\VeraDesktopState_" + digest[:40]
+
+
+def _windows_kernel32() -> object:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.CreateMutexW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    return kernel
+
+
+def _release_state_mutex(handle: object | None) -> None:
+    if handle is not None:
+        import ctypes
+
+        if not _windows_kernel32().CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _acquire_state_mutex(state_root: Path) -> object | None:
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    kernel = _windows_kernel32()
+    handle = kernel.CreateMutexW(None, False, _windows_state_mutex_name(state_root))
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        _release_state_mutex(handle)
+        raise RuntimeError("Vera desktop canonical state root is already owned")
+    return handle
+
+
 def run_host(runtime_root: Path) -> int:
+    # Acquire before any canonical runtime/ledger is opened; always release,
+    # including failed composition and abnormal host-loop exits.
+    layout = prepare_runtime_layout(runtime_root)
+    handle = _acquire_state_mutex(layout["state_root"] / "vera")
+    try:
+        return _run_host_after_state_claim(layout["runtime_root"])
+    finally:
+        _release_state_mutex(handle)
+
+
+def _run_host_after_state_claim(runtime_root: Path) -> int:
     layout = prepare_runtime_layout(runtime_root)
     runtime_root = layout["runtime_root"]
     state_root = layout["state_root"]
@@ -188,18 +241,6 @@ def run_host(runtime_root: Path) -> int:
     if not isinstance(source_manifest, dict):
         raise RuntimeError("runtime install spec must be an object")
     runtime_id = _runtime_id(source_manifest)
-
-    if os.name == "nt":
-        import ctypes
-
-        mutex_name = "Local\\VeraDesktopRuntime_" + runtime_id[:24]
-        mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
-        if not mutex_handle:
-            raise OSError("failed to create Vera desktop runtime mutex")
-        if ctypes.windll.kernel32.GetLastError() == 183:
-            raise SystemExit("Vera desktop runtime is already running")
-    else:
-        mutex_handle = None
 
     vera_state = VeraStateDirectory(
         state_root / "vera",
@@ -385,10 +426,6 @@ def run_host(runtime_root: Path) -> int:
             cognition_ledger.close()
             portal_session.close()
             pre_active.close()
-            if os.name == "nt" and mutex_handle:
-                import ctypes
-
-                ctypes.windll.kernel32.CloseHandle(mutex_handle)
     return 0
 
 
