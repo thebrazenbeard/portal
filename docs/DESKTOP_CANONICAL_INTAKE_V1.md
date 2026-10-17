@@ -100,6 +100,13 @@ checks SQLite release on Windows. Mutex checks cover the existing Windows
 local-session root boundary, including different package source manifests.
 They do not prove cross-session or cross-host whole-root ownership.
 
+The cold-host test records each actual interpreter PID in a unique disposable
+startup witness, then requires its ACTIVE bridge heartbeat. Windows venv
+`python.exe` can launch a base interpreter whose PID differs from `Popen.pid`;
+the wrapper PID is not a valid host readiness identity. The test retains the
+same venv environment, 15-second bound and all canonical/restart assertions.
+No production PID, task, source-currentness or mutex policy is changed.
+
 This candidate does not migrate Desktop identity roots, install this source,
 admit a provider, authenticate client locators, qualify a graphical installed
 runtime, or establish VeraOS package/guest conformance. Independent Integration,

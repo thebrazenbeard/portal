@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from uuid import uuid4
 
 import pytest
 
@@ -29,10 +30,14 @@ def test_actual_host_intake_restart_unknown_claim_and_sqlite_release(tmp_path):
     claim = layout["claimed"] / "prior-claim.json"
     claim.write_text(json.dumps(original))
     program = '''
-import sys,socket,subprocess,urllib.request
+import json,os,sys,socket,subprocess,urllib.request
 from pathlib import Path
 import portal.desktop_host as host
 root=Path(sys.argv[1])
+# Windows venv python.exe may be a redirector with a different Popen PID.
+# This unique, fixture-owned witness identifies the actual interpreter.
+with Path(sys.argv[2]).open("x", encoding="utf-8") as witness:
+ json.dump({"pid":os.getpid()}, witness)
 def forbidden(*args,**kwargs):
  (root/"FORBIDDEN_ROUTE_CALL").write_text("route/model/network boundary was reached")
  raise AssertionError("no route/model/network in host fixture")
@@ -45,7 +50,8 @@ raise SystemExit(host.run_host(root))
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
     def start():
-        child = subprocess.Popen([sys.executable, "-B", "-c", program, str(root)],
+        witness = root / f"host-process-{uuid4().hex}.json"
+        child = subprocess.Popen([sys.executable, "-B", "-c", program, str(root), str(witness)],
                                  env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -53,7 +59,10 @@ raise SystemExit(host.run_host(root))
                 pytest.fail(f"host failed: {child.communicate()}")
             heartbeat = layout["bridge_root"] / "heartbeat.json"
             try:
-                if json.loads(heartbeat.read_text())["pid"] == child.pid:
+                host_pid = json.loads(witness.read_text(encoding="utf-8"))["pid"]
+                current = json.loads(heartbeat.read_text())
+                if current["pid"] == host_pid and current["state"] == "ACTIVE":
+                    print(f"host ready: launcher_pid={child.pid}, interpreter_pid={host_pid}")
                     return child
             except (OSError, ValueError):
                 pass
