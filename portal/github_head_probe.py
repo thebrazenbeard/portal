@@ -21,8 +21,9 @@ def _locator(repository: str, ref: str, expected_head: str) -> tuple[str, str, s
                for part in repository.split("/")):
         raise ValueError("invalid GitHub repository locator")
     if (not isinstance(ref, str) or not _REF.fullmatch(ref)
-            or any(part in {".", "..", ""} for part in ref.split("/"))
-            or ref.endswith(".lock")):
+            or ".." in ref
+            or any(part.startswith(".") or part.endswith((".", ".lock"))
+                   for part in ref.split("/"))):
         raise ValueError("invalid GitHub ref")
     if not isinstance(expected_head, str) or not _SHA.fullmatch(expected_head):
         raise ValueError("expected_head must be an exact lower-case commit SHA")
@@ -56,7 +57,10 @@ def observe_head(repository: str, *, ref: str, expected_head: str) -> dict:
     return {
         "schema": "PORTAL_HOST_PROBE_RESULT_V1",
         "adapter_id": "github-head-observer",
-        "evidence_id": f"github-head:{observed}",
+        # Bind the observed byte-level head to the requested repository, ref,
+        # and expected head. Equal SHAs across repos or stale expectations
+        # are not interchangeable observation evidence.
+        "evidence_id": f"github-head:{repository}:{ref}:{expected_head}:{observed}",
         "routes": [{
             "route_id": f"github-head:{repository}:{ref}",
             "node_id": "github-api",
