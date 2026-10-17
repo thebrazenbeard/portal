@@ -1,0 +1,132 @@
+"""Actual Desktop host processes, pinned sources and disposable roots only."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+from uuid import uuid4
+
+import pytest
+
+pytest.importorskip("vera_core", reason="requires Mono #77 source")
+pytest.importorskip("pre_active", reason="requires pinned Pre-Active source")
+
+from portal.desktop_host import prepare_runtime_layout
+from portal.desktop_ipc import FileBridgeClient
+from vera_core import QualifiedVeraRuntime, VeraStateDirectory
+
+
+def test_actual_host_intake_restart_unknown_claim_and_sqlite_release(tmp_path):
+    root = tmp_path / "isolated-host"
+    layout = prepare_runtime_layout(root)
+    (root / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps({
+        "schema": "OFFLINE_TEST_SOURCE_SPEC_ONLY",
+        "sources": [{"component": "portal", "sha": "b16413fad12d33a9f9b64d6b1602490f4dede327"}],
+    }))
+    # A prior durable claim with no response must be reconciled as UNKNOWN.
+    original = {"command": "desktop_cognize", "conversation_id": "desktop-cold-test",
+                "request_id": "prior-claim", "task": "Original \u03bb input", "source": "HUMAN"}
+    claim = layout["claimed"] / "prior-claim.json"
+    claim.write_text(json.dumps(original))
+    program = '''
+import json,os,sys,socket,subprocess,urllib.request
+from pathlib import Path
+import portal.desktop_host as host
+root=Path(sys.argv[1])
+# Windows venv python.exe may be a redirector with a different Popen PID.
+# This unique, fixture-owned witness identifies the actual interpreter.
+with Path(sys.argv[2]).open("x", encoding="utf-8") as witness:
+ json.dump({"pid":os.getpid()}, witness)
+def forbidden(*args,**kwargs):
+ (root/"FORBIDDEN_ROUTE_CALL").write_text("route/model/network boundary was reached")
+ raise AssertionError("no route/model/network in host fixture")
+socket.create_connection=forbidden
+urllib.request.urlopen=forbidden
+subprocess.run=forbidden
+host.discover_cognition_routes=forbidden
+raise SystemExit(host.run_host(root))
+'''
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+    def start():
+        witness = root / f"host-process-{uuid4().hex}.json"
+        child = subprocess.Popen([sys.executable, "-B", "-c", program, str(root), str(witness)],
+                                 env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if child.poll() is not None:
+                pytest.fail(f"host failed: {child.communicate()}")
+            heartbeat = layout["bridge_root"] / "heartbeat.json"
+            try:
+                host_pid = json.loads(witness.read_text(encoding="utf-8"))["pid"]
+                current = json.loads(heartbeat.read_text())
+                if current["pid"] == host_pid and current["state"] == "ACTIVE":
+                    print(f"host ready: launcher_pid={child.pid}, interpreter_pid={host_pid}")
+                    return child
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.01)
+        child.terminate()
+        pytest.fail(f"host did not start: {child.communicate(timeout=5)}")
+
+    def stop(child):
+        if child.poll() is None:
+            try:
+                FileBridgeClient(root, timeout_seconds=5).request("shutdown")
+                child.wait(timeout=5)
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+        stdout, stderr = child.communicate(timeout=5)
+        assert child.returncode == 0, (stdout, stderr)
+
+    first_process = start()
+    client = FileBridgeClient(root, timeout_seconds=5, poll_seconds=0.005)
+    try:
+        # Poll the same original claim; never publish another request.
+        response = layout["responses"] / claim.name
+        deadline = time.monotonic() + 5
+        while not response.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        result = client.request(**original)
+        assert result["status"] == "OUTCOME_UNKNOWN_NO_REDISPATCH"
+        fresh = client.request("desktop_cognize", conversation_id="desktop-cold-test",
+                               request_id="new-message", task="Exact second message", source="HUMAN")
+        assert fresh["status"] == "PENDING_NO_ADMITTED_PROVIDER"
+        assert fresh["state"] == "HELD"
+    finally:
+        stop(first_process)
+
+    second_process = start()
+    try:
+        history = client.request("desktop_conversation_history", conversation_id="desktop-cold-test")
+        by_message = {row["message_id"]: row for row in history["items"]}
+        assert set(by_message) == {"prior-claim", "new-message"}
+        assert by_message["prior-claim"]["task_id"] == result["task_id"]
+        assert by_message["prior-claim"]["source_digest"] == result["source_digest"]
+        assert by_message["new-message"]["task_id"] == fresh["task_id"]
+        assert all(row["memory_admitted"] is False for row in history["items"])
+        assert client.request(**original)["status"] == "OUTCOME_UNKNOWN_NO_REDISPATCH"
+    finally:
+        stop(second_process)
+
+    runtime = QualifiedVeraRuntime.from_state_directory(VeraStateDirectory(
+        layout["state_root"] / "vera", project_id="VERA_MONO", identity_id="VERA_PROJECT_IDENTITY_V1"))
+    assert len(runtime.tasks.events()) == 2
+    assert all(not task.closed for task in runtime.tasks.tasks())
+    assert runtime.resume_context()["outbound_effect_integrity"]["fence_effect_count"] == 0
+    assert not (root / "FORBIDDEN_ROUTE_CALL").exists()
+    import sqlite3
+    db = sqlite3.connect(layout["state_root"] / "cognition" / "desktop-cognition.sqlite3")
+    try:
+        assert db.execute("SELECT count(*) FROM desktop_cognition_runs").fetchone()[0] == 0
+    finally:
+        db.close()
+    # Win32 detects leaked SQLite owners; no GC or process-only store remains.
+    for path in sorted(layout["state_root"].rglob("*.sqlite*")):
+        if not path.is_file():
+            continue
+        renamed = path.with_name(path.name + ".release-check")
+        path.rename(renamed)
+        renamed.rename(path)

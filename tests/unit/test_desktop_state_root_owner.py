@@ -66,3 +66,30 @@ def test_live_other_process_fails_closed_without_stealing_claim(tmp_path):
         host._release_state_mutex(owner)
     allowed = child()
     assert allowed.returncode == 0, (allowed.stdout, allowed.stderr)
+
+
+def test_different_package_source_versions_cannot_own_same_root(tmp_path):
+    import json
+
+    root = tmp_path / "desktop"
+    state_root = host.prepare_runtime_layout(root)["state_root"] / "vera"
+    version_a = {"sources": [{"component": "portal", "sha": "a" * 40}]}
+    version_b = {"sources": [{"component": "portal", "sha": "b" * 40}]}
+    assert host._runtime_id(version_a) != host._runtime_id(version_b)
+    owner = host._acquire_state_mutex(state_root)
+    try:
+        (root / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps(version_b))
+        code = (
+            "import sys;from pathlib import Path;from portal import desktop_host as h\n"
+            "h._run_host_after_state_claim=lambda root:0\n"
+            "try:h.run_host(Path(sys.argv[1]))\n"
+            "except RuntimeError as e:\n"
+            " print(e);sys.exit(19)\n"
+        )
+        env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[2]))
+        other = subprocess.run([sys.executable, "-B", "-c", code, str(root)],
+                               env=env, text=True, capture_output=True, timeout=15)
+        assert other.returncode == 19, (other.stdout, other.stderr)
+        assert "already owned" in other.stdout
+    finally:
+        host._release_state_mutex(owner)

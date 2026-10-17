@@ -1,13 +1,69 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 from pathlib import Path
 import threading
 import time
 from typing import Protocol
 import uuid
 
-from .desktop_ipc import FileBridgeClient
+from .desktop_ipc import BridgeOutcomeUnknownError, FileBridgeClient, canonical_locator
+
+
+class DesktopConversationSelector:
+    """Client UI pointer only. Task text, provenance and history stay in Mono."""
+
+    def __init__(self, runtime_root: Path) -> None:
+        self.path = Path(runtime_root) / "bridge" / "ui" / "active-conversation.json"
+
+    def read(self) -> str | None:
+        if not self.path.exists():
+            if self.path.is_symlink():
+                raise ValueError("CONVERSATION_SELECTOR_CORRUPT: BLOCKED")
+            return None
+        try:
+            if self.path.is_symlink() or self.path.stat().st_size > 4096:
+                raise ValueError("invalid pointer file")
+
+            def unique_fields(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate pointer field")
+                    result[key] = value
+                return result
+
+            value = json.loads(self.path.read_text(encoding="utf-8"), object_pairs_hook=unique_fields)
+            if (type(value) is not dict or set(value) != {"schema", "conversation_id"}
+                    or value["schema"] != "PORTAL_DESKTOP_UI_SELECTOR_V1"):
+                raise ValueError("invalid pointer schema")
+            return canonical_locator(value["conversation_id"], "conversation_locator")
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("CONVERSATION_SELECTOR_CORRUPT: BLOCKED; existing bytes preserved") from exc
+
+    def begin_new(self, *, expected: str | None) -> str:
+        # Reuse Mono's existing short-lived file-lock primitive. Its SQLite
+        # lock contains no application state, task, identity or authority.
+        from r8a0.portable_lock import PortableFileLock
+
+        with PortableFileLock(self.path.with_suffix(".lock.sqlite3")):
+            current = self.read()
+            if current != expected:
+                raise ValueError("CONVERSATION_SELECTOR_CHANGED: BLOCKED; reload selection")
+            locator = "desktop-" + uuid.uuid4().hex
+            temp = self.path.with_name(self.path.name + "." + uuid.uuid4().hex + ".tmp")
+            try:
+                with temp.open("x", encoding="utf-8") as stream:
+                    json.dump({"schema": "PORTAL_DESKTOP_UI_SELECTOR_V1", "conversation_id": locator}, stream)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temp.replace(self.path)
+            finally:
+                temp.unlink(missing_ok=True)
+            return locator
 
 
 class RuntimeClient(Protocol):
@@ -26,8 +82,30 @@ class DesktopSnapshot:
 
 
 class DesktopViewModel:
-    def __init__(self, client: RuntimeClient) -> None:
+    def __init__(self, client: RuntimeClient, *, conversation_id: str | None = None,
+                 selector: DesktopConversationSelector | None = None) -> None:
         self.client = client
+        self.selector = selector
+        self.conversation_id = selector.read() if selector is not None else conversation_id
+        if self.conversation_id is not None:
+            canonical_locator(self.conversation_id, "conversation_locator")
+        if selector is not None and conversation_id is not None and conversation_id != self.conversation_id:
+            raise ValueError("CONVERSATION_SELECTOR_CHANGED: BLOCKED")
+        self._pending: tuple[str, str, str] | None = None
+        if self.conversation_id is not None and isinstance(client, FileBridgeClient):
+            self._pending = client.unresolved_cognition(self.conversation_id)
+
+    def begin_new_conversation(self) -> str:
+        if self._pending is not None:
+            raise BridgeOutcomeUnknownError("reconcile original request before changing conversation")
+        if self.selector is None:
+            raise ValueError("client-owned conversation selector is required")
+        self.conversation_id = self.selector.begin_new(expected=self.conversation_id)
+        return self.conversation_id
+
+    def conversation_history(self) -> dict[str, object]:
+        return self.client.request("desktop_conversation_history",
+                                   conversation_id=canonical_locator(self.conversation_id, "conversation_locator"))
 
     @staticmethod
     def _preferred_route(
@@ -100,18 +178,34 @@ class DesktopViewModel:
         request_id: str | None = None,
         created_at: float | None = None,
     ) -> dict[str, object]:
-        task = message.strip()
-        if not task:
-            raise ValueError("message is required")
-        return self.client.request(
-            "desktop_cognize",
-            request_id=request_id or uuid.uuid4().hex,
-            source="HUMAN",
-            reason="desktop conversation message",
-            task=task,
-            created_at=float(time.time() if created_at is None else created_at),
-            required_capabilities=["text"],
-        )
+        if type(message) is not str or not message or message != message.strip() or len(message) > 2048:
+            raise ValueError("invalid literal message: preserve text; remove surrounding whitespace explicitly")
+        conversation_id = canonical_locator(self.conversation_id, "conversation_locator")
+        if self.selector is not None and self.selector.read() != conversation_id:
+            raise ValueError("CONVERSATION_SELECTOR_CHANGED: BLOCKED; reload selection")
+        if self._pending is not None:
+            old_conversation, old_id, old_text = self._pending
+            if (conversation_id != old_conversation or message != old_text
+                    or request_id not in (None, old_id)):
+                raise BridgeOutcomeUnknownError(f"reconcile original request; no replacement: {old_id}")
+            request_id = old_id
+        request_id = canonical_locator(uuid.uuid4().hex if request_id is None else request_id, "request_id")
+        self._pending = (conversation_id, request_id, message)
+        try:
+            result = self.client.request(
+                "desktop_cognize", conversation_id=conversation_id, request_id=request_id,
+                source="HUMAN", reason="desktop conversation message", task=message,
+                created_at=float(time.time() if created_at is None else created_at),
+                required_capabilities=["text"],
+            )
+        except BridgeOutcomeUnknownError:
+            raise
+        except Exception:
+            self._pending = None
+            raise
+        if result.get("status") != "OUTCOME_UNKNOWN_NO_REDISPATCH":
+            self._pending = None
+        return result
 
 
 class PortalDesktopApp:
@@ -126,7 +220,15 @@ class PortalDesktopApp:
         self.root.minsize(900, 620)
 
         self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
-        self.view_model = DesktopViewModel(self.client)
+        selector = DesktopConversationSelector(runtime_root)
+        selector_error = None
+        try:
+            self.view_model = DesktopViewModel(self.client, selector=selector)
+        except (ValueError, BridgeOutcomeUnknownError) as exc:
+            # Corrupt selectors remain blocked; read-only runtime UI stays open.
+            selector_error = str(exc)
+            self.view_model = DesktopViewModel(self.client)
+            self.view_model.selector = selector
 
         shell = ttk.Frame(self.root, padding=10)
         shell.pack(fill="both", expand=True)
@@ -153,6 +255,8 @@ class PortalDesktopApp:
             height=28,
         )
         self.conversation.pack(fill="both", expand=True)
+        ttk.Button(conversation_frame, text="Begin new canonical conversation",
+                   command=self.begin_new_conversation).pack(anchor="w", pady=(4, 0))
 
         composer = ttk.Frame(conversation_frame)
         composer.pack(fill="x", pady=(8, 0))
@@ -181,7 +285,7 @@ class PortalDesktopApp:
         )
         self.autonomous_text.pack(fill="x", pady=(2, 8))
 
-        ttk.Label(operations_frame, text="Activity").pack(anchor="w")
+        ttk.Label(operations_frame, text="Legacy operational activity (not canonical tasks)").pack(anchor="w")
         self.activity_text = tk.Text(
             operations_frame,
             height=16,
@@ -202,11 +306,43 @@ class PortalDesktopApp:
             wraplength=360,
         ).pack(fill="x", pady=(2, 0))
 
-        self.status_var = tk.StringVar(value="")
+        self.status_var = tk.StringVar(value=selector_error or (
+            "Selected conversation is untrusted input; no model provider admitted."
+            if self.view_model.conversation_id else "Begin a new canonical conversation. Legacy activity is not imported."
+        ))
         ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
 
         self.root.after(100, self.refresh_async)
         self.root.after(3000, self._scheduled_refresh)
+        if self.view_model.conversation_id:
+            self.root.after(100, self.load_history_async)
+
+    def begin_new_conversation(self) -> None:
+        try:
+            self.view_model.begin_new_conversation()
+        except Exception as exc:
+            self.status_var.set(str(exc))
+            return
+        self._set_text(self.conversation, "New canonical conversation. No legacy history imported.\n\n")
+        self.status_var.set("New conversation selected. No model provider admitted.")
+
+    def load_history_async(self) -> None:
+        selected = self.view_model.conversation_id
+
+        def work() -> None:
+            try:
+                history = self.view_model.conversation_history()
+                rendered = "\n\n".join(
+                    f"Unverified user input: {row['text']}\n{row['status']}"
+                    for row in history["items"]
+                ) or "No canonical task history."
+            except Exception as exc:
+                rendered = f"Canonical history blocked: {exc}"
+            def finish() -> None:
+                if self.view_model.conversation_id == selected:
+                    self._set_text(self.conversation, rendered)
+            self.root.after(0, finish)
+        threading.Thread(target=work, daemon=True).start()
 
     @staticmethod
     def _activity_line(item: dict[str, object]) -> str:
@@ -283,12 +419,12 @@ class PortalDesktopApp:
         return "break"
 
     def send_message(self) -> None:
-        message = self.message_var.get().strip()
+        message = self.message_var.get()
         if not message:
             return
         self.message_var.set("")
         self._append_conversation("Patrick", message)
-        self.status_var.set("Vera is thinking…")
+        self.status_var.set("Opening canonical task…")
         self.send_button.configure(state="disabled")
 
         def work() -> None:
