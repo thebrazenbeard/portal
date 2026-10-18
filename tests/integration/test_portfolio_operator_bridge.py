@@ -357,9 +357,11 @@ def test_expired_claim_only_lease_reclaims_with_new_fence(tmp_path):
     store = SqliteDispatchAdmissionStore(tmp_path / "operator.sqlite3")
     unresolved = store.unresolved_attempts()
     store.close()
-    assert len(unresolved) == 1
-    assert unresolved[0].fencing_token == 2
-    assert unresolved[0].phase == "ADMITTED"
+    # Refencing retains ownership. Historical NO_EFFECT is an operational
+    # observation, not an authenticated release proof; keep both fences visible.
+    assert [entry.fencing_token for entry in unresolved] == [1, 2]
+    assert all(entry.phase == "ADMITTED" for entry in unresolved)
+    assert unresolved[0].last_reconciliation_outcome == "NO_EFFECT_CONFIRMED"
 
     with sqlite3.connect(tmp_path / "operator.sqlite3") as db:
         reconciled = db.execute(
@@ -439,9 +441,18 @@ def test_claim_recovery_rejects_lease_attempt_divergence(tmp_path):
             """,
             (claim.work_fingerprint,),
         )
+        before = tuple(db.iterdump())
+    db.close()
 
-    with pytest.raises(ValueError, match="lease/attempt holder mismatch"):
+    # New collision validation detects this tampered holder before the older
+    # attempt comparison. Both reject; no repair or new claim is permitted.
+    with pytest.raises(ValueError, match="lease/attempt holder mismatch|collision ownership is missing or stale"):
         claim_bound_plan_subject(**kwargs)
+    db = sqlite3.connect(tmp_path / "operator.sqlite3")
+    try:
+        assert tuple(db.iterdump()) == before
+    finally:
+        db.close()
 
 
 def test_replay_after_live_head_moves_fails_closed(tmp_path):

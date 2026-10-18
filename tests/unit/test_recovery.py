@@ -225,61 +225,37 @@ def test_outcome_unknown_is_restart_visible_and_reverifiable(tmp_path: Path):
     assert verification.terminalization_authorized is True
 
 
-def test_no_effect_reconciliation_atomically_enables_bounded_retry(tmp_path: Path):
+def test_unverified_no_effect_declaration_cannot_enable_retry(tmp_path: Path):
     db = tmp_path / "recovery.db"
     _, fingerprint, budget, admitted = _seed_attempt(db)
 
     journal = SqliteDispatchAdmissionStore(db)
-    next_generation = journal.reconcile_admitted(
-        lineage_id=budget.lineage_id,
-        work_fingerprint_value=fingerprint,
-        fencing_token=admitted.lease.fencing_token,
-        expected_work_generation=admitted.work_generation,
-        lease=admitted.lease,
-        outcome="NO_EFFECT_CONFIRMED",
-        reason="provider idempotency ledger confirms no operation was applied",
-        evidence=("provider-ledger:op-123=ABSENT",),
-        reconciler="provider-reconciler",
-        observed_at=50.0,
-    )
-    assert next_generation == admitted.work_generation + 1
-    assert journal.unresolved_attempts() == ()
-
-    stored = journal.connection.execute(
-        """
-        SELECT status, generation
-        FROM recursive_work_state
-        WHERE lineage_id = ? AND work_fingerprint = ?
-        """,
-        (budget.lineage_id, fingerprint),
-    ).fetchone()
-    assert stored == (WorkUnitStatus.FAILED_RETRYABLE.value, next_generation)
-
-    lease_row = journal.connection.execute(
-        """
-        SELECT holder, fencing_token, expires_at, completed
-        FROM leases WHERE work_fingerprint = ?
-        """,
-        (fingerprint,),
-    ).fetchone()
-    assert lease_row == (None, admitted.lease.fencing_token, 0.0, 0)
-
-    retry = journal.admit(
-        lineage_id=budget.lineage_id,
-        work_fingerprint_value=fingerprint,
-        budget_scope_id=budget.scope_id,
-        expected_budget_generation=admitted.budget_generation,
-        expected_work_generation=next_generation,
-        holder="worker-b",
-        now=51.0,
-        ttl=30.0,
-    )
-    journal.close()
-
-    assert retry.lease.fencing_token == admitted.lease.fencing_token + 1
-    assert retry.retry_consumed == 1
-    assert retry.budget_after.remaining_retries == 0
-    assert retry.budget_after.remaining_backend_jobs == 0
+    # PORTAL's explicit P0 contract supersedes the old test's assumption that
+    # self-authored provider strings can release an unknown admitted attempt.
+    before = tuple(journal.connection.iterdump())
+    try:
+        with pytest.raises(ValueError, match="NO_EFFECT"):
+            journal.reconcile_admitted(
+                lineage_id=budget.lineage_id, work_fingerprint_value=fingerprint,
+                fencing_token=admitted.lease.fencing_token,
+                expected_work_generation=admitted.work_generation, lease=admitted.lease,
+                outcome="NO_EFFECT_CONFIRMED",
+                reason="provider idempotency ledger confirms no operation was applied",
+                evidence=("provider-ledger:op-123=ABSENT",),
+                reconciler="provider-reconciler", observed_at=50.0)
+        assert tuple(journal.connection.iterdump()) == before
+        unresolved = journal.unresolved_attempts()
+        assert len(unresolved) == 1 and unresolved[0].phase == "ADMITTED"
+        with pytest.raises(ValueError):
+            journal.admit(lineage_id=budget.lineage_id, work_fingerprint_value=fingerprint,
+                budget_scope_id=budget.scope_id,
+                expected_budget_generation=admitted.budget_generation,
+                expected_work_generation=admitted.work_generation,
+                holder="worker-b", now=51.0, ttl=30.0)
+        assert tuple(journal.connection.iterdump()) == before
+        assert journal.connection.execute("SELECT work_fingerprint FROM collision_reservations").fetchone() == (fingerprint,)
+    finally:
+        journal.close()
 
 
 def test_effect_confirmed_reconciliation_blocks_backend_retry(tmp_path: Path):
@@ -359,28 +335,32 @@ def test_indeterminate_reconciliation_can_be_refined_but_conclusion_is_immutable
     assert unresolved[0].phase == "ADMITTED"
     assert unresolved[0].last_reconciliation_outcome == "INDETERMINATE"
 
-    next_generation = journal.reconcile_admitted(
-        lineage_id=budget.lineage_id,
-        work_fingerprint_value=fingerprint,
+    before = tuple(journal.connection.iterdump())
+    with pytest.raises(ValueError, match="NO_EFFECT"):
+        journal.reconcile_admitted(
+            lineage_id=budget.lineage_id, work_fingerprint_value=fingerprint,
+            fencing_token=admitted.lease.fencing_token,
+            expected_work_generation=admitted.work_generation, lease=admitted.lease,
+            outcome="NO_EFFECT_CONFIRMED", reason="second provider read confirms no operation",
+            evidence=("provider-ledger:op-123=ABSENT",), reconciler="provider-reconciler", observed_at=51.0)
+    assert tuple(journal.connection.iterdump()) == before
+    assert journal.unresolved_attempts()[0].last_reconciliation_outcome == "INDETERMINATE"
+    # A non-releasing observation still exercises conclusion immutability.
+    journal.reconcile_admitted(
+        lineage_id=budget.lineage_id, work_fingerprint_value=fingerprint,
         fencing_token=admitted.lease.fencing_token,
-        expected_work_generation=admitted.work_generation,
-        lease=admitted.lease,
-        outcome="NO_EFFECT_CONFIRMED",
-        reason="second provider read confirms no operation",
-        evidence=("provider-ledger:op-123=ABSENT",),
-        reconciler="provider-reconciler",
-        observed_at=51.0,
-    )
-    assert next_generation == admitted.work_generation + 1
+        expected_work_generation=admitted.work_generation, lease=admitted.lease,
+        outcome="EFFECT_CONFIRMED", reason="source-only observation; no release",
+        evidence=("untrusted-observation",), reconciler="untrusted-caller", observed_at=51.0)
 
     with pytest.raises(ValueError, match="conclusive execution reconciliation"):
         journal.reconcile_admitted(
             lineage_id=budget.lineage_id,
             work_fingerprint_value=fingerprint,
             fencing_token=admitted.lease.fencing_token,
-            expected_work_generation=next_generation,
+            expected_work_generation=admitted.work_generation,
             lease=admitted.lease,
-            outcome="EFFECT_CONFIRMED",
+            outcome="INDETERMINATE",
             reason="contradictory late assertion",
             evidence=("late-assertion:APPLIED",),
             reconciler="other-reconciler",
@@ -401,7 +381,7 @@ def test_reconciliation_after_result_recording_is_rejected(tmp_path: Path):
         result=_result(fingerprint),
         recorded_at=11.0,
     )
-    with pytest.raises(ValueError, match="invalid after result recording"):
+    with pytest.raises(ValueError, match="invalid after result recording|NO_EFFECT"):
         journal.reconcile_admitted(
             lineage_id=budget.lineage_id,
             work_fingerprint_value=fingerprint,
@@ -417,34 +397,35 @@ def test_reconciliation_after_result_recording_is_rejected(tmp_path: Path):
     journal.close()
 
 
-def test_late_result_cannot_reopen_no_effect_reconciled_attempt(tmp_path: Path):
+def test_rejected_no_effect_declaration_does_not_hide_later_observation(tmp_path: Path):
     db = tmp_path / "recovery.db"
     _, fingerprint, budget, admitted = _seed_attempt(db)
 
     journal = SqliteDispatchAdmissionStore(db)
-    next_generation = journal.reconcile_admitted(
-        lineage_id=budget.lineage_id,
-        work_fingerprint_value=fingerprint,
-        fencing_token=admitted.lease.fencing_token,
-        expected_work_generation=admitted.work_generation,
-        lease=admitted.lease,
-        outcome="NO_EFFECT_CONFIRMED",
-        reason="provider confirms no effect",
-        evidence=("provider-ledger:ABSENT",),
-        reconciler="provider-reconciler",
-        observed_at=50.0,
-    )
-    assert next_generation == admitted.work_generation + 1
-
-    with pytest.raises(ValueError, match="no-effect reconciliation"):
+    before = tuple(journal.connection.iterdump())
+    with pytest.raises(ValueError, match="NO_EFFECT"):
+        journal.reconcile_admitted(
+            lineage_id=budget.lineage_id, work_fingerprint_value=fingerprint,
+            fencing_token=admitted.lease.fencing_token,
+            expected_work_generation=admitted.work_generation, lease=admitted.lease,
+            outcome="NO_EFFECT_CONFIRMED", reason="provider confirms no effect",
+            evidence=("provider-ledger:ABSENT",), reconciler="provider-reconciler", observed_at=50.0)
+    assert tuple(journal.connection.iterdump()) == before
+    try:
+        observed = _result(fingerprint)
         journal.record_result(
             lineage_id=budget.lineage_id,
             work_fingerprint_value=fingerprint,
             fencing_token=admitted.lease.fencing_token,
-            result=_result(fingerprint),
+            result=observed,
             recorded_at=51.0,
         )
-    journal.close()
+        assert journal.load_result(lineage_id=budget.lineage_id,
+            work_fingerprint_value=fingerprint, fencing_token=admitted.lease.fencing_token) == observed
+        assert journal.connection.execute("SELECT work_fingerprint FROM collision_reservations").fetchone() == (fingerprint,)
+        assert journal.connection.execute("SELECT status FROM recursive_work_state").fetchone() == (WorkUnitStatus.CLAIMED.value,)
+    finally:
+        journal.close()
 
 
 def test_late_result_may_resolve_indeterminate_reconciliation(tmp_path: Path):

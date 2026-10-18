@@ -11,6 +11,7 @@ from typing import Any, Collection, Mapping
 from .leases import Lease
 from .models import ExactSubject
 from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from .persistent_state import _validate_collision_ownership, _release_collision_keys, _validate_collision_keys
 
 
 _TERMINAL_STATUSES = frozenset(
@@ -142,6 +143,8 @@ class SqliteRecursiveWorkStore:
             raise ValueError("recursive work lineage id is required")
         if not budget_scope_id.strip():
             raise ValueError("recursive work budget scope id is required")
+
+        _validate_collision_keys(work.collision_keys)
 
         fingerprint = work_unit_fingerprint(work)
         ancestry = frozenset(str(item) for item in ancestry_fingerprints)
@@ -516,6 +519,7 @@ class SqliteRecursiveWorkStore:
                 raise ValueError(
                     "recursive work lease changed during atomic finalization"
                 )
+            _release_collision_keys(self.connection, lease)
 
             work_update = self.connection.execute(
                 """
@@ -585,6 +589,7 @@ def _validate_active_lease_state(
         raise ValueError("active recursive work lease is already completed")
     if now >= float(expires_at):
         raise ValueError("active recursive work lease is expired")
+    _validate_collision_ownership(connection, lease)
 
 
 def _validate_terminal_lease_state(
@@ -703,7 +708,7 @@ def _work_from_payload(
             inputs=subjects,
             operation=str(payload["operation"]),
             required_capabilities=tuple(str(item) for item in payload["required_capabilities"]),
-            collision_keys=tuple(str(item) for item in payload["collision_keys"]),
+            collision_keys=_validate_collision_keys(payload["collision_keys"]),
             recursion_depth=int(payload["recursion_depth"]),
             budget_allocation={str(k): int(v) for k, v in raw_budget.items()},
             expected_outputs=tuple(str(item) for item in payload["expected_outputs"]),

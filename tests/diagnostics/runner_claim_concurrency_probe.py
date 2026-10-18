@@ -1,8 +1,8 @@
 """Disposable, source-bound Runner concurrency probes; never dispatch a backend.
 
-The two collision-contract tests deliberately remain RED: Runner's existing
-fingerprint leases do not provide a global collision-key owner, especially across
-independent SQLite roots. They are not claimed as defects in a promised global ABI.
+The same-root collision assertion is a regression contract for transactional
+key exclusion. The independent-root assertion deliberately remains RED: separate
+SQLite roots have no shared owner. Neither proves authenticated host authority.
 """
 from __future__ import annotations
 
@@ -67,9 +67,12 @@ def seed(db, subject="a", lineage="lineage-a"):
 
 def snapshot(db):
     with closing(sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)) as con:
+        tables = ["recursive_work_state", "lineage_budgets", "leases",
+                  "execution_attempts", "execution_verifications", "execution_reconciliations"]
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='collision_reservations'").fetchone():
+            tables.append("collision_reservations")
         return {table: con.execute("SELECT * FROM " + table + " ORDER BY 1, 2").fetchall()
-                for table in ("recursive_work_state", "lineage_budgets", "leases",
-                              "execution_attempts", "execution_verifications", "execution_reconciliations")}
+                for table in tables}
 
 
 def child_args(db, subject, lineage, holder, *, mode="admit", now=100.0, ready=None, gate=None):
@@ -151,10 +154,10 @@ def distinct_collision_case(tmp_path, independent_roots=False):
     return results
 
 
-def test_distinct_fingerprints_same_key_expose_local_scope(tmp_path):
+def test_distinct_fingerprints_same_key_have_one_local_owner(tmp_path):
     results = distinct_collision_case(tmp_path)
-    assert sum(item["ok"] for item in results) == 2
-    assert len({item["lease"]["work_fingerprint"] for item in results}) == 2
+    assert sum(item["ok"] for item in results) == 1
+    assert all("collision" in item["reason"].lower() for item in results if not item["ok"])
 
 
 def test_independent_roots_expose_unshared_lease_scope(tmp_path):
