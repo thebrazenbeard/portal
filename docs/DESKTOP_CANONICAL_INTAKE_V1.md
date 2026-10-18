@@ -60,6 +60,10 @@ pass the original source/response checks. Persistent denial, other I/O failure,
 or incomplete response yields UNKNOWN without a new ID or dispatch. Once a
 response has been observed, its disappearance cannot become a safe pre-claim
 timeout: original transport evidence and the UI pending ID remain for recovery.
+Generic host errors also remain UNKNOWN: the host can catch an exception after
+Mono opens a task, so `ok=false` cannot prove pre-dispatch rejection. Live and
+cold clients retain the original ID; cold pending retirement requires explicit
+boolean `ok=true` with the matching request and held source response.
 Use `desktop_conversation_history` for fresh Mono source/head evidence. It is
 read-only, labels input untrusted, and never promotes observed model text to
 dialogue, truth, task completion or memory. An operational `COMPLETED` row is

@@ -222,9 +222,10 @@ class FileBridgeClient:
                     if response_path.exists():
                         response = json.loads(response_path.read_text(encoding="utf-8-sig"))
                         result = response.get("result", {})
-                        if response.get("ok") is False:
-                            continue  # Explicit host rejection, not a dispatch retry.
-                        if (response.get("request_id") == request_id
+                        # A generic host error may follow TASK_OPENED. Only
+                        # explicit matching success can retire this pending ID.
+                        if (response.get("ok") is True
+                                and response.get("request_id") == request_id
                                 and _held_intake_matches(result, original)
                                 and result.get("status") != "OUTCOME_UNKNOWN_NO_REDISPATCH"
                                 ):
@@ -334,6 +335,10 @@ class FileBridgeClient:
                         raise BridgeOutcomeUnknownError(f"response identity differs; no redispatch: {request_id}")
                     raise RuntimeError("bridge response request_id mismatch")
                 if response.get("ok") is not True:
+                    if canonical:
+                        raise BridgeOutcomeUnknownError(
+                            f"unverified host outcome; no redispatch: {request_id}"
+                        )
                     raise RuntimeError(
                         str(response.get("error") or "bridge request failed")
                     )

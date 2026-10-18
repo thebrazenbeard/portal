@@ -182,3 +182,49 @@ def test_unsafe_responses_remain_unknown_without_redispatch(held_reply, desktop,
         send(FileBridgeClient(layout["runtime_root"], timeout_seconds=0.03, poll_seconds=0.01))
     assert claim.read_bytes() == original and not list(layout["requests"].iterdir())
     assert len(desktop[0].tasks.events()) == 1 and desktop[1].list_recent() == []
+
+
+def test_host_error_after_task_open_keeps_live_original_pending(held_reply, desktop, monkeypatch):
+    layout, claim, response, _ = held_reply
+    client = FileBridgeClient(layout["runtime_root"])
+    vm = DesktopViewModel(client, conversation_id=payload()["conversation_id"])
+    # The real handler has already opened the canonical task. A generic host
+    # exception does not prove rejection before task opening or any dispatch.
+    _atomic_json(response, {"request_id": claim.stem, "ok": False,
+                            "error": "RuntimeError: source read failed after TASK_OPENED"})
+    original, reply = claim.read_bytes(), response.read_bytes()
+    with pytest.raises(BridgeOutcomeUnknownError, match="no redispatch"):
+        vm.send_message(payload()["task"], request_id=claim.stem)
+    assert vm._pending == (payload()["conversation_id"], claim.stem, payload()["task"])
+    monkeypatch.setattr("portal.desktop_ipc.uuid.uuid4", lambda: pytest.fail("no replacement ID"))
+    with pytest.raises(BridgeOutcomeUnknownError, match="no redispatch"):
+        vm.send_message(payload()["task"])
+    with pytest.raises(BridgeOutcomeUnknownError, match="no replacement"):
+        vm.send_message("changed original source")
+    assert_retained(layout, claim, original, response, reply, desktop)
+
+
+@pytest.mark.parametrize("wire,unknown_status,pending", [
+    ({"ok": False}, False, True),
+    ({"ok": False, "request_id": "foreign-message"}, False, True),
+    ({}, False, True),
+    ({"ok": None}, False, True),
+    ({"ok": "false"}, False, True),
+    ({"ok": 0}, False, True),
+    ({"ok": 1}, False, True),
+    ({"ok": True, "request_id": "foreign-message"}, False, True),
+    ({"ok": True}, True, True),
+    ({"ok": True}, False, False),
+])
+def test_cold_ui_retires_pending_only_for_matching_explicit_success(
+        held_reply, desktop, wire, unknown_status, pending):
+    layout, claim, response, result = held_reply
+    if unknown_status:
+        result = {**result, "status": "OUTCOME_UNKNOWN_NO_REDISPATCH"}
+    _atomic_json(response, {"request_id": claim.stem, "result": result, **wire})
+    original, reply = claim.read_bytes(), response.read_bytes()
+    vm = DesktopViewModel(FileBridgeClient(layout["runtime_root"]),
+                          conversation_id=payload()["conversation_id"])
+    expected = (payload()["conversation_id"], claim.stem, payload()["task"]) if pending else None
+    assert vm._pending == expected
+    assert_retained(layout, claim, original, response, reply, desktop)

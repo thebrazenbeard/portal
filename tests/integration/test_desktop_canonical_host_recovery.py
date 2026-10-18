@@ -13,7 +13,7 @@ pytest.importorskip("vera_core", reason="requires Mono #77 source")
 pytest.importorskip("pre_active", reason="requires pinned Pre-Active source")
 
 from portal.desktop_host import prepare_runtime_layout
-from portal.desktop_ipc import FileBridgeClient
+from portal.desktop_ipc import BridgeOutcomeUnknownError, FileBridgeClient
 from vera_core import QualifiedVeraRuntime, VeraStateDirectory
 
 
@@ -25,7 +25,11 @@ def test_denied_response_client_interruption_and_actual_host_cold_recovery(tmp_p
     _check_host_recovery(tmp_path, interrupt_client=True)
 
 
-def _check_host_recovery(tmp_path, *, interrupt_client=False):
+def test_host_error_after_task_open_remains_unknown_across_cold_restart(tmp_path):
+    _check_host_recovery(tmp_path, fail_after_open=True)
+
+
+def _check_host_recovery(tmp_path, *, interrupt_client=False, fail_after_open=False):
     root = tmp_path / "isolated-host"
     layout = prepare_runtime_layout(root)
     (root / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps({
@@ -53,13 +57,22 @@ socket.create_connection=forbidden
 urllib.request.urlopen=forbidden
 subprocess.run=forbidden
 host.discover_cognition_routes=forbidden
+if sys.argv[3]=="1":
+ original_handle=host.DesktopRuntimeCommandHandler.handle
+ def fail_after_open(self,payload,**kwargs):
+  result=original_handle(self,payload,**kwargs)
+  if payload.get("request_id")=="new-message":
+   raise RuntimeError("injected source failure after TASK_OPENED")
+  return result
+ host.DesktopRuntimeCommandHandler.handle=fail_after_open
 raise SystemExit(host.run_host(root))
 '''
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
     def start():
         witness = root / f"host-process-{uuid4().hex}.json"
-        child = subprocess.Popen([sys.executable, "-B", "-c", program, str(root), str(witness)],
+        child = subprocess.Popen([sys.executable, "-B", "-c", program, str(root), str(witness),
+                                  str(int(fail_after_open))],
                                  env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -129,10 +142,18 @@ raise AssertionError("unreadable response must remain unknown")
             assert "new-message" in json.loads(interrupted.stdout)["error"]
             print(f"client interrupted after UNKNOWN: {json.loads(interrupted.stdout)['pid']}")
         # Reconcile using exactly the original ID; never another host dispatch.
-        fresh = client.request("desktop_cognize", conversation_id="desktop-cold-test",
+        if fail_after_open:
+            with pytest.raises(BridgeOutcomeUnknownError, match="no redispatch"):
+                client.request("desktop_cognize", conversation_id="desktop-cold-test",
                                request_id="new-message", task="Exact second message", source="HUMAN")
-        assert fresh["status"] == "PENDING_NO_ADMITTED_PROVIDER"
-        assert fresh["state"] == "HELD"
+            history = client.request("desktop_conversation_history", conversation_id="desktop-cold-test")
+            fresh = next(row for row in history["items"] if row["message_id"] == "new-message")
+            assert fresh["status"] == "PENDING_NO_ADMITTED_PROVIDER"
+        else:
+            fresh = client.request("desktop_cognize", conversation_id="desktop-cold-test",
+                                   request_id="new-message", task="Exact second message", source="HUMAN")
+            assert fresh["status"] == "PENDING_NO_ADMITTED_PROVIDER"
+            assert fresh["state"] == "HELD"
     finally:
         stop(first_process)
 
@@ -146,6 +167,10 @@ raise AssertionError("unreadable response must remain unknown")
         assert by_message["new-message"]["task_id"] == fresh["task_id"]
         assert all(row["memory_admitted"] is False for row in history["items"])
         assert client.request(**original)["status"] == "OUTCOME_UNKNOWN_NO_REDISPATCH"
+        if fail_after_open:
+            with pytest.raises(BridgeOutcomeUnknownError, match="no redispatch"):
+                client.request("desktop_cognize", conversation_id="desktop-cold-test",
+                               request_id="new-message", task="Exact second message", source="HUMAN")
     finally:
         stop(second_process)
 
