@@ -301,6 +301,8 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
         engine=cognition_engine,
         discover_routes=discover_cognition_routes,
         runtime_status=status,
+        canonical_runtime=vera,
+        source_store=pre_active,
     )
 
     def handle(payload: dict[str, object]) -> dict[str, object]:
@@ -311,6 +313,7 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
             "desktop_discover_routes",
             "desktop_recent_activity",
             "desktop_cognize",
+            "desktop_conversation_history",
         }:
             return handler.handle(payload)
         if command in {"status", "ping"}:
@@ -370,6 +373,7 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
                 last_heartbeat = now
 
             claimed_paths = list(sorted(claimed.glob("*.json")))
+            newly_claimed = set()
             for request_path in sorted(requests.glob("*.json")):
                 try:
                     claimed_path = claim_bridge_request(
@@ -381,9 +385,15 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
                     continue
                 if claimed_path is not None:
                     claimed_paths.append(claimed_path)
+                    newly_claimed.add(claimed_path)
 
             for claimed_path in claimed_paths:
                 request_id = claimed_path.stem
+                # Canonical transport claims/results remain durable, with no
+                # reprocessing of a finished or ambiguous model operation.
+                if (responses / f"{request_id}.json").exists():
+                    continue
+                canonical_request = False
                 try:
                     payload = json.loads(
                         claimed_path.read_text(
@@ -392,12 +402,14 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
                     )
                     if not isinstance(payload, dict):
                         raise ValueError("request payload must be an object")
+                    canonical_request = payload.get("command") == "desktop_cognize"
                     payload_request_id = str(payload["request_id"])
                     if payload_request_id != request_id:
                         raise ValueError(
                             "bridge payload request_id does not match claimed filename"
                         )
-                    result = handle(payload)
+                    result = (handler.handle(payload, outcome_unknown=claimed_path not in newly_claimed)
+                              if canonical_request else handle(payload))
                     response = {
                         "schema": "VERA_UNIFIED_BRIDGE_RESPONSE_V1",
                         "request_id": request_id,
@@ -417,7 +429,8 @@ def _run_host_after_state_claim(runtime_root: Path) -> int:
                         "observed_at": time.time(),
                     }
                 _atomic_json(responses / f"{request_id}.json", response)
-                claimed_path.unlink(missing_ok=True)
+                if not canonical_request:
+                    claimed_path.unlink(missing_ok=True)
             time.sleep(0.1)
     finally:
         try:

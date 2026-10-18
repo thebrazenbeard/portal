@@ -83,7 +83,7 @@ def test_view_model_refresh_reports_runtime_route_and_last_autonomous_activity()
 
 def test_view_model_send_message_uses_ipc_runtime_not_direct_model() -> None:
     client = FakeClient([])
-    vm = DesktopViewModel(client)
+    vm = DesktopViewModel(client, conversation_id="fixture-conversation")
 
     response = vm.send_message(
         "hello",
@@ -98,6 +98,7 @@ def test_view_model_send_message_uses_ipc_runtime_not_direct_model() -> None:
     assert payload["source"] == "HUMAN"
     assert payload["reason"] == "desktop conversation message"
     assert payload["task"] == "hello"
+    assert payload["conversation_id"] == "fixture-conversation"
 
 
 def test_view_model_rejects_empty_message_without_ipc_call() -> None:

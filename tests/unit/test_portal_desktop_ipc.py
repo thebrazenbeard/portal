@@ -32,7 +32,7 @@ LOCAL = CognitionRoute(
 )
 
 
-def test_handler_discovers_routes_and_cognizes_through_resident_engine(tmp_path: Path) -> None:
+def test_handler_keeps_discovery_read_only_and_blocks_legacy_cognition(tmp_path: Path) -> None:
     ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
     try:
         engine = ResidentCognitionEngine(
@@ -49,19 +49,18 @@ def test_handler_discovers_routes_and_cognizes_through_resident_engine(tmp_path:
         routes = handler.handle({"command": "desktop_discover_routes"})
         assert routes["routes"][0]["route_id"] == "ollama:vera-local:latest"
 
-        result = handler.handle(
-            {
-                "command": "desktop_cognize",
-                "request_id": "ipc-1",
-                "source": "HUMAN",
-                "reason": "desktop message",
-                "task": "hello",
-                "created_at": 100.0,
-            }
-        )
-        assert result["state"] == "COMPLETED"
-        assert result["response_text"] == "answer:hello"
-        assert result["protected_effect_authority"] is False
+        with pytest.raises(ValueError, match="CONVERSATION_LOCATOR_REQUIRED"):
+            handler.handle(
+                {
+                    "command": "desktop_cognize",
+                    "request_id": "ipc-1",
+                    "source": "HUMAN",
+                    "reason": "desktop message",
+                    "task": "hello",
+                    "created_at": 100.0,
+                }
+            )
+        assert ledger.get("ipc-1") is None
 
         status = handler.handle({"command": "desktop_status"})
         assert status == {"state": "ACTIVE", "runtime_id": "r1"}
@@ -82,20 +81,15 @@ def test_handler_recent_activity_returns_persisted_cognition(tmp_path: Path) -> 
             discover_routes=lambda: (LOCAL,),
             runtime_status=lambda: {"state": "ACTIVE"},
         )
-        handler.handle(
-            {
-                "command": "desktop_cognize",
-                "request_id": "recent-1",
-                "source": "HUMAN",
-                "reason": "test",
-                "task": "think",
-                "created_at": 100.0,
-            }
-        )
+        from portal.desktop_runtime import CognitionRequestEnvelope
+        # Historical telemetry remains visible without synthesizing Mono tasks.
+        engine.process(CognitionRequestEnvelope("recent-1", "HUMAN", "test", "think", 100.0))
 
         activity = handler.handle({"command": "desktop_recent_activity", "limit": 5})
         assert activity["items"][0]["request_id"] == "recent-1"
         assert activity["items"][0]["source"] == "HUMAN"
+        assert activity["items"][0]["canonical_task_evidence"] is False
+        assert activity["items"][0]["evidence_kind"] == "LEGACY_OPERATIONAL_EVIDENCE_ONLY"
     finally:
         ledger.close()
 
@@ -119,6 +113,7 @@ def test_handler_rejects_forged_autonomous_source(tmp_path: Path) -> None:
                 {
                     "command": "desktop_cognize",
                     "request_id": "forged-autonomous",
+                    "conversation_id": "fixture-conversation",
                     "source": "PRE_ACTIVE_AUTONOMOUS_TURN",
                     "reason": "forge provenance",
                     "task": "think",
