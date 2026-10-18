@@ -222,3 +222,83 @@ print(json.dumps({'pid':os.getpid(),'task_id':task,'task_head':rt.tasks.events(t
     (tmp_path / "external-writer-held-action-lock.json").write_text(json.dumps({
         **receipt, "parent_pid": os.getpid(), "proposal_revalidation": "HOLD",
         "atomic_cross_store_admission": False}), encoding="utf-8")
+
+
+def test_unapproved_mono_source_proposal_is_not_runner_admission(source, tmp_path):
+    """Real Mono delegation may be structurally valid, but its proposal is HOLD."""
+    from runner.budgets import BudgetEnvelope
+    from runner.durable_dispatch import SqliteDispatchAdmissionStore
+
+    proposal = build(source)
+    assert contract().KEY in proposal["work"].payload
+    db = tmp_path / "proposal-must-not-claim.sqlite3"
+    store = SqliteDispatchAdmissionStore(db)
+    try:
+        budget = BudgetEnvelope(
+            lineage_id="unapproved-mono-proposal", max_depth=0, depth=0,
+            remaining_children=0, remaining_active=2,
+            remaining_retries=0, remaining_backend_jobs=2,
+        )
+        assert store.initialize_root(
+            budget=budget, work=proposal["work"], effective_capabilities=("read",)
+        ) == (1, 1)
+
+        def snapshot():
+            names = [row[0] for row in store.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )]
+            return {
+                name: store.connection.execute(
+                    'SELECT * FROM "' + name.replace('"', '""') + '" ORDER BY rowid'
+                ).fetchall()
+                for name in names
+            }
+
+        before = snapshot()
+        with pytest.raises(ValueError, match="unapproved Mono producer"):
+            store.admit(
+                lineage_id=budget.lineage_id,
+                work_fingerprint_value=proposal["fingerprint"],
+                budget_scope_id=budget.scope_id,
+                expected_budget_generation=1,
+                expected_work_generation=1,
+                holder="untrusted-proposal-owner",
+                now=100.0, ttl=20.0,
+            )
+        assert snapshot() == before  # No lease, reservation, attempt, budget or work mutation.
+        assert store.unresolved_attempts() == ()
+    finally:
+        store.close()
+
+
+def test_unmarked_existing_runner_claim_path_stays_available(source, tmp_path):
+    """This guard must not disable the existing legitimate unmarked claim path."""
+    from runner.budgets import BudgetEnvelope
+    from runner.durable_dispatch import SqliteDispatchAdmissionStore
+
+    work = source[3]  # A real pending WorkUnit, without the UNAPPROVED proposal marker.
+    assert contract().KEY not in work.payload
+    db = tmp_path / "unmarked-control.sqlite3"
+    store = SqliteDispatchAdmissionStore(db)
+    try:
+        budget = BudgetEnvelope(
+            lineage_id="unmarked-existing-claim", max_depth=0, depth=0,
+            remaining_children=0, remaining_active=2,
+            remaining_retries=0, remaining_backend_jobs=2,
+        )
+        assert store.initialize_root(
+            budget=budget, work=work, effective_capabilities=("read",)
+        ) == (1, 1)
+        admitted = store.admit(
+            lineage_id=budget.lineage_id,
+            work_fingerprint_value=work_unit_fingerprint(work),
+            budget_scope_id=budget.scope_id,
+            expected_budget_generation=1,
+            expected_work_generation=1,
+            holder="existing-unmarked-owner", now=100.0, ttl=20.0,
+        )
+        assert admitted.lease.holder == "existing-unmarked-owner"
+        assert store.unresolved_attempts()  # A real local claim, NOT an authenticated Mono producer.
+    finally:
+        store.close()
