@@ -403,3 +403,88 @@ def test_running_preflight_rejects_unrelated_or_forged_successors(tmp_path, bad_
 if __name__ == "__main__":
     assert sys.argv[1] == "worker"
     print(json.dumps(worker(*sys.argv[2:])))
+
+
+@pytest.mark.parametrize("terminal_status", [
+    WorkUnitStatus.COMPLETE,
+    WorkUnitStatus.FAILED_DETERMINISTIC,
+    WorkUnitStatus.SUPERSEDED,
+])
+def test_legacy_terminal_admitted_attempt_without_reservation_blocks_overlap(
+    tmp_path, terminal_status,
+):
+    """A historical terminal label cannot erase an admitted unresolved effect."""
+    db = tmp_path / "historical-terminal-attempt.sqlite"
+    a, b = work("a", ("K1", "K2")), work("b", ("K2",))
+    seed(db, a, b)
+    store = SqliteDispatchAdmissionStore(db)
+    try:
+        first = admit(store, a)
+        a_fp = work_unit_fingerprint(a)
+        assert first.lease.fencing_token == 1
+        assert store.connection.execute(
+            "SELECT COUNT(*) FROM execution_attempts WHERE work_fingerprint=?",
+            (a_fp,),
+        ).fetchone() == (1,)
+        # Reconstitute a historical terminal row with a still unresolved
+        # durable attempt and missing old collision reservations. This is
+        # disposable legacy evidence, NOT an authorized cancellation.
+        store.connection.execute(
+            "UPDATE recursive_work_state SET status=? "
+            "WHERE lineage_id=? AND work_fingerprint=?",
+            (terminal_status.value, a.id, a_fp),
+        )
+        store.connection.execute(
+            "DELETE FROM collision_reservations WHERE work_fingerprint=?",
+            (a_fp,),
+        )
+        store.connection.execute(
+            "UPDATE leases SET holder=NULL,expires_at=0 "
+            "WHERE work_fingerprint=?",
+            (a_fp,),
+        )
+
+        def snapshot():
+            names = [r[0] for r in store.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )]
+            return {
+                n: store.connection.execute(
+                    'SELECT * FROM "' + n.replace('"', '""') + '" ORDER BY rowid'
+                ).fetchall()
+                for n in names
+            }
+
+        before = snapshot()
+        with pytest.raises(ValueError, match="collision"):
+            admit(store, b, holder="new-unverified-owner", now=111.)
+        assert snapshot() == before  # No partial lease/key/attempt/budget/work claim.
+    finally:
+        store.close()
+
+
+def test_legacy_terminal_orphan_does_not_block_disjoint_key(tmp_path):
+    """Fail closed only on overlapping historical keys, not every work item."""
+    db = tmp_path / "historical-terminal-disjoint.sqlite"
+    a, b = work("a", ("K1", "K2")), work("b", ("K3",))
+    seed(db, a, b)
+    store = SqliteDispatchAdmissionStore(db)
+    try:
+        first = admit(store, a)
+        a_fp = work_unit_fingerprint(a)
+        assert first.lease.fencing_token == 1
+        store.connection.execute(
+            "UPDATE recursive_work_state SET status='COMPLETE' "
+            "WHERE lineage_id=? AND work_fingerprint=?",
+            (a.id, a_fp),
+        )
+        store.connection.execute(
+            "DELETE FROM collision_reservations WHERE work_fingerprint=?", (a_fp,),
+        )
+        store.connection.execute(
+            "UPDATE leases SET holder=NULL,expires_at=0 WHERE work_fingerprint=?", (a_fp,),
+        )
+        assert admit(store, b, holder="disjoint-control", now=111.).lease.holder == "disjoint-control"
+    finally:
+        store.close()
