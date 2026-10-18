@@ -1,0 +1,907 @@
+{
+  "schema": "MONO_RUNNER_SOURCE_PACKET_NATIVE_EXECUTION_V1",
+  "qualification": "source/disposable Windows processes only; producer ABI and shared collision domain HOLD",
+  "parent": {
+    "thread_id": "01a149be-396d-7ca1-a68d-c58b6696cb08",
+    "native_task_id": "/root",
+    "top_level_workers_created": 0,
+    "new_checkouts_created": 0,
+    "native_capacity_including_parent": 4,
+    "actual_child_count": 4,
+    "schedule": "A/B/C first; after A real return, D reused freed slot; all returns inspected",
+    "id_limit": "Canonical native task IDs are tool-returned IDs; opaque child UUIDs were not exposed and are not invented"
+  },
+  "source_binding": {
+    "portal_base": "f053fe916cc2a9965e134533cb0b5c48b86c8699",
+    "owned_branch": "review/codex-mono-runner-producer-contract-20261018",
+    "portal55_unchanged": "88026ea85c1ebc480396b582cf473df5a30e031e",
+    "portal56": "6183aa7e8ded004054f185f62a0a40a5d55ffb10",
+    "mono77_runtime_overlay": "a351d36274595cde26bc60df4c44c3b83a6d1f0a",
+    "unchanged_other_mono_packages": "89ba1d18da78e7e38f015cf8d8ef4f528aae9df8",
+    "pre_active": "1f23a809d7274df506e03e2d9052525538c3bcf6",
+    "read_only_owner_refs": {
+      "vera_os38": "b388061414b3231ff7cf0caea913683e8b451b0d",
+      "training113": "51bd9749c2bf77b9b2b3f9d94f55a56e3ef29896",
+      "training114": "7ad7088993249c00f718896c371eaa68c9013eb2",
+      "ccb376": "d0f5564df4fc8da5f8a05740ce506a172c91864b",
+      "ccb384": "20ebec6d91419684d646da5deb53597b68c5970a",
+      "ccb385": "472ab3230e75b5e082ca47dec87308aad9d042ff"
+    },
+    "owner_releases_pr57_comments": [
+      6250999506,
+      6251060375,
+      6251075816
+    ],
+    "raw_tested_source_sha256": {
+      "runner/durable_dispatch.py": "2c3f8dcb86f4af514ae09319f9be42499f2d2dd8bdb426fd97830ebe8b87f343",
+      "tests/diagnostics/mono_runner_binding_probe.py": "8c5fdc3722eff10a95d35aaef16df0542b31fe755106afbf9eacb48ddbde9840",
+      "tests/diagnostics/runner_claim_concurrency_probe.py": "060ea26ca9fa079b6490b2b979a2b040c8113407d00fddfc1c856686b8ef2554",
+      "tests/integration/test_adversarial_delegation_contract.py": "dab55ad29823f6d1c593ad239671e9d4e92c63a1d3ed638bc21e8db8814d6296",
+      "tests/integration/test_mono_runner_malformed_evidence.py": "c415ee2f969571f1645eec4ea8656e4fa03b55fcdfb15634bb43c2be43adfca6",
+      "tests/integration/test_mono_runner_producer_contract.py": "71594cfc117286d8f2f09f9e496311c05250d7755ef15657e15b0ff5b95ca8e7",
+      "tests/integration/test_qualified_runtime_cold_composition.py": "d2c42f44e5b0d32200b08f4502c997cba594939e0b9e39a8fbda93c107124b31",
+      "tests/integration/test_runner_claim_clock_domain.py": "46cb1b8d159a9d706e7ce9de2aba7ebbd69cb08e0ebb541402ed65103b11721c",
+      "tests/integration/test_runner_claim_recovery_concurrency.py": "3cc628d1105c0c5f721f16a6b5a7beffb25b562bb417c462c76b0c634af4b683",
+      "tests/proposals/mono_runner_producer_contract.py": "9c0d95cc56e64e920ce336a5d297eafe69c9eced88bd0540a3b22f32f508d8ea"
+    },
+    "byte_note": "Raw checkout hashes; canonical Git LF blobs and remote commit readback are recorded separately after commit. This file deliberately does not assert a self-referential future commit."
+  },
+  "runtime": {
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "executable": "C:\\Users\\patri\\vera-blender-runner\\_work\\_tool\\Python\\3.12.10\\x64\\python.exe",
+    "os": "Windows-11-10.0.26300-SP0",
+    "sqlite": "3.49.1",
+    "full_pytest": "9.0.3",
+    "focused_venv_pytest": "9.1.1",
+    "powershell": "7.6.5",
+    "git": "2.55.0"
+  },
+  "children": [
+    {
+      "actual_native_task_id": "/root/canonical_abi",
+      "scope": "A read-only existing Mono/Runner ABI, scope outputs/multi-agent/a",
+      "state": "completed; actual return received and inspected by parent",
+      "note": "No tests run; actual source review only",
+      "artifacts": [
+        {
+          "path": "outputs/multi-agent/a/canonical-producer-contract-findings.md",
+          "sha256": "24e39b8585011bcef3c9ae8515d7e28a7a6c28599dbd1aa141c9eabdf33e5717"
+        }
+      ],
+      "junit": [],
+      "owner_source_edits": 0,
+      "remote_messages": 0,
+      "vn1_independent": false
+    },
+    {
+      "actual_native_task_id": "/root/durable_claims",
+      "scope": "B actual disposable Runner concurrency/clock tests only, outputs/multi-agent/b",
+      "state": "completed; actual return received and inspected by parent",
+      "note": "Original 5 FAIL = 3 timestamp defects plus 2 unresolved stronger collision contracts; same child later verifies unchanged 51 GREEN",
+      "artifacts": [
+        {
+          "path": "outputs/multi-agent/b/evidence-manifest.json",
+          "sha256": "a3a182e17eff18316eb5812efa8444c7da05b74debefa6a322e8ebaee13bd6a7"
+        },
+        {
+          "path": "outputs/multi-agent/b/README.md",
+          "sha256": "6396a2ff68cdd62c79f9a75cad052b9ab85249349898e14a4c699d52c04a9754"
+        },
+        {
+          "path": "outputs/multi-agent/b/test_runner_concurrency.py",
+          "sha256": "6d21b74e3158eaad349f294f63c545830c09f1dc629b9a31600bda17834c9dd5"
+        },
+        {
+          "path": "outputs/multi-agent/b/clock-domain-manifest.json",
+          "sha256": "7ad52c2edce1288f06dec716b222ff8626a2665f458f5d1b0677dc2c1253fc0d"
+        },
+        {
+          "path": "outputs/multi-agent/b/clock-domain-green-manifest.json",
+          "sha256": "e06e3c1a74369ddfcb2ade04dcaf07d62067c55f50c952af384cd64bc1b10fb7"
+        },
+        {
+          "path": "outputs/multi-agent/b/clock-domain-tests.py",
+          "sha256": "098f7d93cd2f1fe3dedfd6aafca04762c9beb52ef560f218850ae77db5418d4d"
+        }
+      ],
+      "junit": [
+        {
+          "path": "outputs/multi-agent/b/runner-concurrency-expanded-red.xml",
+          "sha256": "1d48857ccc2bec1999b933c5f8e41473139f4ee7acd0ec1953f3f6655c27fb36",
+          "result": {
+            "tests": 14,
+            "passed": 9,
+            "failed": 5,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": [
+            {
+              "test": "outputs.multi-agent.b.test_runner_concurrency::test_explicit_collision_contract_same_database_one_owner",
+              "outcome": "failed",
+              "message": "AssertionError: UNRESOLVED CONTRACT: fingerprint lease does not reserve shared collision_key\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_same_database_one_owner.<locals>.<genexpr> at 0x000001A464518FB0>)"
+            },
+            {
+              "test": "outputs.multi-agent.b.test_runner_concurrency::test_explicit_collision_contract_independent_roots_one_owner",
+              "outcome": "failed",
+              "message": "AssertionError: UNRESOLVED CONTRACT: no shared collision authority across independent roots\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_independent_roots_one_owner.<locals>.<genexpr> at 0x000001A4643BF370>)"
+            },
+            {
+              "test": "outputs.multi-agent.b.test_runner_concurrency::test_simultaneous_expired_claim_recovery_has_one_new_fence",
+              "outcome": "failed",
+              "message": "AssertionError: assert 'active lease' in 'execution attempt journal digest mismatch'"
+            },
+            {
+              "test": "outputs.multi-agent.b.test_runner_concurrency::test_initial_admission_numeric_clock_cold_replay[integer-clock]",
+              "outcome": "failed",
+              "message": "AssertionError: execution attempt journal digest mismatch\nassert False"
+            },
+            {
+              "test": "outputs.multi-agent.b.test_runner_concurrency::test_refenced_admission_numeric_clock_cold_replay[integer-clock]",
+              "outcome": "failed",
+              "message": "AssertionError: execution attempt journal digest mismatch\nassert False"
+            }
+          ]
+        },
+        {
+          "path": "outputs/multi-agent/b/clock-domain-red.xml",
+          "sha256": "9bf4070aa85852554557747658cd1391e6f4767faaed56ba02400341814e9323",
+          "result": {
+            "tests": 51,
+            "passed": 18,
+            "failed": 33,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": [
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-bool-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-bool-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-bool-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-nan-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', \"INSERT INTO leases (\\n                        work_fingerprint, holder, fencing_token, expires_at...        ) VALUES ('3feb1dd4b1958cca5f1161e5c52ac4243978d5b0250ce3923b5bcf52feeea685', 'fixture-original', 1, NULL, 0)\"]"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-nan-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', 'BEGIN IMMEDIATE', \"INSERT INTO leases (\\n                        work_fingerprint, holder, fencin...        ) VALUES ('3feb1dd4b1958cca5f1161e5c52ac4243978d5b0250ce3923b5bcf52feeea685', 'fixture-original', 1, NULL, 0)\"]"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-nan-claimed-recover]",
+              "outcome": "failed",
+              "message": "sqlite3.IntegrityError: NOT NULL constraint failed: execution_reconciliations.observed_at"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inf-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inf-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inf-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inexact-int-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inexact-int-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[now-inexact-int-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-bool-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-bool-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-bool-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-nan-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', \"INSERT INTO leases (\\n                        work_fingerprint, holder, fencing_token, expires_at...        ) VALUES ('3feb1dd4b1958cca5f1161e5c52ac4243978d5b0250ce3923b5bcf52feeea685', 'fixture-original', 1, NULL, 0)\"]"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-nan-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', 'BEGIN IMMEDIATE', \"INSERT INTO leases (\\n                        work_fingerprint, holder, fencin...        ) VALUES ('3feb1dd4b1958cca5f1161e5c52ac4243978d5b0250ce3923b5bcf52feeea685', 'fixture-original', 1, NULL, 0)\"]"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-nan-claimed-recover]",
+              "outcome": "failed",
+              "message": "sqlite3.IntegrityError: NOT NULL constraint failed: leases.expires_at"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inf-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inf-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inf-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-overflow-int-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE']"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-overflow-int-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', 'BEGIN IMMEDIATE']"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-overflow-int-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: clock rejection occurred only after transaction/mutation began\nassert not ['BEGIN IMMEDIATE', 'INSERT INTO execution_reconciliations (\\n                        lineage_id, work_fingerprint, fe...orded\"]\\', \\'portfolio-claim-recovery\\', 111.0, \\'30b00f414fa5b6b98fcee0c2327856610266c5e9c5a4984c764aa27d9399d42d\\')']"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inexact-int-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inexact-int-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[ttl-inexact-int-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-overflow-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-overflow-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-overflow-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-no-progress-admit]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-no-progress-pending-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            },
+            {
+              "test": "outputs.multi-agent.b.clock-domain-tests::test_invalid_clock_domain_rejected_before_mutation[expiry-no-progress-claimed-recover]",
+              "outcome": "failed",
+              "message": "AssertionError: invalid clock domain was admitted\nassert None is not None"
+            }
+          ]
+        },
+        {
+          "path": "outputs/multi-agent/b/clock-domain-green.xml",
+          "sha256": "d62ba2605d8952e2d6876ed2567fa61f1e2eb538852fb6034c2502bc13f14f49",
+          "result": {
+            "tests": 51,
+            "passed": 51,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": []
+        }
+      ],
+      "owner_source_edits": 0,
+      "remote_messages": 0,
+      "vn1_independent": false
+    },
+    {
+      "actual_native_task_id": "/root/cold_composition",
+      "scope": "C actual QualifiedVeraRuntime and cold processes only, outputs/multi-agent/c",
+      "state": "completed; actual return received and inspected by parent",
+      "note": "Initial 5 PASS/1 fixture ERROR preserved separately; explicit Pre-Active close repaired harness",
+      "artifacts": [
+        {
+          "path": "outputs/multi-agent/c/evidence-manifest.json",
+          "sha256": "d62def713fee4b1d8dafaa627577b8360760feda6f12496e922b6c0d0bd262a7"
+        },
+        {
+          "path": "outputs/multi-agent/c/test_qualified_runtime_cold_composition.py",
+          "sha256": "ca57038593f57140174a4cff29365f5abaca33fa0db6c556dc55fcab27cd53e1"
+        },
+        {
+          "path": "outputs/multi-agent/c/reproduce.ps1",
+          "sha256": "a8e611a9dd0f65274dc96f06db4232eed0dbf05df47571120d0f4f7837afff4b"
+        }
+      ],
+      "junit": [
+        {
+          "path": "outputs/multi-agent/c/run-final-junit.xml",
+          "sha256": "689cad0f8b20bebba33136cd578c89129666c60045b10cecf9a0fc925fa437d0",
+          "result": {
+            "tests": 6,
+            "passed": 6,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": []
+        }
+      ],
+      "owner_source_edits": 0,
+      "remote_messages": 0,
+      "vn1_independent": false
+    },
+    {
+      "actual_native_task_id": "/root/adversarial_regression",
+      "scope": "D actual delegation/negative diagnostic tests only, outputs/multi-agent/d",
+      "state": "completed; actual return received and inspected by parent",
+      "note": "20 original = 15 actual Mono + 2 actual Runner + 3 explicitly conceptual public-hash controls; unchanged 17 malformed cases rerun GREEN; original RED observations preserved",
+      "artifacts": [
+        {
+          "path": "outputs/multi-agent/d/evidence-manifest.json",
+          "sha256": "499f089e877c0c2c12d0f40e99282efe6db2b5b7017b49617755321d630cfad2"
+        },
+        {
+          "path": "outputs/multi-agent/d/test_adversarial_delegation_contract.py",
+          "sha256": "f17bdf92c2514f7cae66286877b2930cca5c89241f672876f722042733d44055"
+        },
+        {
+          "path": "outputs/multi-agent/d/commands.ps1",
+          "sha256": "955605cbafa842f68e7e90cbe8464eb2c7cba59adddaa4b6feefe217efbf981d"
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-evidence-manifest.json",
+          "sha256": "56c2619f5d29e4a11ebb36e106840c347c74e9461c2d2d242e01030bc24a93d7"
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-green-evidence-manifest.json",
+          "sha256": "f900b5cdeb6c57e173c029b1d8de4ea796017411eff0d4fc9fa6a1f5e2d484d7"
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-test_probe_inputs.py",
+          "sha256": "5c76d7a47751b841a0990101af96a37e99e76f27d1f711d6969b3804e38d738d"
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-commands.ps1",
+          "sha256": "1559bf7f3d6383f587aa72dbdf49b6783e1c22b8f75a5c0d2a6de066579aaed2"
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-green-commands.ps1",
+          "sha256": "894919f4202c4a98b8b6d33b7df7fd2dbeae2d88f955d50ac238c8cef382357c"
+        }
+      ],
+      "junit": [
+        {
+          "path": "outputs/multi-agent/d/run-2-junit.xml",
+          "sha256": "37b04cf3da6cb487f4c39e96a77fbc87552f89994ba84ad6cebd74d0643b56e6",
+          "result": {
+            "tests": 20,
+            "passed": 20,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": []
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-red-junit.xml",
+          "sha256": "93d45f2febf88e73a387ec075db857cebb497f2d02d5be7502dfed8fe56a239a",
+          "result": {
+            "tests": 17,
+            "passed": 4,
+            "failed": 13,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": [
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[intake-none]",
+              "outcome": "failed",
+              "message": "AttributeError: 'NoneType' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[intake-list]",
+              "outcome": "failed",
+              "message": "AttributeError: 'list' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[intake-text]",
+              "outcome": "failed",
+              "message": "AttributeError: 'str' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[request-none]",
+              "outcome": "failed",
+              "message": "AttributeError: 'NoneType' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[request-list]",
+              "outcome": "failed",
+              "message": "AttributeError: 'list' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[request-text]",
+              "outcome": "failed",
+              "message": "AttributeError: 'str' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[assessment-none]",
+              "outcome": "failed",
+              "message": "AttributeError: 'NoneType' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[assessment-list]",
+              "outcome": "failed",
+              "message": "AttributeError: 'list' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[assessment-text]",
+              "outcome": "failed",
+              "message": "AttributeError: 'str' object has no attribute 'get'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[runner-db-none]",
+              "outcome": "failed",
+              "message": "TypeError: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[runner-db-list]",
+              "outcome": "failed",
+              "message": "TypeError: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'list'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[expected-db-none]",
+              "outcome": "failed",
+              "message": "TypeError: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'NoneType'"
+            },
+            {
+              "test": "outputs.multi-agent.d.malformed-test_probe_inputs::test_malformed_evidence_returns_structured_hold[expected-db-list]",
+              "outcome": "failed",
+              "message": "TypeError: argument should be a str or an os.PathLike object where __fspath__ returns a str, not 'list'"
+            }
+          ]
+        },
+        {
+          "path": "outputs/multi-agent/d/malformed-green-junit.xml",
+          "sha256": "efa19384a2adae81ea122e8164ad048891abe82f139be4fbfd7a13dcb0b90183",
+          "result": {
+            "tests": 17,
+            "passed": 17,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "nonpasses": []
+        }
+      ],
+      "owner_source_edits": 0,
+      "remote_messages": 0,
+      "vn1_independent": false
+    }
+  ],
+  "parent_runs": [
+    {
+      "path": "outputs/multi-agent/parent-red-junit.xml",
+      "sha256": "71977e29f55e9e070a0b4aed9b97b495085aab1bc4370dac545f34e22e4c2caf",
+      "result": {
+        "tests": 5,
+        "passed": 2,
+        "failed": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "outputs.multi-agent.b.test_runner_concurrency::test_simultaneous_expired_claim_recovery_has_one_new_fence",
+          "outcome": "failed",
+          "message": "AssertionError: assert 'active lease' in 'execution attempt journal digest mismatch'"
+        },
+        {
+          "test": "outputs.multi-agent.b.test_runner_concurrency::test_initial_admission_numeric_clock_cold_replay[integer-clock]",
+          "outcome": "failed",
+          "message": "AssertionError: execution attempt journal digest mismatch\nassert False"
+        },
+        {
+          "test": "outputs.multi-agent.b.test_runner_concurrency::test_refenced_admission_numeric_clock_cold_replay[integer-clock]",
+          "outcome": "failed",
+          "message": "AssertionError: execution attempt journal digest mismatch\nassert False"
+        }
+      ]
+    },
+    {
+      "path": "outputs/multi-agent/parent-green-junit.xml",
+      "sha256": "10e54a4b5fd0ee2897fa678ad31268f65012e0ff05d112f145ba2f451a18bf25",
+      "result": {
+        "tests": 5,
+        "passed": 5,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/multi-agent/proposal-red-junit.xml",
+      "sha256": "80667ba02445700b6cd413d52e216750c568e43d7fca08cd82fe660bceb46f02",
+      "result": {
+        "tests": 6,
+        "passed": 0,
+        "failed": 6,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_seals_actual_delegation_and_original_task_before_any_admission",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        },
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_nested_input_detached_but_mutated_proposal_rejected",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        },
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_unrelated_global_advance_does_not_change_task_bound_work_identity",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        },
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_same_task_advance_rejects_even_when_reference_is_still_active",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        },
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_explicit_actor_and_exact_target_scope_cannot_be_substituted",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        },
+        {
+          "test": "tests.integration.test_mono_runner_producer_contract::test_cancellation_invalidates_producer_snapshot",
+          "outcome": "failed",
+          "message": "AssertionError: EXECUTABLE_VALIDATED_DELEGATION_PRODUCER_PROPOSAL_MISSING\nassert False\n +  where False = is_file()\n +    where is_file = WindowsPath('C:/Users/patri/Documents/Codex/2026-10-17/vera-codex-a1-portal-desktop-canonical/work/portal/tests/proposals/mono_runner_producer_contract.py').is_file"
+        }
+      ]
+    },
+    {
+      "path": "outputs/multi-agent/integrated-junit.xml",
+      "sha256": "e20f4054f7ed8dbb9289cf762b5db8d0b591f5a2460f62f49042deceb3cf662d",
+      "result": {
+        "tests": 44,
+        "passed": 44,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/multi-agent/updated-focused-junit.xml",
+      "sha256": "32efb0d8a7ccefe8882e2e7b9e847610c60414d1d8867d3461bf3069942c296e",
+      "result": {
+        "tests": 90,
+        "passed": 90,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/multi-agent/full-junit.xml",
+      "sha256": "e25a2827a23bfb7c01297e1668fa3ad6eb06e255d70cc25560f7df00db8390f7",
+      "result": {
+        "tests": 941,
+        "passed": 939,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 1
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_portal_github_noeffect_host_conformance::test_live_exact_head_holds_without_host_dispatch",
+          "outcome": "skipped",
+          "message": "opt in to authenticated read-only GitHub CLI"
+        },
+        {
+          "test": "tests.integration.test_portal_session_cli::test_session_run_persists_non_secret_resume_envelope",
+          "outcome": "failed",
+          "message": "assert 2 == 0"
+        }
+      ]
+    },
+    {
+      "path": "outputs/multi-agent/collision-gap-junit.xml",
+      "sha256": "142063a825200d476a4df465b9869b4d16141e72ef51c0483d20ccde5dd770c7",
+      "result": {
+        "tests": 2,
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_same_database_one_owner",
+          "outcome": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: fingerprint lease does not reserve shared collision_key\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_same_database_one_owner.<locals>.<genexpr> at 0x000001D6836D42B0>)"
+        },
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_independent_roots_one_owner",
+          "outcome": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: no shared collision authority across independent roots\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_independent_roots_one_owner.<locals>.<genexpr> at 0x000001D6836D4A00>)"
+        }
+      ]
+    },
+    {
+      "path": "outputs/multi-agent/live-readonly-junit.xml",
+      "sha256": "576aca3997e22b2a654d15b8d86979f4fab4e6cf9f73524821906f84abbe64c7",
+      "result": {
+        "tests": 1,
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    }
+  ],
+  "parent_logs": [
+    {
+      "path": "outputs/multi-agent/parent-red.log",
+      "sha256": "db7e6623260e7fad83e7b1779e4f041937e4ce55af913f9a93dcaa55576b7df0"
+    },
+    {
+      "path": "outputs/multi-agent/parent-green.log",
+      "sha256": "f87e5a30c18ce89a85a9552e0279f44c8df40a5d831c194fe138c1ec785a15c6"
+    },
+    {
+      "path": "outputs/multi-agent/proposal-red.log",
+      "sha256": "c1310ee9dd5ea07d9c4d07640acaea730f5fe19d589f0806cb0592be79174461"
+    },
+    {
+      "path": "outputs/multi-agent/integrated.log",
+      "sha256": "12fa0c46663a1ffebfdc5c691a3d118923c5ba815c5b3e4e9e38ce28d8174056"
+    },
+    {
+      "path": "outputs/multi-agent/updated-focused.log",
+      "sha256": "ee494150998ffca369986c407a1c4849e31e52ba3e17b3b40e734b1f322af268"
+    },
+    {
+      "path": "outputs/multi-agent/full.log",
+      "sha256": "1ab92ca425610d509d8b58c1f1c31f20e1f3db7c7b92e62c3beabcd495637fb2"
+    },
+    {
+      "path": "outputs/multi-agent/collision-gap.log",
+      "sha256": "6c26cca46f7eb6f2106f6cea10ecdef58269682edf5ff2805d94aaab0bb42e75"
+    },
+    {
+      "path": "outputs/multi-agent/live-readonly.log",
+      "sha256": "c4a185ed712dc07522150c0ec4c2a97c837fba7b3e99102f08c70bc681e9042d"
+    }
+  ],
+  "commands": {
+    "environment": [
+      "$taskMonoPaths=Get-ChildItem work/vera-mono/packages -Directory | ForEach-Object { Join-Path $_.FullName 'src' } | Where-Object { Test-Path -LiteralPath $_ }",
+      "$env:PYTHONPATH=(@((Resolve-Path work/diagnostic-mono-overlay).Path,(Resolve-Path work/portal).Path,(Resolve-Path work/pre-active/src).Path)+@($taskMonoPaths))-join ';'",
+      "$env:PYTHONDONTWRITEBYTECODE='1'",
+      "$env:TEMP=(Resolve-Path work/test-temp).Path; $env:TMP=$env:TEMP"
+    ],
+    "full_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-full-state --junitxml=outputs/multi-agent/full-junit.xml 2>&1 | Tee-Object outputs/multi-agent/full.log",
+    "explicit_unresolved_contracts_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/diagnostics/runner_claim_concurrency_probe.py -k explicit_collision_contract -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-collision-gap-state --junitxml=outputs/multi-agent/collision-gap-junit.xml 2>&1 | Tee-Object outputs/multi-agent/collision-gap.log",
+    "live_readonly_executed": "$env:PORTAL_TEST_LIVE_GITHUB_NOEFFECT='1'; & 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/integration/test_portal_github_noeffect_host_conformance.py::test_live_exact_head_holds_without_host_dispatch -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-live-readonly-state --junitxml=outputs/multi-agent/live-readonly-junit.xml 2>&1 | Tee-Object outputs/multi-agent/live-readonly.log",
+    "notes": "Commands run from workspace root. New reproductions must use fresh disposable basetemp and output paths. Full run did not set live opt-in; separate opt-in result does not erase its skip. Clock/collision commands need only work/portal on PYTHONPATH. Child exact commands are in the hashed child artifacts."
+  },
+  "child_original_to_integrated": [
+    {
+      "child": "b/test_runner_concurrency.py",
+      "source_sha256": "6d21b74e3158eaad349f294f63c545830c09f1dc629b9a31600bda17834c9dd5",
+      "integrated_path": "tests/diagnostics/runner_claim_concurrency_probe.py",
+      "integrated_sha256": "060ea26ca9fa079b6490b2b979a2b040c8113407d00fddfc1c856686b8ef2554",
+      "changes": "repository-relative paths, explicit optional source qualification, deterministic connection close only"
+    },
+    {
+      "child": "c/test_qualified_runtime_cold_composition.py",
+      "source_sha256": "ca57038593f57140174a4cff29365f5abaca33fa0db6c556dc55fcab27cd53e1",
+      "integrated_path": "tests/integration/test_qualified_runtime_cold_composition.py",
+      "integrated_sha256": "d2c42f44e5b0d32200b08f4502c997cba594939e0b9e39a8fbda93c107124b31",
+      "changes": "repository-relative paths, explicit optional source qualification, deterministic connection close only"
+    },
+    {
+      "child": "d/test_adversarial_delegation_contract.py",
+      "source_sha256": "f17bdf92c2514f7cae66286877b2930cca5c89241f672876f722042733d44055",
+      "integrated_path": "tests/integration/test_adversarial_delegation_contract.py",
+      "integrated_sha256": "dab55ad29823f6d1c593ad239671e9d4e92c63a1d3ed638bc21e8db8814d6296",
+      "changes": "repository-relative paths, explicit optional source qualification, deterministic connection close only"
+    }
+  ],
+  "cold_actual_child_c": {
+    "processes": {
+      "parent": 36540,
+      "cold": [
+        34796,
+        33344
+      ],
+      "interrupted": {
+        "pid": 22060,
+        "outcome_delivered": false
+      },
+      "interrupted_exit": 17,
+      "source_cold": 36084
+    },
+    "canonical_evidence": {
+      "intake": {
+        "conversation_id": "untrusted-source-c",
+        "message_id": "request-A",
+        "opened_head": "be7584065bdf3524c494975d040dbace3e40b008510f512b0d6ec823302abd71",
+        "origin_authenticated": false,
+        "packet_digest": "615f60695cd74e1df57d9e9dd7b9838f93dcfbb46e8351e3fa99498048170fe1",
+        "schema": "VERAOS_LOCAL_TASK_INTAKE_V1",
+        "source_digest": "aa94d261fa01e566974e267b6914414678a05378acdf9af95915742c5d028009",
+        "task_id": "ui-eb816ba14a159216773f3866bb2073d1886b3ac14598fc40ec77f5547889b718",
+        "text": "Read-only source λ original bytes"
+      },
+      "cold_receipt_sha256": "f653d77b1ed1a73a0528ef3e88fe22a61945ae5d4f89baf87b02a3e61069d368",
+      "source_cold_recovery": {
+        "status": "OUTCOME_UNKNOWN_NO_REDISPATCH",
+        "task_id": "ui-eb816ba14a159216773f3866bb2073d1886b3ac14598fc40ec77f5547889b718"
+      },
+      "protected_counts": {
+        "effects\\audit.sqlite": {
+          "events": 0,
+          "meta": 2
+        },
+        "effects\\effects.sqlite": {
+          "effects": 0
+        },
+        "memory\\memory.sqlite": {
+          "meta": 2,
+          "operations": 0,
+          "records": 0
+        },
+        "pc\\execution-bindings.sqlite": {
+          "pc_execution_bindings": 0
+        },
+        "provider\\execution-bindings.sqlite": {
+          "provider_execution_bindings": 0
+        },
+        "source\\mutation-bindings.sqlite": {
+          "source_mutation_bindings": 0
+        },
+        "source\\mutation-outcomes.sqlite": {
+          "source_mutation_outcomes": 0
+        },
+        "source\\verification.sqlite": {
+          "meta": 2,
+          "observations": 0
+        },
+        "trust\\outbound.sqlite": {
+          "authorities": 0,
+          "events": 0,
+          "meta": 2
+        }
+      }
+    }
+  },
+  "cold_actual_child_d": {
+    "pid": 13936,
+    "task_id": "ui-5cc9429db54d33f067afba613af8f60c513f3c3966635e1823d7578376d2333e",
+    "binding": "d02b64f2085559af63802e3240e4dc6ddfac243baad50fd02f3f79067b0b4a2e",
+    "events": 2,
+    "dispatches": 0,
+    "state": "HOLD",
+    "effect": "NO_EFFECT"
+  },
+  "preserved_a1_artifacts": [
+    {
+      "path": "outputs/a1-red-receipt.md",
+      "sha256": "91ed8446b2b8dcb8ef419534ddc43bfaa56902e8a6401bdb15e4a76db8ca40db"
+    },
+    {
+      "path": "outputs/test_desktop_mono_canonical_intake.py",
+      "sha256": "b23fb63d301eeef3d675310c8fe16133cbb5826458aff2b1a21d4f985fabcc2e"
+    },
+    {
+      "path": "outputs/a1-red-tests.patch",
+      "sha256": "eef049edcf04fc41c44da67739c7607ee5ae51d7701951a89a563e34e991fa3c"
+    },
+    {
+      "path": "outputs/a1-red.log",
+      "sha256": "d5be40d2b59530986040a7db7426ab334532da13a97119fa178e1757b148e191"
+    },
+    {
+      "path": "outputs/a1-red-junit.xml",
+      "sha256": "fdf5442a4c9af0ce0209a79241f3695189540efee7dd592052eef27c5e12bb2d"
+    },
+    {
+      "path": "outputs/a1-evidence-manifest.json",
+      "sha256": "05f81937998bc309fa4943185b6b7ee59400763fa0de26a58cc6c61d3d49e0ca"
+    }
+  ],
+  "known_failures": {
+    "baseline": "Unchanged #52 CLI GitHub-discovery exit2; 1 full-suite failure",
+    "unresolved_stronger_contract_reds": [
+      "Different fingerprints sharing one collision key both admit in one root",
+      "Independent roots have no shared authenticated collision owner"
+    ],
+    "domain_tests": "Explicit diagnostic -k explicit_collision_contract: 2 FAIL, 12 deselected. Not XFAIL, not silently blessed; ordinary regression tests assert native local behavior only."
+  },
+  "authority_ceiling": {
+    "production_claims": 0,
+    "provider_model_backend_dispatches": 0,
+    "new_packet_canonical_closeouts": 0,
+    "canonical_memory_admissions": 0,
+    "schema_changes": 0,
+    "migrations": 0,
+    "production_producer_abi_approved": false,
+    "claim_domain_authenticated": false,
+    "new_task_claim_scheduler_services": 0,
+    "receipt": "HOLD / NO_EFFECT; arbitrary offline fixture head and actor label are not authority"
+  },
+  "independent_review": {
+    "vn1": "BLOCKED physical host offline, per Bus368/6251227031; exact frozen successor review requested after push",
+    "source_objections_incorporated": [
+      "finite exact clock domain before SQL",
+      "malformed input structured HOLD",
+      "active ref is not latest TASK head",
+      "actual committed task advance barrier",
+      "copied domain/public hashes are not authenticity"
+    ],
+    "not_substitutes": [
+      "native child tests",
+      "parent tests",
+      "PORTAL host tests",
+      "ChatGPT-container primitive tests"
+    ],
+    "owners_required": [
+      "PORTAL",
+      "Integration",
+      "Training",
+      "VN1"
+    ]
+  }
+}

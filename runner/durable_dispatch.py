@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+import math
 from pathlib import Path
 import sqlite3
 
@@ -131,6 +132,32 @@ def _canonical_json(payload: object) -> str:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _claim_clock(now: float, ttl: float, label: str) -> tuple[float, float]:
+    """Match SQLite REAL before hashing/storage, without rounding an integer.
+
+    This validates representation only; caller time is not host authentication.
+    Reject malformed clocks before beginning any admission/recovery transaction.
+    """
+    normalized = []
+    for value in (now, ttl):
+        if type(value) not in (int, float):
+            raise ValueError(f"{label} clock values must be finite exact numbers")
+        try:
+            number = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise ValueError(f"{label} clock value cannot be stored as REAL") from exc
+        if not math.isfinite(number) or (type(value) is int and int(number) != value):
+            raise ValueError(f"{label} clock value cannot be stored as finite exact REAL")
+        normalized.append(number)
+    now_value, ttl_value = normalized
+    if ttl_value <= 0:
+        raise ValueError(f"{label} ttl must be positive")
+    expiry = now_value + ttl_value
+    if not math.isfinite(expiry) or expiry <= now_value:
+        raise ValueError(f"{label} expiry must be finite and advance current time")
+    return now_value, ttl_value
 
 
 def _attempt_digest(
@@ -346,8 +373,7 @@ class SqliteDispatchAdmissionStore:
             raise ValueError("dispatch budget scope id is required")
         if not holder.strip():
             raise ValueError("dispatch lease holder is required")
-        if ttl <= 0:
-            raise ValueError("dispatch lease ttl must be positive")
+        now, ttl = _claim_clock(now, ttl, "dispatch lease")
 
         try:
             self.connection.execute("BEGIN IMMEDIATE")
@@ -650,8 +676,7 @@ class SqliteDispatchAdmissionStore:
             )
         if not holder.strip():
             raise ValueError("claim-only recovery holder is required")
-        if ttl <= 0:
-            raise ValueError("claim-only recovery ttl must be positive")
+        now, ttl = _claim_clock(now, ttl, "claim-only recovery")
         if budget.scope_id != "root":
             raise ValueError("claim-only recovery requires root budget")
 

@@ -91,6 +91,15 @@ def diagnose(*, ledger, intake, request, assessment, runner_db, expected_runner_
     Mono metadata can never turn this diagnostic's output into an acceptance.
     """
     reasons = {"MONO_WORKUNIT_PRODUCER_ABI_MISSING", "CLAIM_DOMAIN_NOT_AUTHENTICATED"}
+    if type(intake) is not dict:
+        reasons.add("TASK_SOURCE_INVALID")
+        intake = {}
+    if type(request) is not dict:
+        reasons.add("ADVISORY_STALE_OR_INVALID")
+        request = {}
+    if type(assessment) is not dict:
+        reasons.add("ADVISORY_STALE_OR_INVALID")
+        assessment = {}
     report = {"schema": "DIAGNOSTIC_ONLY_MONO_RUNNER_BINDING_V1", "state": "HOLD", "effect": "NO_EFFECT",
         "dispatch_authorized": False, "producer_authenticated": False, "model_calls": 0,
         "dispatches": 0, "runner_writes": 0, "lease_checks": "NOT_VALIDATED",
@@ -124,8 +133,14 @@ def diagnose(*, ledger, intake, request, assessment, runner_db, expected_runner_
     elif claim is None:
         reasons.add("CLAIM_MISSING")
     else:
-        path = Path(runner_db).resolve()
-        if path != Path(expected_runner_db).resolve():
+        try:
+            path = Path(runner_db).resolve()
+            expected_path = Path(expected_runner_db).resolve()
+        except (TypeError, ValueError, OSError):
+            path = expected_path = None
+        if path is None:
+            reasons.add("RUNNER_DB_UNAVAILABLE")
+        elif path != expected_path:
             reasons.add("CLAIM_DOMAIN_MISMATCH")
         # Closed fixtures only. immutable avoids SQLite creating WAL/SHM even
         # for a mode=ro connection to a WAL-mode DB. Never use this as a live
