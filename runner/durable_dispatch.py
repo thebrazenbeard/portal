@@ -448,6 +448,15 @@ class SqliteDispatchAdmissionStore:
             work = _work_from_payload(work_payload, status=current_status)
             if work_unit_fingerprint(work) != work_fingerprint_value:
                 raise ValueError("durable dispatch semantic identity mismatch")
+            # The source-only Mono producer proposal explicitly declares that
+            # it is UNAPPROVED. A public fingerprint and a copied canonical
+            # task/delegation reference cannot promote it into an admitted
+            # Runner claim. This check is inside BEGIN IMMEDIATE and before
+            # any lease, collision, attempt, work or budget state changes.
+            if "UNAPPROVED_MONO_PRODUCER_ASSOCIATION_V1" in work.payload:
+                raise ValueError(
+                    "unapproved Mono producer proposal cannot authorize Runner admission"
+                )
             if not set(work.required_capabilities).issubset(set(capabilities)):
                 raise ValueError(
                     "durable dispatch requirement exceeds capability ceiling"
