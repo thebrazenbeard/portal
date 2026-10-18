@@ -1,4 +1,4 @@
-"""Current Runner guarantees; stronger unresolved domain assertions stay explicit
+"""Current Runner guarantees; unsupported independent-root assertion stays explicit
 in tests/diagnostics/runner_claim_concurrency_probe.py and are run separately.
 """
 import importlib.util
@@ -11,7 +11,7 @@ _probe = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_probe)
 
 test_same_fingerprint_same_database_has_one_admission = _probe.test_same_fingerprint_same_database_has_one_admission
-test_distinct_fingerprints_same_key_expose_local_scope = _probe.test_distinct_fingerprints_same_key_expose_local_scope
+test_distinct_fingerprints_same_key_have_one_local_owner = _probe.test_distinct_fingerprints_same_key_have_one_local_owner
 test_independent_roots_expose_unshared_lease_scope = _probe.test_independent_roots_expose_unshared_lease_scope
 test_same_fingerprint_independent_roots_have_independent_token_one = _probe.test_same_fingerprint_independent_roots_have_independent_token_one
 test_interrupted_uncommitted_admission_rolls_back_on_cold_open = _probe.test_interrupted_uncommitted_admission_rolls_back_on_cold_open

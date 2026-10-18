@@ -1,0 +1,1136 @@
+{
+  "schema": "RUNNER_LOCAL_COLLISION_FENCE_EXECUTION_V1",
+  "parent": {
+    "thread_id": "01a149be-396d-7ca1-a68d-c58b6696cb08",
+    "native_id": "/root",
+    "new_top_level_workers": 0,
+    "new_checkouts": 0,
+    "capacity_including_parent": 4,
+    "actual_new_child_count": 4,
+    "sequence": "Reconciled all prior completed children. Actual A/B/C spawned; A real return freed slot for D. Followups reused same children for P0 and operator correction. All real returns inspected; parent alone integrates/commits.",
+    "id_note": "These canonical IDs were returned by native tools; opaque child UUIDs were not exposed or invented."
+  },
+  "branch": "review/codex-runner-collision-fence-20261018",
+  "base": "f5cded4d883be09ed45a246806f9f65cd20cd779",
+  "native_children": [
+    {
+      "id": "/root/collision_abi",
+      "scope": "Read-only Runner/Mono ABI; outputs/collision-fence/a only",
+      "result": "Actual read-only return; tests NOT RUN",
+      "artifacts": [
+        {
+          "path": "outputs/collision-fence/a/canonical-abi-findings.md",
+          "sha256": "af289b5e46b43acfd828e70249540cf2214c3baa345ec32cfbcbc2d3d0f1ad00"
+        }
+      ]
+    },
+    {
+      "id": "/root/collision_engine",
+      "scope": "Three designated Runner files and new admission test",
+      "result": "Final 94 PASS = 27 own cases + 67 existing unit/operator/queue; no FAIL/SKIP",
+      "artifacts": [
+        {
+          "path": "outputs/collision-fence/b/execution-manifest.json",
+          "sha256": "766f15ef323ecdfda7ec6219c5f1445174119fc292bcdb41fac4a65c1864a44e"
+        }
+      ]
+    },
+    {
+      "id": "/root/collision_recovery",
+      "scope": "New cold test only; no production edits",
+      "result": "Unchanged 9 PASS; 30 workers plus parent; no FAIL/ERROR/SKIP",
+      "artifacts": [
+        {
+          "path": "outputs/collision-fence/c/operator-final-evidence-manifest.json",
+          "sha256": "5c0fcffb96e7e1e6333450619c56cf120e3f9d8ef9a3bd43df7bc2f560626241"
+        }
+      ]
+    },
+    {
+      "id": "/root/collision_adversary",
+      "scope": "New hostile test only; no production edits",
+      "result": "Unchanged strict 40 PASS; four simultaneous process and four actual Mono cases; no FAIL/SKIP",
+      "artifacts": [
+        {
+          "path": "outputs/collision-fence/d/operator-final-manifest.json",
+          "sha256": "17b5c2b4843960191b2fac4e7323ec15c4f4fd0068fbf73f861b87bcba7312bd"
+        },
+        {
+          "path": "outputs/collision-fence/d/strict-execution-manifest.json",
+          "sha256": "409144e3c94ce842a3c759682aa972bf0d7af68704f6d6189ac75e9cacebb0f5"
+        }
+      ]
+    }
+  ],
+  "runtime": {
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "executable": "C:\\Users\\patri\\vera-blender-runner\\_work\\_tool\\Python\\3.12.10\\x64\\python.exe",
+    "sqlite": "3.49.1",
+    "os": "Windows-11-10.0.26300-SP0",
+    "pytest": "9.0.3",
+    "powershell": "7.6.5",
+    "git": "2.55.0"
+  },
+  "raw_tested_sources": {
+    "runner/durable_dispatch.py": "1800dec569a344c409fb91cbfa9666feaafce483306ce6b9f5006997b1ad66f2",
+    "runner/persistent_state.py": "db52e51968f8d52a9c3ec7087a28b5e85489d091da29f00b3a3dc18fe50dffc8",
+    "runner/recursive_state.py": "d04d9d0950388a31c19bd90bdefc5236be725312befaa9a204714cbf3fa3a246",
+    "tests/diagnostics/runner_claim_concurrency_probe.py": "0ef64f48785df4bda4a7735b0e290e5f2c05f77a075f54c051c911a4dff6a3e9",
+    "tests/integration/test_runner_claim_recovery_concurrency.py": "2cbc98a0995b792239697da7c1606caf2d8e29d9e61a29efdd8af411549b3e0a",
+    "tests/integration/test_portfolio_operator_bridge.py": "041d6159cd858c7e0e239ce56a1cfa1c814980bab6aa373f068e5f2f97f02622",
+    "tests/unit/test_recovery.py": "26d1c283b3d6f46a39aae1c33a744b39d9c4dc135ac66c1ee889500f6248dcf2",
+    "tests/integration/test_runner_collision_admission.py": "c28d46507b7dc16758053856a1a43965d199983de220b294ed2eeb9f398fc8e6",
+    "tests/integration/test_runner_collision_cold_recovery.py": "3b261b2b136c623a92213ca428bce189fb383b93a6fb6fc7a31c4134be03a6b7",
+    "tests/integration/test_runner_collision_hostile.py": "1381676e9ce6bad212e16787960d769ebbe17e107a691176db301a939e378e0c"
+  },
+  "source_note": "Raw checkout hashes; remote canonical Git blobs/commit/tree readback is recorded separately after commit, without a self-referential future SHA.",
+  "read_only_source_bindings": {
+    "mono77_initial": "a351d36274595cde26bc60df4c44c3b83a6d1f0a",
+    "mono77_refreshed": "8fd64c97998a8d24943439a96409f2114646905e",
+    "mono_compare": "GitHub compare adds only tests/test_receiver_task_head_external_writer.py blob ae7251243e026eacf711fc1c81663d9d897b7c06; selected production runtime bytes unchanged",
+    "other_mono_packages": "89ba1d18da78e7e38f015cf8d8ef4f528aae9df8",
+    "pre_active": "1f23a809d7274df506e03e2d9052525538c3bcf6",
+    "vera_os38_observed_not_modified": "100886104587b5ee188cd320c5d313dc1a5a9f57",
+    "training115_external_writer_falsifier": "cd7de17a9e97d6d752da90d200a7555a295205c2",
+    "a1_accepted_unchanged": "88026ea85c1ebc480396b582cf473df5a30e031e"
+  },
+  "contract": {
+    "domain": "Processes sharing the same SQLite database file only; path/actor/domain strings authenticate nothing",
+    "table": "collision_reservations(collision_key PRIMARY KEY, work_fingerprint, holder, fencing_token, generation)",
+    "transaction": "All exact keys + existing lease/attempt/work/budget CAS in existing BEGIN IMMEDIATE; no separate authority service",
+    "key_bytes": "Literal exact strings; reject duplicates, empty/edge whitespace, Unicode Cc/Cs; empty tuple declares no keys; no normalization/case/prefix alias",
+    "generation": "Retained tombstone increments on acquisition/refence across fingerprints; original active replay unchanged",
+    "p0": "ALL public NO_EFFECT_CONFIRMED reject before BEGIN. No independently authenticated verifier selected. Old public digests never release or hide admitted attempts.",
+    "release_limit": "ADMITTED work retains collision ownership even after terminal journal labels. Only an existing local fenced cancellation without an execution attempt demonstrates positive key transfer here.",
+    "pre_dispatch": "Current lease/all keys + original attempt identity and exact CLAIMED or its RUNNING generation+1. No atomic external-effect guarantee.",
+    "remaining": [
+      "Independent roots share no exclusion authority: explicit stronger assertion remains RED/HOLD",
+      "No authenticated immutable Mono producer/issuer/domain or cross-store atomic admission",
+      "No selected independent verifier to release an admitted effect; conservative liveness HOLD remains"
+    ]
+  },
+  "policy_test_amendments": [
+    "Original 7 PASS/3 FAIL recovery audit retained. Three prior tests assumed self-authored provider strings granted retry; explicit PORTAL P0 now requires unchanged state and blocked retry, preserving nonrelease conclusion immutability.",
+    "Original collected same-root expectation of two owners strengthened to one; original stronger same-root assertion unchanged. Independent-root assertion unchanged.",
+    "Refenced historical NO_EFFECT remains visible alongside current fence; tampered-holder error may occur at stronger collision validator first, with full database equality asserted.",
+    "First whole run 995 PASS/17 FAIL/1 SKIP retained. Fourteen true operator regressions fixed in source by recognizing existing exact RUNNING CAS; no original operator/queue positive assertion relaxed."
+  ],
+  "junit_runs": [
+    {
+      "path": "outputs/collision-fence/b/cold-fake-red-junit.xml",
+      "sha256": "769a851a46cb2d77e6e823e71bf4b12be2580c1ee01e3a224c2674234241436d",
+      "tests": 2,
+      "counts": {
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_cold_forged_historical_no_effect_is_not_release_authority[False]",
+          "state": "failed",
+          "message": "AssertionError: public forged NO_EFFECT released another fingerprint's collision key\nassert not True"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_cold_forged_historical_no_effect_is_not_release_authority[True]",
+          "state": "failed",
+          "message": "AssertionError: public forged NO_EFFECT released another fingerprint's collision key\nassert not True"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/fake-no-effect-green-junit.xml",
+      "sha256": "1229c2b680145ba97e6d2ba44ccd0e9564c660fa6da4c94864e6690ea0bccae1",
+      "tests": 3,
+      "counts": {
+        "passed": 3,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/fake-no-effect-red-junit.xml",
+      "sha256": "e7662b2b2f00c403476f59bb74a77d9c36b8c183bcb0fe04f78596e4befbba18",
+      "tests": 2,
+      "counts": {
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_running_claim_no_effect_strings_cannot_release_shared_key[False]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_running_claim_no_effect_strings_cannot_release_shared_key[True]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-2-junit.xml",
+      "sha256": "eb3accbe646bfbe54fd890f70a70085190833d885b09bb9558d8f81f4a7d8610",
+      "tests": 49,
+      "counts": {
+        "passed": 49,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-3-junit.xml",
+      "sha256": "f1ac00d87365df99d4b40d9d2b6aaa0e047af44cec216356dec39ea77f04685b",
+      "tests": 49,
+      "counts": {
+        "passed": 49,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-4-junit.xml",
+      "sha256": "e834c795a92f5389678791e07b751c79b91719baee7df3ed5f43a31bf8161af6",
+      "tests": 51,
+      "counts": {
+        "passed": 51,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-junit.xml",
+      "sha256": "da69970dcd1bc2ca6a5524cc149710adf80e984c86ee445192411d6df3dbfe40",
+      "tests": 47,
+      "counts": {
+        "passed": 47,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/green-junit.xml",
+      "sha256": "127676f522a7c24cae0d9533212d6568c0e7d468ceed3da07bf7cb5f6b93bc21",
+      "tests": 44,
+      "counts": {
+        "passed": 44,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/legacy-red-junit.xml",
+      "sha256": "a106615031be53bd963e15b1b0b63aaf0d295842b2c332694703917a013ce92b",
+      "tests": 2,
+      "counts": {
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_legacy_released_lease_without_reconciliation_stays_held[True]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_legacy_released_lease_without_reconciliation_stays_held[False]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/older-unknown-red-junit.xml",
+      "sha256": "817a9219d5997c6c21b16c8307b7acc897630b275edbe1e70fc808c7e14b1441",
+      "tests": 2,
+      "counts": {
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_later_no_effect_cannot_launder_older_unresolved_attempt[True]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_later_no_effect_cannot_launder_older_unresolved_attempt[False]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/operator-green-junit.xml",
+      "sha256": "20d13e89b3fd30bf8bfee21705e40cc1f78555bd75c63bcb15498f7178df810e",
+      "tests": 94,
+      "counts": {
+        "passed": 94,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/operator-red-junit.xml",
+      "sha256": "8b5583eb0cf668402a9c34dfd6fc8372476d852cac1a858f2abb4c4bb64503e8",
+      "tests": 5,
+      "counts": {
+        "passed": 3,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_actual_running_successor_accepts_original_admission",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_running_preflight_rejects_unrelated_or_forged_successors[budget]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/p0-final-green-junit.xml",
+      "sha256": "7cab40089aad68e93cd20b0e0f6bb24f10d1d2311c322fdeae1f0d820fd8107b",
+      "tests": 55,
+      "counts": {
+        "passed": 55,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/p0-green-junit.xml",
+      "sha256": "03c9687238c7ac912c2f9d4540bad26ea357f4276b4a7a56b9e81df3e7358879",
+      "tests": 53,
+      "counts": {
+        "passed": 53,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/red-junit.xml",
+      "sha256": "cb44dd66e042c08c2f3c78ad980cdc89216dac7a75a627c1da94965d16dee393",
+      "tests": 9,
+      "counts": {
+        "passed": 1,
+        "failed": 8,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_separate_process_different_fingerprints_one_shared_key",
+          "state": "failed",
+          "message": "assert 2 == 1\n +  where 2 = sum(<generator object test_separate_process_different_fingerprints_one_shared_key.<locals>.<genexpr> at 0x000001F77D640D40>)"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_expiry_alone_does_not_release_collision_owner",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys0]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys1]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys2]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys3]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys4]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_invalid_keys_rejected_before_state_write[keys5]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-final-green-junit.xml",
+      "sha256": "bdef2fbd9456ab3054c6021a33b1fab32ec2f5ac04bca896d0dc7d3cbf82e4e3",
+      "tests": 57,
+      "counts": {
+        "passed": 57,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-green-junit.xml",
+      "sha256": "33d1faa96f42f0da9cd772a96a284b00b3e85e9cd4f91a98fbbe1a7f86f7262d",
+      "tests": 57,
+      "counts": {
+        "passed": 57,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-red-junit.xml",
+      "sha256": "33bf6da3299bcec1d080141037ccec42b69409f1c210a2498e7553a00fe22d74",
+      "tests": 4,
+      "counts": {
+        "passed": 1,
+        "failed": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_cold_forged_historical_no_effect_is_not_release_authority[executable]",
+          "state": "failed",
+          "message": "AssertionError: an unauthenticated public NO_EFFECT must remain visibly unresolved\nassert 0 == 1\n +  where 0 = len(())"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_cold_forged_historical_no_effect_is_not_release_authority[claim_only]",
+          "state": "failed",
+          "message": "AssertionError: an unauthenticated public NO_EFFECT must remain visibly unresolved\nassert 0 == 1\n +  where 0 = len(())"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_admission::test_public_claim_only_no_effect_has_no_selected_verifier",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/c/green-initial-junit.xml",
+      "sha256": "906f6ed03631cb7d10a827db749af782dfb3ccd323a9b2533c9e640d245d48ea",
+      "tests": 9,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/c/green-junit.xml",
+      "sha256": "5f3ab3945432b38d414fb3b569f8a76ff53a3328419fcb0b24f7bdab0306b5ed",
+      "tests": 9,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/c/operator-final-junit.xml",
+      "sha256": "8dca71caa3b77253a25d0c1cdd0422a747e37fd55af54576e282747088102020",
+      "tests": 9,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/c/red-junit.xml",
+      "sha256": "e5f90afe9aeddd91a43f77846a70d39933fcb1e434cf5059127ae4ecadc00a20",
+      "tests": 8,
+      "counts": {
+        "passed": 1,
+        "failed": 7,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_cold_distinct_fingerprints_one_shared_collision_owner",
+          "state": "failed",
+          "message": "AssertionError: different WorkUnit fingerprints must share collision-key exclusion\nassert 2 == 1\n +  where 2 = sum(<generator object test_cold_distinct_fingerprints_one_shared_collision_owner.<locals>.<genexpr> at 0x000001AAE0318930>)"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_crash_before_commit_rolls_back_all_reservations_and_budget[partial-reservations]",
+          "state": "failed",
+          "message": "AssertionError: {'expected': 73, 'pid': 192, 'returncode': 0, 'stderr': '', ...}\nassert 0 == 73\n +  where 0 = <Popen: returncode: 0 args: ['C:\\\\Users\\\\patri\\\\vera-blender-runner\\\\_work\\\\...>.returncode"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_crash_after_commit_cold_replay_preserves_original_attempt",
+          "state": "failed",
+          "message": "AssertionError: lost response must not free the committed shared collision domain\nassert not True"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_claim_only_expired_refence_and_stale_tokens_are_cold_fenced",
+          "state": "failed",
+          "message": "assert not True"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_crash_during_expired_refence_rolls_back_original_domain",
+          "state": "failed",
+          "message": "assert not True"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_simultaneous_cold_refence_has_one_new_owner",
+          "state": "failed",
+          "message": "assert not True"
+        },
+        {
+          "test": "tests.integration.test_runner_collision_cold_recovery::test_unknown_attempt_retains_collision_after_expiry_and_cold_restart",
+          "state": "failed",
+          "message": "AssertionError: lease expiry is not proof that an unknown attempt had no effects\nassert not True"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/c/strict-green-junit.xml",
+      "sha256": "60b4a2c9aa9d798b99524d2d51550ea529dd55bdac2d76333c6c0eec88852928",
+      "tests": 9,
+      "counts": {
+        "passed": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/final-junit.xml",
+      "sha256": "59b5e575b080c8bfc9f0242a5395126c0a3d432ed5ed16b4c5ad67d06976ba09",
+      "tests": 37,
+      "counts": {
+        "passed": 37,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/final-v2-junit.xml",
+      "sha256": "b762405e00506aaf8751124df4f9c0ff75c6a43118400d70c7aa2f5fc7c37ae2",
+      "tests": 37,
+      "counts": {
+        "passed": 37,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/initial-junit.xml",
+      "sha256": "8293275f755327fcaf7580a3b65d4608160243fc903a32308d62ce741be22867",
+      "tests": 25,
+      "counts": {
+        "passed": 24,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_hostile::test_stale_admission_is_rejected_before_backend_boundary",
+          "state": "failed",
+          "message": "ValueError: claim-only recovery requires execution_authority=false"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/d/operator-final-junit.xml",
+      "sha256": "af100e435b03713f6f5c50c1d26c4b08f3bfbdf7f76034047848ea24047aa54b",
+      "tests": 40,
+      "counts": {
+        "passed": 40,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/p0-green-junit.xml",
+      "sha256": "029766d1581a74bad80e81c920d4423aeb27ec80803ab1bccd6a75bc18839255",
+      "tests": 39,
+      "counts": {
+        "passed": 39,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/p0-red-junit.xml",
+      "sha256": "b9ab8160b4bd588307fc54f668228a3d5f396ad0fc26654839002d72ddb840ff",
+      "tests": 2,
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_hostile::test_public_no_effect_strings_cannot_release_executable_multikey_attempt[CLAIMED]",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/d/strict-green-junit.xml",
+      "sha256": "21a0dc3563454714623f76a3ff31ac06be47fd0f126d47f4bc2b6fe281dd9e1d",
+      "tests": 40,
+      "counts": {
+        "passed": 40,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/d/strict-red-junit.xml",
+      "sha256": "f161f039071973a82431f1b74761946117e5e14fae53aaac4a6df2c5aac5ad9e",
+      "tests": 1,
+      "counts": {
+        "passed": 0,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_runner_collision_hostile::test_public_no_effect_strings_cannot_release_claim_only_false_flags",
+          "state": "failed",
+          "message": "Failed: DID NOT RAISE <class 'ValueError'>"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/final-contract-junit.xml",
+      "sha256": "5c8bde1b6412e16e8fc1306916f3435b9c0648e091ba75b2dd56809c8c49d911",
+      "tests": 2,
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_independent_roots_one_owner",
+          "state": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: no shared collision authority across independent roots\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_independent_roots_one_owner.<locals>.<genexpr> at 0x0000019838E48A00>)"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/final-full-junit.xml",
+      "sha256": "99a42f03c15d0b1edb35b0a64e16359a6372967bf25fb2e475ee418fa6611c45",
+      "tests": 1018,
+      "counts": {
+        "passed": 1016,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 1
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_portal_github_noeffect_host_conformance::test_live_exact_head_holds_without_host_dispatch",
+          "state": "skipped",
+          "message": "opt in to authenticated read-only GitHub CLI"
+        },
+        {
+          "test": "tests.integration.test_portal_session_cli::test_session_run_persists_non_secret_resume_envelope",
+          "state": "failed",
+          "message": "assert 2 == 0"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/full-junit.xml",
+      "sha256": "acfe92caaec4510e9778c45c44367b3c0f8ade71daa45be3c314806fef687490",
+      "tests": 1013,
+      "counts": {
+        "passed": 995,
+        "failed": 17,
+        "errors": 0,
+        "skipped": 1
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_cli::test_cli_portfolio_to_queue_consumption_round_trip",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.integration.test_portal_github_noeffect_host_conformance::test_live_exact_head_holds_without_host_dispatch",
+          "state": "skipped",
+          "message": "opt in to authenticated read-only GitHub CLI"
+        },
+        {
+          "test": "tests.integration.test_portal_runtime::test_run_once_executes_independent_ready_work_across_node_slots",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.integration.test_portal_runtime::test_run_once_is_bounded_by_node_capacity",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.integration.test_portal_runtime::test_continuous_run_refills_lane_until_portfolio_is_idle",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.integration.test_portal_session_cli::test_session_run_persists_non_secret_resume_envelope",
+          "state": "failed",
+          "message": "assert 2 == 0"
+        },
+        {
+          "test": "tests.integration.test_portfolio_operator_bridge::test_expired_claim_only_lease_reclaims_with_new_fence",
+          "state": "failed",
+          "message": "AssertionError: assert 2 == 1\n +  where 2 = len((DurableExecutionJournalEntry(lineage_id='portfolio-plan:aafd9bac2c620cc25638527ce99892a03b86d655f60dea04713e8c2fd3ef0...ication_status=None, last_verification_reason=None, last_reconciliation_outcome=None, last_reconciliation_reason=None)))"
+        },
+        {
+          "test": "tests.integration.test_portfolio_operator_bridge::test_claim_recovery_rejects_lease_attempt_divergence",
+          "state": "failed",
+          "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'lease/attempt holder mismatch'\n  Actual message: 'collision ownership is missing or stale'"
+        },
+        {
+          "test": "tests.unit.test_operator::test_durable_operator_executes_real_read_route_and_finalizes",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_operator::test_durable_operator_fails_closed_when_exact_target_moved",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_operator::test_durable_operator_does_not_silently_restart_existing_lineage",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_queue_consumer_executes_declared_target_and_completes",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_queue_consumer_uses_declared_nondefault_ref",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_unchanged_newer_snapshot_does_not_erase_pending_queue_work",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_newer_provider_subject_supersedes_old_unclaimed_queue_candidate",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_reclaimed_queue_reconciles_terminal_operator_without_reexecution",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_ambiguous_old_claim_blocks_newer_colliding_frontier",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        },
+        {
+          "test": "tests.unit.test_queue_consumer::test_failed_retryable_on_older_snapshot_is_recovered_into_latest_queue",
+          "state": "failed",
+          "message": "ValueError: dispatch admission work generation or status is stale"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/live-observation-junit.xml",
+      "sha256": "86986601d8a595bdd750c8a3f29e1812caf1d3fea574d95890b66aa2c9c2e587",
+      "tests": 1,
+      "counts": {
+        "passed": 1,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/parent-contract-junit.xml",
+      "sha256": "90741e8c17310ae4a0f226d749278c43d1f18fa670d1d29f14b1491310d10970",
+      "tests": 2,
+      "counts": {
+        "passed": 1,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_independent_roots_one_owner",
+          "state": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: no shared collision authority across independent roots\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_independent_roots_one_owner.<locals>.<genexpr> at 0x00000129C79F0A00>)"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/parent-red-junit.xml",
+      "sha256": "3f3f5ebe899c578c1283ce7ced66dca8ca8fa61473a7278c45fed2f9fffa174b",
+      "tests": 2,
+      "counts": {
+        "passed": 0,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_same_database_one_owner",
+          "state": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: fingerprint lease does not reserve shared collision_key\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_same_database_one_owner.<locals>.<genexpr> at 0x000002BCEF35C380>)"
+        },
+        {
+          "test": "tests.diagnostics.runner_claim_concurrency_probe::test_explicit_collision_contract_independent_roots_one_owner",
+          "state": "failed",
+          "message": "AssertionError: UNRESOLVED CONTRACT: no shared collision authority across independent roots\nassert 2 == 1\n +  where 2 = sum(<generator object test_explicit_collision_contract_independent_roots_one_owner.<locals>.<genexpr> at 0x000002BCEF35D3C0>)"
+        }
+      ]
+    },
+    {
+      "path": "outputs/collision-fence/policy-integration-junit.xml",
+      "sha256": "c6a40786f406de0fbd582d0ade7b7858c11d16e409b1ecd913c6c3f29a4c959b",
+      "tests": 25,
+      "counts": {
+        "passed": 25,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/collision-fence/recovery-policy-junit.xml",
+      "sha256": "40a6fc0b3071105db019371faa81abf6c11c008a82b2ae24e75d5d6a36920011",
+      "tests": 10,
+      "counts": {
+        "passed": 7,
+        "failed": 3,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": [
+        {
+          "test": "tests.unit.test_recovery::test_no_effect_reconciliation_atomically_enables_bounded_retry",
+          "state": "failed",
+          "message": "ValueError: NO_EFFECT release requires unobserved execution-forbidden claim-only work; unsupported outcomes remain held"
+        },
+        {
+          "test": "tests.unit.test_recovery::test_indeterminate_reconciliation_can_be_refined_but_conclusion_is_immutable",
+          "state": "failed",
+          "message": "ValueError: NO_EFFECT release requires unobserved execution-forbidden claim-only work; unsupported outcomes remain held"
+        },
+        {
+          "test": "tests.unit.test_recovery::test_late_result_cannot_reopen_no_effect_reconciled_attempt",
+          "state": "failed",
+          "message": "ValueError: NO_EFFECT release requires unobserved execution-forbidden claim-only work; unsupported outcomes remain held"
+        }
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "path": "outputs/collision-fence/b/cold-fake-red.log",
+      "sha256": "8c109b887ab4bc743b43cd62166edf434a082e3df5fb6632ea547ac78eb5b6ff"
+    },
+    {
+      "path": "outputs/collision-fence/b/fake-no-effect-green.log",
+      "sha256": "0e61b35f6abaae8e5cab5aa4408c3278b0222ad6e245a0f95c91f739c3d5c5ed"
+    },
+    {
+      "path": "outputs/collision-fence/b/fake-no-effect-red.log",
+      "sha256": "7f1b2a32587af3b050c7d60c4907236f33fe0ea6f2690ce82102dc0c3a016f74"
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-2.log",
+      "sha256": "1b96eb77cacb93571b9b21014f51e0b3a959c11487ae04a27f6dabfc8397410d"
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-3.log",
+      "sha256": "859606f6571d6328a4bc1741c21521b8b40e65c875f803637cea8320218c5ece"
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final-4.log",
+      "sha256": "3c8322a4fc8e4651d3c9860631470af5cfc559ab2d2cf235c59e9a2d196258c6"
+    },
+    {
+      "path": "outputs/collision-fence/b/green-final.log",
+      "sha256": "5f30de3f8ea3eaa4c1da4d9a77a72ca7cb22a145ce65301748881538b949ea98"
+    },
+    {
+      "path": "outputs/collision-fence/b/green.log",
+      "sha256": "1847328c345b32742c23d4129c73b1a632d0e674908293a8c4d3b7694f922484"
+    },
+    {
+      "path": "outputs/collision-fence/b/legacy-red.log",
+      "sha256": "2fd0fb55b872395bae88bb0269ebe7f87b6876ef2b796ba75407f5bf6117541c"
+    },
+    {
+      "path": "outputs/collision-fence/b/older-unknown-red.log",
+      "sha256": "d2b0b078e83ba61e519a476974e84a5ece360a2fbece6b779c7fd674ccc82fc4"
+    },
+    {
+      "path": "outputs/collision-fence/b/operator-green.log",
+      "sha256": "4d0af0c3a8fe2debbd56c0418cded9ca441c639b9fce99afb08a31767657964c"
+    },
+    {
+      "path": "outputs/collision-fence/b/operator-red.log",
+      "sha256": "9a8ae573377845f7a9991ce2b3f01daa0813b1b3dd3cc6f6b27919e5bce28f3d"
+    },
+    {
+      "path": "outputs/collision-fence/b/p0-final-green.log",
+      "sha256": "d3b6bb9984cd99e37c2bca8dc3b8ad32c7d6a31b8631d7ea7a2097e4f34e3459"
+    },
+    {
+      "path": "outputs/collision-fence/b/p0-green.log",
+      "sha256": "45b2dd9bfec05df1e3ce465f240365a77b64839bebfce1c392a825adba882dab"
+    },
+    {
+      "path": "outputs/collision-fence/b/red.log",
+      "sha256": "5f41c55a485647cfef3b250f89a9cb7a61b1581fd0c6b535f01347aa87044f44"
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-final-green.log",
+      "sha256": "95a28dd1b952a2b64bcac9f8660984093622c7a5d2c7b511cdcd18da103b37ed"
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-green.log",
+      "sha256": "8ef26fbd67340989f2fcabdb07b23207d2ea4dc9f2e7e5a81eef62ddfb3b8887"
+    },
+    {
+      "path": "outputs/collision-fence/b/strict-red.log",
+      "sha256": "5670506378a174478bdf9935c88d06756eb1afa2eaca773b523683581e82ce64"
+    },
+    {
+      "path": "outputs/collision-fence/c/green-initial.log",
+      "sha256": "482b0e19aa977be44293b035aae5acfe8d75a982e7fcd3d1208cea1cb9d7dd73"
+    },
+    {
+      "path": "outputs/collision-fence/c/green.log",
+      "sha256": "05964a1a0c424c12af640c9cd6627a8a9c056f8e4b09f399f1b0a5da6c8f884c"
+    },
+    {
+      "path": "outputs/collision-fence/c/operator-final.log",
+      "sha256": "f1f4747f428ce3764d71c710ac00f9cd743e7d449eac0372b81af9b6c9622164"
+    },
+    {
+      "path": "outputs/collision-fence/c/red.log",
+      "sha256": "83ebf84f1d1dc39345523ccc4738a4e70b37a9b321faedef7a82190c48123e28"
+    },
+    {
+      "path": "outputs/collision-fence/c/strict-green.log",
+      "sha256": "1020bf1579556749f58dd741226515eb5e690e0a89f0fc97bbdf02d77ffe76b7"
+    },
+    {
+      "path": "outputs/collision-fence/d/final-v2.log",
+      "sha256": "86eb4d2383c8974c179cdd716945b0004d1de675257f82e5503254c787ad1ed4"
+    },
+    {
+      "path": "outputs/collision-fence/d/final.log",
+      "sha256": "96a0fa0968030b020a5c2abf3faef5a1f3f686458685ac66aa4993f51aec36da"
+    },
+    {
+      "path": "outputs/collision-fence/d/initial.log",
+      "sha256": "616e734c0a130d8896960a5bd4f5f8024d745e059feccc4248a6dce19835f894"
+    },
+    {
+      "path": "outputs/collision-fence/d/operator-final.log",
+      "sha256": "59b414263366dac6115f7217e04c3b7a148fcb55bc936dcad76e46f79ad4759f"
+    },
+    {
+      "path": "outputs/collision-fence/d/p0-green.log",
+      "sha256": "c4f7cffce44921ea1d2c92f0dd65fc2c1ebbf914f07e3c12de7da6a5e34bd09c"
+    },
+    {
+      "path": "outputs/collision-fence/d/p0-red.log",
+      "sha256": "81de3b9bca85b34beee0919ad8aefe8898e7df83260d22d415f4d16c17e7ce33"
+    },
+    {
+      "path": "outputs/collision-fence/d/strict-green.log",
+      "sha256": "0b69575952e224ccf19eb3deba10f5a1085acb8dc9f50ba5c4dfb8fbcc76d0ae"
+    },
+    {
+      "path": "outputs/collision-fence/d/strict-red.log",
+      "sha256": "a056a58f2dfa7f969d28660de9c3b3de74c5e6c970afe0f538381299f416881b"
+    },
+    {
+      "path": "outputs/collision-fence/final-contract.log",
+      "sha256": "581205e73f262d24561d15c59e6f1abb225417dfe93b25e45c5524ccd86ac18d"
+    },
+    {
+      "path": "outputs/collision-fence/final-full.log",
+      "sha256": "4625109e376558dbff42fe3397dc416c9af13ed443f5df53db09d2dc23910ca3"
+    },
+    {
+      "path": "outputs/collision-fence/full.log",
+      "sha256": "7271ef856207aa933ed4ea963472385b39ff71078436b53479e1d9870120cfd2"
+    },
+    {
+      "path": "outputs/collision-fence/live-observation.log",
+      "sha256": "52ac5bc3266ca4d56a21ff1b10c02330179b0d932808009cc47412933a91bb80"
+    },
+    {
+      "path": "outputs/collision-fence/parent-contract.log",
+      "sha256": "146e42fd600977623ab46604a18d38427d236d8595fe9237dcb28ea976b7a3e2"
+    },
+    {
+      "path": "outputs/collision-fence/parent-red.log",
+      "sha256": "8c2d837853d034512d640309c48658a2b80db614a54d9e0e525d9138cd088bc2"
+    },
+    {
+      "path": "outputs/collision-fence/policy-integration.log",
+      "sha256": "6736c4ec0c3a8b975b4875196f45fe1994be3237778c33dafba7e11ab1919fd5"
+    },
+    {
+      "path": "outputs/collision-fence/recovery-policy.log",
+      "sha256": "2aec7e7b6b3e7f725c9469ac5461a54e64aaa62672b9c96a0e8e9aadcfcfdd4c"
+    }
+  ],
+  "commands": {
+    "working_directory": "C:\\Users\\patri\\Documents\\Codex\\2026-10-17\\vera-codex-a1-portal-desktop-canonical",
+    "environment": [
+      "$taskMonoPaths=Get-ChildItem work/vera-mono/packages -Directory | ForEach-Object { Join-Path $_.FullName 'src' } | Where-Object { Test-Path -LiteralPath $_ }",
+      "$env:PYTHONPATH=(@((Resolve-Path work/diagnostic-mono-overlay).Path,(Resolve-Path work/portal).Path,(Resolve-Path work/pre-active/src).Path)+@($taskMonoPaths))-join ';'",
+      "$env:PYTHONDONTWRITEBYTECODE='1'",
+      "$env:TEMP=(Resolve-Path work/test-temp).Path; $env:TMP=$env:TEMP"
+    ],
+    "original_two_red_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/diagnostics/runner_claim_concurrency_probe.py -k explicit_collision_contract -q --tb=short -p no:cacheprovider --basetemp=work/collision-fence-parent-red-state --junitxml=outputs/collision-fence/parent-red-junit.xml 2>&1 | Tee-Object outputs/collision-fence/parent-red.log",
+    "first_integrated_full_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests -q --tb=short -p no:cacheprovider --basetemp=work/collision-fence-full-state --junitxml=outputs/collision-fence/full-junit.xml 2>&1 | Tee-Object outputs/collision-fence/full.log",
+    "final_full_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests -q --tb=short -p no:cacheprovider --basetemp=work/collision-fence-final-full-state --junitxml=outputs/collision-fence/final-full-junit.xml 2>&1 | Tee-Object outputs/collision-fence/final-full.log",
+    "policy_audit_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/unit/test_recovery.py -q --tb=short -p no:cacheprovider --basetemp=work/collision-recovery-policy-state --junitxml=outputs/collision-fence/recovery-policy-junit.xml 2>&1 | Tee-Object outputs/collision-fence/recovery-policy.log",
+    "policy_integration_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/unit/test_recovery.py work/portal/tests/integration/test_portfolio_operator_bridge.py -q --tb=short -p no:cacheprovider --basetemp=work/collision-policy-integration-state --junitxml=outputs/collision-fence/policy-integration-junit.xml 2>&1 | Tee-Object outputs/collision-fence/policy-integration.log",
+    "final_stronger_contracts_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/diagnostics/runner_claim_concurrency_probe.py -k explicit_collision_contract -q --tb=short -p no:cacheprovider --basetemp=work/collision-fence-final-contract-state --junitxml=outputs/collision-fence/final-contract-junit.xml 2>&1 | Tee-Object outputs/collision-fence/final-contract.log",
+    "live_readonly_observation_executed": "$env:PORTAL_TEST_LIVE_GITHUB_NOEFFECT='1'; & 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/integration/test_portal_github_noeffect_host_conformance.py::test_live_exact_head_holds_without_host_dispatch -q --tb=short -p no:cacheprovider --basetemp=work/collision-fence-live-observation-state --junitxml=outputs/collision-fence/live-observation-junit.xml 2>&1 | Tee-Object outputs/collision-fence/live-observation.log",
+    "note": "Choose fresh basetemp/output names to preserve these actual executions. Child exact commands and exit statuses are in the hashed child manifests. Overlapping results must not be summed."
+  },
+  "historical_evidence": [
+    {
+      "path": "outputs/a1-evidence-manifest.json",
+      "sha256": "05f81937998bc309fa4943185b6b7ee59400763fa0de26a58cc6c61d3d49e0ca"
+    },
+    {
+      "path": "work/portal/docs/evidence/MONO_RUNNER_NATIVE_EXECUTION_20261018.json",
+      "sha256": "d27038c5d332aca7b9f64e2e4b45b906baab4f98aa7ac842bdab41421350311e"
+    }
+  ],
+  "original_base_test_source_copies": [
+    {
+      "path": "outputs/collision-fence/source-baseline/runner_claim_concurrency_probe.py",
+      "sha256": "060ea26ca9fa079b6490b2b979a2b040c8113407d00fddfc1c856686b8ef2554"
+    },
+    {
+      "path": "outputs/collision-fence/source-baseline/test_portfolio_operator_bridge.py",
+      "sha256": "2ab6c6f30a454ea83b78155a8c07e5b22dd8085eb86b2d494af7311dfef9b470"
+    },
+    {
+      "path": "outputs/collision-fence/source-baseline/test_recovery.py",
+      "sha256": "b8dfcc7343c53e997a37af33d82ffeea45af2d7fb8716c7995f66bf91f3abfba"
+    },
+    {
+      "path": "outputs/collision-fence/source-baseline/test_runner_claim_recovery_concurrency.py",
+      "sha256": "3cc628d1105c0c5f721f16a6b5a7beffb25b562bb417c462c76b0c634af4b683"
+    }
+  ],
+  "independent_review": {
+    "vn1": "Patrick physically present on VERA-NODE-1; Executor command tunnel unavailable. Source/design challenges received, physical candidate run BLOCKED; no child/parent/PORTAL result substituted.",
+    "vn1_bus_comments": [
+      6251725163,
+      6251749827,
+      6251760423,
+      6251773511,
+      6251782734,
+      6251805012,
+      6251875486,
+      6251928912
+    ],
+    "reviewer_fixture_syntax_only_sha256": [
+      "08ca5e05adfdfa2bb6b2af54b8e160ef390ce5fd620e168a671bdb38f7c5af43",
+      "f81a91144ad89e7d3c1d45b605694deec9764cf06de716eee7941271a6d6289b"
+    ],
+    "reviewer_latest_reconstructed_fixture_reported_sha256": "ec53e00cfdc6ce79bb4a8759623e1bdc5dc007992e817cac557924b0aa771d81",
+    "reviewer_fixture_limit": "Reviewer reported separate container syntax checks only. Earlier Windows relative-path attempt ran no tests. Reconstructed latest file is not byte-identical to earlier fixtures and was not available/run by parent; no physical VN1 PASS inferred.",
+    "portal_independent_base58": {
+      "recovery_pass": 14,
+      "stronger_contract_fail": 2,
+      "recovery_log_sha256": "28A2993849DADEDE5C3002562F86833737DC17E0D660D97AF9EDB317FE206E05",
+      "collision_log_sha256": "51B655390663570C953483519F0C7EA794624042C7900FE78AA6C9064E79F506",
+      "unsafe_public_no_effect_reproduction_log_sha256": "FCF131A43F4CE8AE7DB90980640AE35C2C36FC5C014079DF9E4D4E85383D3A10"
+    },
+    "status": "Candidate exact-head independent review required after push; no acceptance inferred"
+  },
+  "authority_ceiling": {
+    "real_backend_model_provider_calls": 0,
+    "production_leases": 0,
+    "canonical_memory_writes": 0,
+    "protected_effects": 0,
+    "installed_desktop_changes": 0,
+    "owner_sibling_branch_edits": 0,
+    "new_scheduler_task_claim_service": 0,
+    "main_merge_deployment": 0,
+    "qualification": "Source/disposable Windows processes; no installed runtime, graphical guest or trusted producer admission"
+  }
+}

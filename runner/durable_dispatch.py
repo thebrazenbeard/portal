@@ -15,6 +15,11 @@ from .leases import Lease, LeaseStore
 from .models import Frontier
 from .persistent_state import _SCHEMA as _PERSISTENT_SCHEMA
 from .persistent_state import _migrate_budget_scope_schema
+from .persistent_state import (
+    _validate_collision_keys, _reserve_collision_keys,
+    _validate_collision_ownership, _release_collision_keys,
+    _durable_attempt_needs_reconciliation,
+)
 from .recursive_state import (
     _ALLOWED_STATUS_TRANSITIONS,
     _TERMINAL_STATUSES,
@@ -285,6 +290,8 @@ class SqliteDispatchAdmissionStore:
         if not budget.lineage_id.strip():
             raise ValueError("root initialization requires a lineage id")
 
+        _validate_collision_keys(work.collision_keys)
+
         fingerprint = work_unit_fingerprint(work)
         capabilities = _normalize_capabilities(effective_capabilities)
         if not set(work.required_capabilities).issubset(set(capabilities)):
@@ -429,6 +436,7 @@ class SqliteDispatchAdmissionStore:
                 raise ValueError("durable dispatch work state is structurally invalid") from exc
             if not isinstance(work_payload, dict):
                 raise ValueError("durable dispatch work payload is structurally invalid")
+            _validate_collision_keys(work_payload.get("collision_keys"))
             if not isinstance(capability_payload, list):
                 raise ValueError(
                     "durable dispatch capability ceiling is structurally invalid"
@@ -501,7 +509,12 @@ class SqliteDispatchAdmissionStore:
                 (work_fingerprint_value,),
             ).fetchone()
 
+            if _durable_attempt_needs_reconciliation(self.connection, work_fingerprint_value):
+                raise ValueError("collision ownership requires admitted outcome reconciliation")
             if lease_row is None:
+                if self.connection.execute("SELECT 1 FROM execution_attempts WHERE work_fingerprint=? LIMIT 1",
+                        (work_fingerprint_value,)).fetchone() is not None:
+                    raise ValueError("collision prior attempt lease is missing")
                 token = 1
                 expires_at = now + ttl
                 self.connection.execute(
@@ -518,6 +531,9 @@ class SqliteDispatchAdmissionStore:
                     raise ValueError("completed work cannot be dispatched")
                 if current_holder is not None and now < float(current_expiry):
                     raise ValueError("dispatch work already has an active lease")
+                if current_holder is not None:
+                    _validate_collision_ownership(self.connection, Lease(
+                        work_fingerprint_value, str(current_holder), int(current_token), float(current_expiry)))
                 token = int(current_token) + 1
                 expires_at = now + ttl
                 self.connection.execute(
@@ -528,6 +544,12 @@ class SqliteDispatchAdmissionStore:
                     """,
                     (holder, token, expires_at, work_fingerprint_value),
                 )
+
+            _reserve_collision_keys(self.connection,
+                work_fingerprint=work_fingerprint_value, holder=holder,
+                fencing_token=token, keys=work.collision_keys,
+                previous_lease=(Lease(work_fingerprint_value, str(lease_row[0]), int(lease_row[1]), float(lease_row[2]))
+                    if lease_row is not None and lease_row[0] is not None else None))
 
             admitted_budget_generation = expected_budget_generation + 1
             admitted_work_generation = expected_work_generation + 1
@@ -681,6 +703,7 @@ class SqliteDispatchAdmissionStore:
             raise ValueError("claim-only recovery requires root budget")
 
         fingerprint = work_unit_fingerprint(work)
+        _validate_collision_keys(work.collision_keys)
         capabilities = _normalize_capabilities(effective_capabilities)
         expected_work_json = _recursive_canonical_json(_work_payload(work))
         expected_ancestry_json = _recursive_canonical_json([fingerprint])
@@ -821,6 +844,10 @@ class SqliteDispatchAdmissionStore:
                     raise ValueError("claim-only claimed recovery lease is completed")
                 current_token = int(current_token)
                 current_expiry = float(current_expiry)
+                if current_holder is None:
+                    raise ValueError("claim-only collision owner is missing")
+                _validate_collision_ownership(self.connection, Lease(
+                    fingerprint, str(current_holder), current_token, current_expiry))
 
                 latest_token_row = self.connection.execute(
                     """
@@ -983,6 +1010,10 @@ class SqliteDispatchAdmissionStore:
                 )
                 if lease_update.rowcount != 1:
                     raise ValueError("claim-only recovery fence changed concurrently")
+
+                _reserve_collision_keys(self.connection, work_fingerprint=fingerprint,
+                    holder=holder, fencing_token=new_token, keys=work.collision_keys,
+                    previous_lease=Lease(fingerprint, str(current_holder), current_token, current_expiry))
 
                 new_work_generation = work_generation + 1
                 work_update = self.connection.execute(
@@ -1700,6 +1731,7 @@ class SqliteDispatchAdmissionStore:
                 raise ValueError(
                     "recursive work lease changed during atomic verification finalization"
                 )
+            _release_collision_keys(self.connection, lease)
 
             work_update = self.connection.execute(
                 """
@@ -1769,13 +1801,16 @@ class SqliteDispatchAdmissionStore:
         explicitly allow reconciliation of a recorded failed OUTCOME_UNKNOWN;
         no other recorded result is eligible.
 
-        Only NO_EFFECT_CONFIRMED may atomically release the exact fence and move
-        work to FAILED_RETRYABLE. INDETERMINATE and EFFECT_CONFIRMED remain
-        non-retryable. A prior INDETERMINATE observation may be refined, but a
-        conclusive reconciliation cannot be changed.
+        No authenticated independent no-effect verifier is selected by this
+        interface. Public NO_EFFECT_CONFIRMED is therefore unsupported and
+        cannot release ownership, including for execution-forbidden work.
+        Public reason/evidence/reconciler strings establish no such authority.
+        INDETERMINATE and EFFECT_CONFIRMED remain non-retryable.
         """
         if outcome not in _RECONCILIATION_OUTCOMES:
             raise ValueError("unsupported execution reconciliation outcome")
+        if outcome == "NO_EFFECT_CONFIRMED":
+            raise ValueError("NO_EFFECT has no authenticated independent verifier; HOLD_UNKNOWN_NO_REDISPATCH")
         if not reason.strip():
             raise ValueError("execution reconciliation reason is required")
         if not reconciler.strip():
@@ -1932,6 +1967,7 @@ class SqliteDispatchAdmissionStore:
                 raise ValueError(
                     "execution reconciliation fence is no longer current"
                 )
+            _validate_collision_ownership(self.connection, lease)
 
             evidence_json = _canonical_json(list(normalized_evidence))
             self.connection.execute(
@@ -1956,65 +1992,13 @@ class SqliteDispatchAdmissionStore:
                 ),
             )
 
-            if outcome != "NO_EFFECT_CONFIRMED":
-                self.connection.commit()
-                return current_generation
-
-            allowed = _ALLOWED_STATUS_TRANSITIONS.get(
-                current_status,
-                frozenset(),
-            )
-            if WorkUnitStatus.FAILED_RETRYABLE not in allowed:
-                raise ValueError(
-                    "reconciled no-effect work cannot enter retryable state"
-                )
-
-            lease_update = self.connection.execute(
-                """
-                UPDATE leases
-                SET holder = NULL, expires_at = 0, completed = 0
-                WHERE work_fingerprint = ?
-                  AND holder = ?
-                  AND fencing_token = ?
-                  AND completed = 0
-                """,
-                (
-                    work_fingerprint_value,
-                    lease.holder,
-                    fencing_token,
-                ),
-            )
-            if lease_update.rowcount != 1:
-                raise ValueError(
-                    "execution reconciliation lease changed during finalization"
-                )
-
-            work_update = self.connection.execute(
-                """
-                UPDATE recursive_work_state
-                SET status = ?, generation = generation + 1
-                WHERE lineage_id = ?
-                  AND work_fingerprint = ?
-                  AND generation = ?
-                """,
-                (
-                    WorkUnitStatus.FAILED_RETRYABLE.value,
-                    lineage_id,
-                    work_fingerprint_value,
-                    expected_work_generation,
-                ),
-            )
-            if work_update.rowcount != 1:
-                raise ValueError(
-                    "recursive work generation changed during reconciliation"
-                )
         except BaseException:
             self.connection.rollback()
             raise
         else:
             self.connection.commit()
 
-        return expected_work_generation + 1
+        return current_generation
 
     def unresolved_attempts(self) -> tuple[DurableExecutionJournalEntry, ...]:
         rows = self.connection.execute(
@@ -2130,8 +2114,8 @@ class SqliteDispatchAdmissionStore:
                 last_reconciliation_reason = str(raw_reconciliation_reason)
 
             if result_json is None and result_sha256 is None:
-                if last_reconciliation_outcome == "NO_EFFECT_CONFIRMED":
-                    continue
+                # A historical public NO_EFFECT row remains an unresolved
+                # observation, not authenticated release/redispatch authority.
                 phase = (
                     "EFFECT_CONFIRMED"
                     if last_reconciliation_outcome == "EFFECT_CONFIRMED"
@@ -2190,6 +2174,33 @@ def execute_admitted(
     """
     if admission.work.payload.get("execution_authority") is False:
         raise ValueError("durable admission does not authorize backend execution")
+    # This is a local preflight, not an atomic transaction with an external
+    # backend. A downstream effect still needs its own qualified fence boundary.
+    fingerprint = work_unit_fingerprint(admission.work)
+    try:
+        journal.connection.execute("BEGIN IMMEDIATE")
+        _validate_active_lease_state(journal.connection,
+            work_fingerprint_value=fingerprint, lease=admission.lease, now=recorded_at)
+        current = journal.connection.execute(
+            "SELECT status,generation FROM recursive_work_state WHERE lineage_id=? AND work_fingerprint=?",
+            (admission.budget_after.lineage_id, fingerprint)).fetchone()
+        attempt = journal._attempt_row(lineage_id=admission.budget_after.lineage_id,
+            work_fingerprint_value=fingerprint, fencing_token=admission.lease.fencing_token)
+        if (attempt[0] != admission.lease.holder
+                or attempt[2] != admission.budget_generation
+                or attempt[3] != admission.work_generation):
+            raise ValueError("dispatch admission attempt/work/budget identity mismatch")
+        # The existing operator starts RUNNING under this exact lease before
+        # invoking the backend. Admit only that one causal successor, not an
+        # arbitrary later RUNNING state after unknown-outcome/retry transitions.
+        if current not in {
+                (WorkUnitStatus.CLAIMED.value, attempt[3]),
+                (WorkUnitStatus.RUNNING.value, attempt[3] + 1)}:
+            raise ValueError("dispatch admission work generation or status is stale")
+        if attempt[5] is not None or attempt[6] is not None:
+            raise ValueError("dispatch attempt already has a recorded outcome")
+    finally:
+        journal.connection.rollback()
     result = backend.execute(admission.work)
     journal.record_result(
         lineage_id=admission.budget_after.lineage_id,
