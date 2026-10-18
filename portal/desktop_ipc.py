@@ -306,13 +306,23 @@ class FileBridgeClient:
                 temp.unlink(missing_ok=True)
 
         deadline = time.monotonic() + self.timeout_seconds
+        response_observed = False
+        last_read_error: Exception | None = None
         while time.monotonic() < deadline:
             if response_path.is_file():
+                response_observed = True
                 try:
                     response = json.loads(response_path.read_text(encoding="utf-8-sig"))
-                except (json.JSONDecodeError, UnicodeError, FileNotFoundError):
-                    time.sleep(self.poll_seconds)
+                except (json.JSONDecodeError, UnicodeError, FileNotFoundError, PermissionError) as exc:
+                    # A Windows sharing/access denial may clear. Retry only
+                    # this read within the original deadline, never dispatch.
+                    last_read_error = exc
+                    time.sleep(min(self.poll_seconds, max(0.0, deadline - time.monotonic())))
                     continue
+                except OSError as exc:
+                    raise BridgeOutcomeUnknownError(
+                        f"unreadable bridge response; no redispatch: {request_id}"
+                    ) from exc
                 if not canonical:
                     response_path.unlink(missing_ok=True)
                 if not isinstance(response, dict):
@@ -343,8 +353,13 @@ class FileBridgeClient:
                 return result
             time.sleep(self.poll_seconds)
 
-        if response_path.exists():
-            raise BridgeOutcomeUnknownError(f"incomplete bridge response; no redispatch: {request_id}")
+        if response_observed or response_path.exists():
+            # Even if the unreadable response vanishes, retain the original
+            # transport evidence and the UI's pending ID for reconciliation.
+            detail = "unreadable" if isinstance(last_read_error, PermissionError) else "incomplete"
+            raise BridgeOutcomeUnknownError(
+                f"{detail} bridge response; no redispatch: {request_id}"
+            ) from last_read_error
         try:
             request_path.unlink()
         except FileNotFoundError:

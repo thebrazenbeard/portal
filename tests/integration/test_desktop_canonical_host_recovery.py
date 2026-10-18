@@ -18,6 +18,14 @@ from vera_core import QualifiedVeraRuntime, VeraStateDirectory
 
 
 def test_actual_host_intake_restart_unknown_claim_and_sqlite_release(tmp_path):
+    _check_host_recovery(tmp_path)
+
+
+def test_denied_response_client_interruption_and_actual_host_cold_recovery(tmp_path):
+    _check_host_recovery(tmp_path, interrupt_client=True)
+
+
+def _check_host_recovery(tmp_path, *, interrupt_client=False):
     root = tmp_path / "isolated-host"
     layout = prepare_runtime_layout(root)
     (root / "RUNTIME_INSTALL_SPEC.json").write_text(json.dumps({
@@ -91,6 +99,36 @@ raise SystemExit(host.run_host(root))
             time.sleep(0.01)
         result = client.request(**original)
         assert result["status"] == "OUTCOME_UNKNOWN_NO_REDISPATCH"
+        if interrupt_client:
+            # A separate real client loses response access after dispatch, then
+            # exits without normal cleanup. Its original claim must survive.
+            client_program = '''
+import errno,json,os,sys
+from pathlib import Path
+from portal.desktop_ipc import FileBridgeClient,BridgeOutcomeUnknownError
+root=Path(sys.argv[1])
+response=root/"bridge"/"responses"/"new-message.json"
+original_read=Path.read_text
+def denied(path,*args,**kwargs):
+ if path==response:
+  raise PermissionError(errno.EACCES,"injected response read denial")
+ return original_read(path,*args,**kwargs)
+Path.read_text=denied
+client=FileBridgeClient(root,timeout_seconds=3,poll_seconds=0.01)
+try:
+ client.request("desktop_cognize",conversation_id="desktop-cold-test",
+                request_id="new-message",task="Exact second message",source="HUMAN")
+except BridgeOutcomeUnknownError as exc:
+ print(json.dumps({"error":str(exc),"pid":os.getpid()}),flush=True)
+ os._exit(23)
+raise AssertionError("unreadable response must remain unknown")
+'''
+            interrupted = subprocess.run([sys.executable, "-B", "-c", client_program, str(root)],
+                                         env=env, capture_output=True, text=True, timeout=15)
+            assert interrupted.returncode == 23, (interrupted.stdout, interrupted.stderr)
+            assert "new-message" in json.loads(interrupted.stdout)["error"]
+            print(f"client interrupted after UNKNOWN: {json.loads(interrupted.stdout)['pid']}")
+        # Reconcile using exactly the original ID; never another host dispatch.
         fresh = client.request("desktop_cognize", conversation_id="desktop-cold-test",
                                request_id="new-message", task="Exact second message", source="HUMAN")
         assert fresh["status"] == "PENDING_NO_ADMITTED_PROVIDER"

@@ -54,6 +54,12 @@ unreadable pending claims block. A fresh host encountering an old claim
 reconciles the canonical intake but returns `OUTCOME_UNKNOWN_NO_REDISPATCH`.
 
 Cached responses are historical and explicitly return `task_head_current=false`.
+Response reads can race Windows file sharing/access restrictions. Only the
+read is retried, using the original request deadline; later success must still
+pass the original source/response checks. Persistent denial, other I/O failure,
+or incomplete response yields UNKNOWN without a new ID or dispatch. Once a
+response has been observed, its disappearance cannot become a safe pre-claim
+timeout: original transport evidence and the UI pending ID remain for recovery.
 Use `desktop_conversation_history` for fresh Mono source/head evidence. It is
 read-only, labels input untrusted, and never promotes observed model text to
 dialogue, truth, task completion or memory. An operational `COMPLETED` row is
