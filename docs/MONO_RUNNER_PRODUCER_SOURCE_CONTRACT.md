@@ -46,8 +46,12 @@ checkpoint, including in a cold process. Unrelated B preserves A's fingerprint.
 It never initializes/adopts/admits the proposed WorkUnit. Every receipt remains
 HOLD/NO_EFFECT with `producer_authenticated=false`.
 
-The exact source result is a producer proposal, not an approved ABI. An owner
-must bind the original verified plan/wave/registry, trusted issuer and selected
+The exact source result is a producer proposal, not an approved ABI. A real cold
+process can commit a direct canonical checkpoint while another process holds
+`action_lock`: that separate portable lock does not fence every task writer.
+The new negative reproduces this and then rejects both stale proposal
+revalidation and stale native task CAS. No lock-only admission is qualified.
+An owner must bind the original verified plan/wave/registry, trusted issuer and selected
 canonical/Runner domain in the existing producer before admission. A task lock
 does not atomically commit another database. Lock ordering or an existing intent
 and reconciliation protocol must address death between stores without new task,
@@ -57,9 +61,9 @@ introduced here.
 
 ## Executable acceptance and explicit unresolved REDs
 
-There are 116 added normally collected cases: 51 clock-domain, 14 native
+There are 117 added normally collected cases: 51 clock-domain, 14 native
 concurrency/recovery, 17 malformed-evidence, 20 delegation/adversarial, 6 actual
-qualified-runtime cold composition, and 8 producer-proposal cases. Of the 20
+qualified-runtime cold composition, and 9 producer-proposal cases. Of the 20
 adversarial cases, 15 exercise actual Mono, 2 actual Runner fingerprinting and
 3 are explicitly conceptual public-hash controls. No conceptual control is
 reported as production-component qualification.
@@ -94,12 +98,15 @@ independent VN1 review. Session capacity was four including the parent, so D
 started only after A returned. No second top-level worker or new checkout.
 
 Lappy Windows11 build26300, CPython3.12.10, SQLite3.49.1: full repository
-**939 PASS / 1 FAIL / 1 SKIP**. The unchanged wider failure is
+**940 PASS / 1 FAIL / 1 SKIP**. The unchanged wider failure is
 `test_session_run_persists_non_secret_resume_envelope`, exit2 GitHub discovery,
 previously reproduced on #52. The skipped opt-in live read-only GitHub test was
 separately executed: **1 PASS**, no host dispatch. The parent expanded focused
-run passed 90 cases; the full run additionally included the original #57 packet
-and new actual-component cold/delegation tests. Do not sum overlapping runs.
+run passed 90 cases; the final full run additionally included the original #57
+packet, actual-component cold/delegation tests and the late peer-reported cold
+writer/action-lock negative (separate nine-case proposal rerun also passed).
+The prior full run was 939 PASS / 1 FAIL / 1 SKIP before that extra case.
+Do not sum overlapping runs.
 
 VN1's latest return is Bus #368 comment 6251227031: physical independent
 execution is BLOCKED because VERA-NODE-1 is disconnected. Prior A1/unchanged

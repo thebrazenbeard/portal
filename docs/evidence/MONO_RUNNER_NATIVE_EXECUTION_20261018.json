@@ -23,6 +23,7 @@
       "vera_os38": "b388061414b3231ff7cf0caea913683e8b451b0d",
       "training113": "51bd9749c2bf77b9b2b3f9d94f55a56e3ef29896",
       "training114": "7ad7088993249c00f718896c371eaa68c9013eb2",
+      "training115_observed_not_executed": "cd7de17a9e97d6d752da90d200a7555a295205c2",
       "ccb376": "d0f5564df4fc8da5f8a05740ce506a172c91864b",
       "ccb384": "20ebec6d91419684d646da5deb53597b68c5970a",
       "ccb385": "472ab3230e75b5e082ca47dec87308aad9d042ff"
@@ -38,7 +39,7 @@
       "tests/diagnostics/runner_claim_concurrency_probe.py": "060ea26ca9fa079b6490b2b979a2b040c8113407d00fddfc1c856686b8ef2554",
       "tests/integration/test_adversarial_delegation_contract.py": "dab55ad29823f6d1c593ad239671e9d4e92c63a1d3ed638bc21e8db8814d6296",
       "tests/integration/test_mono_runner_malformed_evidence.py": "c415ee2f969571f1645eec4ea8656e4fa03b55fcdfb15634bb43c2be43adfca6",
-      "tests/integration/test_mono_runner_producer_contract.py": "71594cfc117286d8f2f09f9e496311c05250d7755ef15657e15b0ff5b95ca8e7",
+      "tests/integration/test_mono_runner_producer_contract.py": "2b2fba8de480dff3aa52240b084cf4c6618e9bb06ce161d0659727516b0c16c0",
       "tests/integration/test_qualified_runtime_cold_composition.py": "d2c42f44e5b0d32200b08f4502c997cba594939e0b9e39a8fbda93c107124b31",
       "tests/integration/test_runner_claim_clock_domain.py": "46cb1b8d159a9d706e7ce9de2aba7ebbd69cb08e0ebb541402ed65103b11721c",
       "tests/integration/test_runner_claim_recovery_concurrency.py": "3cc628d1105c0c5f721f16a6b5a7beffb25b562bb417c462c76b0c634af4b683",
@@ -688,6 +689,41 @@
         "skipped": 0
       },
       "nonpasses": []
+    },
+    {
+      "path": "outputs/multi-agent/external-writer-junit.xml",
+      "sha256": "e3c9c712b6ff4039440581e03d6bb56bb6c92c90364744c8e2b2697f2e8b1226",
+      "result": {
+        "tests": 9,
+        "passed": 9,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "nonpasses": []
+    },
+    {
+      "path": "outputs/multi-agent/final-full-junit.xml",
+      "sha256": "edd97a548bef44d58fea55459a1af46aacaeabf7dbd78536902918805e0715cf",
+      "result": {
+        "tests": 942,
+        "passed": 940,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 1
+      },
+      "nonpasses": [
+        {
+          "test": "tests.integration.test_portal_github_noeffect_host_conformance::test_live_exact_head_holds_without_host_dispatch",
+          "outcome": "skipped",
+          "message": "opt in to authenticated read-only GitHub CLI"
+        },
+        {
+          "test": "tests.integration.test_portal_session_cli::test_session_run_persists_non_secret_resume_envelope",
+          "outcome": "failed",
+          "message": "assert 2 == 0"
+        }
+      ]
     }
   ],
   "parent_logs": [
@@ -722,6 +758,14 @@
     {
       "path": "outputs/multi-agent/live-readonly.log",
       "sha256": "c4a185ed712dc07522150c0ec4c2a97c837fba7b3e99102f08c70bc681e9042d"
+    },
+    {
+      "path": "outputs/multi-agent/external-writer.log",
+      "sha256": "670edb8c35df8466c645799e05b1282fb8940298e407c8cc262dd8e7603e3975"
+    },
+    {
+      "path": "outputs/multi-agent/final-full.log",
+      "sha256": "a288423befdca386f2b05fc0e5ce7a4ae51bca1aac99c3c288f4a2f10570c7dc"
     }
   ],
   "commands": {
@@ -732,6 +776,8 @@
       "$env:TEMP=(Resolve-Path work/test-temp).Path; $env:TMP=$env:TEMP"
     ],
     "full_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-full-state --junitxml=outputs/multi-agent/full-junit.xml 2>&1 | Tee-Object outputs/multi-agent/full.log",
+    "external_writer_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/integration/test_mono_runner_producer_contract.py -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-external-writer-state --junitxml=outputs/multi-agent/external-writer-junit.xml 2>&1 | Tee-Object outputs/multi-agent/external-writer.log",
+    "final_full_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-final-full-state --junitxml=outputs/multi-agent/final-full-junit.xml 2>&1 | Tee-Object outputs/multi-agent/final-full.log",
     "explicit_unresolved_contracts_executed": "& 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/diagnostics/runner_claim_concurrency_probe.py -k explicit_collision_contract -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-collision-gap-state --junitxml=outputs/multi-agent/collision-gap-junit.xml 2>&1 | Tee-Object outputs/multi-agent/collision-gap.log",
     "live_readonly_executed": "$env:PORTAL_TEST_LIVE_GITHUB_NOEFFECT='1'; & 'C:/Users/patri/vera-blender-runner/_work/_tool/Python/3.12.10/x64/python.exe' -B -m pytest work/portal/tests/integration/test_portal_github_noeffect_host_conformance.py::test_live_exact_head_holds_without_host_dispatch -q --tb=short -p no:cacheprovider --basetemp=work/multi-agent-live-readonly-state --junitxml=outputs/multi-agent/live-readonly-junit.xml 2>&1 | Tee-Object outputs/multi-agent/live-readonly.log",
     "notes": "Commands run from workspace root. New reproductions must use fresh disposable basetemp and output paths. Full run did not set live opt-in; separate opt-in result does not erase its skip. Clock/collision commands need only work/portal on PYTHONPATH. Child exact commands are in the hashed child artifacts."
@@ -835,6 +881,19 @@
     "dispatches": 0,
     "state": "HOLD",
     "effect": "NO_EFFECT"
+  },
+  "external_direct_writer_while_action_lock_held": {
+    "peer_finding": "Training Bus368/6251263932 and Draft115; owner source untouched",
+    "parent_reproduction": {
+      "pid": 3768,
+      "task_id": "ui-417ac6ef1b5658ff74acadc8b87910fa802f6b63f0e3b70c8a7277ce7bd9edcc",
+      "task_head": "4780935bcdb01ac78330e7cec38506fa8bd0491cbf38c4723be9eafb10937634",
+      "dispatches": 0,
+      "parent_pid": 9236,
+      "proposal_revalidation": "HOLD",
+      "atomic_cross_store_admission": false
+    },
+    "limit": "Separate action_lock is not an all-writer lock; native CAS rejection preserved; production producer remains HOLD"
   },
   "preserved_a1_artifacts": [
     {

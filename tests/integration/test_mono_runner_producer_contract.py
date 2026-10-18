@@ -184,3 +184,41 @@ else:raise AssertionError('stale source proposal was not rejected')
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=20)
     assert cold.returncode == 0, cold.stderr
     assert json.loads(cold.stdout)["state"] == "HOLD"
+
+
+def test_action_lock_does_not_fence_direct_cold_checkpoint_writer(source, tmp_path):
+    rt, intake, ref, work = source
+    proposal = build(source)
+    code = '''
+import json,os,sys
+from pathlib import Path
+from vera_core import QualifiedVeraRuntime,VeraStateDirectory
+root,task,head,evidence=sys.argv[1:]
+rt=QualifiedVeraRuntime.from_state_directory(VeraStateDirectory(Path(root),project_id="SOURCE_PROPOSAL_FIXTURE",identity_id="UNTRUSTED_FIXTURE"))
+rt.tasks.checkpoint(task,"external-direct-writer",completed_evidence=(),blockers=("HOLD",),
+    protected_effects_still_gated=("all",),next_frontier="HOLD",
+    lifecycle_evidence_digest=evidence,expected_task_head=head)
+print(json.dumps({'pid':os.getpid(),'task_id':task,'task_head':rt.tasks.events(task)[-1].event_digest,'dispatches':0}))
+'''
+    # Real writer commits before this lock releases. It uses the existing
+    # canonical SQLite transaction/CAS, not the separate advisory action lock.
+    with rt.tasks.action_lock():
+        cold = subprocess.run([sys.executable, "-B", "-c", code, str(tmp_path / "mono"),
+            intake["task_id"], ref.binding_event_digest, intake["source_digest"]],
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=20)
+        assert cold.returncode == 0, cold.stderr
+        receipt = json.loads(cold.stdout)
+        assert receipt["pid"] != os.getpid()
+        assert receipt["task_id"] == intake["task_id"]
+        assert receipt["task_head"] != ref.binding_event_digest
+        assert rt.tasks.events(intake["task_id"])[-1].event_digest == receipt["task_head"]
+    assert rt.validate_task_delegation(ref, actor_ref=ACTOR) == ref
+    with pytest.raises(ValueError, match="task-scoped"):
+        check(source, proposal)
+    with pytest.raises(TaskExecutionError):
+        rt.tasks.checkpoint(intake["task_id"], "stale-direct-writer", completed_evidence=(),
+            blockers=("HOLD",), protected_effects_still_gated=("all",), next_frontier="HOLD",
+            lifecycle_evidence_digest=intake["source_digest"], expected_task_head=ref.binding_event_digest)
+    (tmp_path / "external-writer-held-action-lock.json").write_text(json.dumps({
+        **receipt, "parent_pid": os.getpid(), "proposal_revalidation": "HOLD",
+        "atomic_cross_store_admission": False}), encoding="utf-8")
