@@ -71,8 +71,18 @@ def request(path, subject="a", holder="untrusted-source-left", mode="admit", now
 
 
 def launch(args):
-    return subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "worker", json.dumps(args)],
-        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(ROOT)),
+    # On Windows, venv python.exe can be a redirector. Popen then reports the
+    # redirector PID, not the child interpreter PID recorded by the worker.
+    # Use the matching base interpreter and expose the venv's dependencies.
+    interpreter = sys.executable
+    source_paths = [str(ROOT)]
+    if os.name == "nt" and sys.prefix != sys.base_prefix:
+        import site
+        interpreter = getattr(sys, "_base_executable", sys.executable)
+        source_paths.extend(site.getsitepackages())
+    return subprocess.Popen([interpreter, str(Path(__file__).resolve()), "worker", json.dumps(args)],
+        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                 PYTHONPATH=os.pathsep.join(source_paths)),
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
