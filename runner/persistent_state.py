@@ -165,14 +165,23 @@ def _reserve_collision_keys(connection, *, work_fingerprint, holder, fencing_tok
     # authorization. Do not let a newly created reservation table hide them.
     if keys and _table_exists(connection, "recursive_work_state"):
         fingerprints = connection.execute(
-            """SELECT DISTINCT r.work_fingerprint,l.holder FROM recursive_work_state r
+            """SELECT DISTINCT r.work_fingerprint,l.holder,r.status FROM recursive_work_state r
                LEFT JOIN leases l ON l.work_fingerprint=r.work_fingerprint
-               WHERE r.work_fingerprint<>?
-                 AND r.status NOT IN ('COMPLETE','FAILED_DETERMINISTIC','SUPERSEDED')""", (work_fingerprint,)
+               WHERE r.work_fingerprint<>?""", (work_fingerprint,)
         ).fetchall()
-        for other, other_holder in fingerprints:
-            if set(keys).intersection(_collision_work_keys(connection, other)) and (
-                    other_holder is not None or _durable_attempt_needs_reconciliation(connection, other)):
+        for other, other_holder, status in fingerprints:
+            if not set(keys).intersection(_collision_work_keys(connection, other)):
+                continue
+            # A terminal label is not authenticated proof that an earlier
+            # admitted attempt caused no effect. Historical roots may have
+            # missing collision_reservations rows; their unresolved admitted
+            # attempts must still fence an overlapping new claim.
+            unresolved = _durable_attempt_needs_reconciliation(connection, other)
+            active_lease = (
+                status not in ('COMPLETE', 'FAILED_DETERMINISTIC', 'SUPERSEDED')
+                and other_holder is not None
+            )
+            if unresolved or active_lease:
                 raise ValueError("collision key has an unresolved lease owner")
     for key in sorted(keys):
         row = connection.execute(
