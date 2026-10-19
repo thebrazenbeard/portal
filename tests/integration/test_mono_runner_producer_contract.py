@@ -302,3 +302,101 @@ def test_unmarked_existing_runner_claim_path_stays_available(source, tmp_path):
         assert store.unresolved_attempts()  # A real local claim, NOT an authenticated Mono producer.
     finally:
         store.close()
+
+@pytest.mark.parametrize("forged_claims", [False, True])
+def test_real_local_claim_source_inspection_cannot_elevate_canonical_producer(
+    source, tmp_path, forged_claims,
+):
+    """Source-level task match and a real local Runner claim are not issuer authority."""
+    from runner.budgets import BudgetEnvelope
+    from runner.durable_dispatch import SqliteDispatchAdmissionStore
+
+    rt, intake, ref, original = source
+    proposal = build(source)
+    payload = dict(original.payload)
+    if forged_claims:
+        payload.update({
+            "task_id": intake["task_id"],
+            "expected_task_head": ref.binding_event_digest,
+            "producer_authenticated": True,
+            "issuer": "CLAIMED_RECEIVER",
+            "loaded_model": "SELF_ATTESTED_MODEL",
+            "receiver_nonce": "SELF_ATTESTED_NONCE",
+        })
+    observed = replace(original, payload=payload)
+    db = tmp_path / "real-local-only.sqlite"
+    store = SqliteDispatchAdmissionStore(db)
+    try:
+        budget = BudgetEnvelope(
+            lineage_id="source-hold-negative", max_depth=0, depth=0,
+            remaining_children=0, remaining_active=2,
+            remaining_retries=0, remaining_backend_jobs=2,
+        )
+        assert store.initialize_root(
+            budget=budget, work=observed, effective_capabilities=("read",)
+        ) == (1, 1)
+        admitted = store.admit(
+            lineage_id=budget.lineage_id,
+            work_fingerprint_value=work_unit_fingerprint(observed),
+            budget_scope_id=budget.scope_id,
+            expected_budget_generation=1, expected_work_generation=1,
+            holder="local-only", now=100.0, ttl=20.0,
+        )
+        assert admitted.lease.holder == "local-only"
+        journal_before = store.unresolved_attempts()
+
+        # Matching the complete source proposal is still explicitly NOT authority.
+        proposed_only = contract().inspect_observed_local_work(
+            runtime=rt, delegation=ref, actor_ref=ACTOR,
+            expected_task_head=ref.binding_event_digest,
+            proposal=proposal, observed_work=proposal["work"],
+        )
+        assert proposed_only["source_proposal_revalidated"] is True
+        assert proposed_only["observed_work_matches_proposal"] is True
+        assert proposed_only["state"] == "HOLD"
+        assert proposed_only["producer_authenticated"] is False
+        inspected = contract().inspect_observed_local_work(
+            runtime=rt, delegation=ref, actor_ref=ACTOR,
+            expected_task_head=ref.binding_event_digest,
+            proposal=proposal, observed_work=observed,
+        )
+        assert inspected["state"] == "HOLD"
+        assert inspected["effect"] == "NO_EFFECT"
+        assert inspected["producer_authenticated"] is False
+        assert inspected["dispatch_authorized"] is False
+        assert inspected["memory_admitted"] is False
+        assert inspected["source_proposal_revalidated"] is True
+        assert inspected["observed_work_matches_proposal"] is False
+        assert "LOCAL_CLAIM_NOT_CANONICAL_AUTHORITY" in inspected["reasons"]
+        assert "OBSERVED_WORK_NOT_SEALED_PROPOSAL" in inspected["reasons"]
+        assert store.unresolved_attempts() == journal_before
+
+        # An unrelated B advances GLOBAL but leaves A's own latest TASK head valid.
+        open_message(rt.tasks, "untrusted-proposal", "unrelated-B-inspect", "B")
+        again = contract().inspect_observed_local_work(
+            runtime=rt, delegation=ref, actor_ref=ACTOR,
+            expected_task_head=ref.binding_event_digest,
+            proposal=proposal, observed_work=observed,
+        )
+        assert again["source_proposal_revalidated"] is True
+        assert again["state"] == "HOLD"
+
+        # A direct canonical checkpoint(A) invalidates the prior task-specific snapshot.
+        rt.tasks.checkpoint(
+            intake["task_id"], "stale-A-inspect", completed_evidence=(),
+            blockers=("HOLD",), protected_effects_still_gated=("all",),
+            next_frontier="HOLD", lifecycle_evidence_digest=intake["source_digest"],
+            expected_task_head=ref.binding_event_digest,
+        )
+        stale = contract().inspect_observed_local_work(
+            runtime=rt, delegation=ref, actor_ref=ACTOR,
+            expected_task_head=ref.binding_event_digest,
+            proposal=proposal, observed_work=observed,
+        )
+        assert stale["source_proposal_revalidated"] is False
+        assert "TASK_SOURCE_UNVERIFIED" in stale["reasons"]
+        assert stale["state"] == "HOLD" and stale["producer_authenticated"] is False
+        assert store.unresolved_attempts() == journal_before
+        assert rt.tasks.read(intake["task_id"]).closed is False
+    finally:
+        store.close()
