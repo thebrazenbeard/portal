@@ -80,3 +80,47 @@ def revalidate(*, runtime, delegation, actor_ref, expected_task_head, proposal):
             "expected_task_head": expected_task_head, "global_head_observed": global_head,
             "work_fingerprint": proposal["fingerprint"],
             "reasons": ["UNAPPROVED_PRODUCER_ABI", "CLAIM_COLLISION_DOMAIN_UNQUALIFIED"]}
+
+
+def inspect_observed_local_work(
+    *, runtime, delegation, actor_ref, expected_task_head, proposal, observed_work,
+):
+    """SOURCE-ONLY inspection of an ordinary LOCAL Runner WorkUnit.
+
+    A valid task snapshot and an observed WorkUnit digest are not an authenticated
+    Mono producer, receiver-owned nonce, or cross-root collision authority.
+    This function neither reads nor mutates the Runner store or permits dispatch.
+    """
+    from vera_core import TaskExecutionError
+
+    try:
+        # Re-read canonical task-specific event head; GLOBAL changes alone do
+        # not invalidate a task-local proposal. No two-store atomicity is implied.
+        source = revalidate(
+            runtime=runtime, delegation=delegation, actor_ref=actor_ref,
+            expected_task_head=expected_task_head, proposal=proposal,
+        )
+    except (ValueError, TaskExecutionError):
+        source = None
+
+    matched = bool(
+        source is not None
+        and work_unit_fingerprint(observed_work) == source["work_fingerprint"]
+    )
+    reasons = ["LOCAL_CLAIM_NOT_CANONICAL_AUTHORITY", "NO_SELECTED_MONO_RECEIVER_ISSUER"]
+    if source is None:
+        reasons.append("TASK_SOURCE_UNVERIFIED")
+    if not matched:
+        reasons.append("OBSERVED_WORK_NOT_SEALED_PROPOSAL")
+
+    # These are source-level observations, not authentication assertions.
+    return {
+        "state": "HOLD",
+        "effect": "NO_EFFECT",
+        "producer_authenticated": False,
+        "dispatch_authorized": False,
+        "memory_admitted": False,
+        "source_proposal_revalidated": source is not None,
+        "observed_work_matches_proposal": matched,
+        "reasons": reasons,
+    }
