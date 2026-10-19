@@ -400,3 +400,37 @@ def test_real_local_claim_source_inspection_cannot_elevate_canonical_producer(
         assert rt.tasks.read(intake["task_id"]).closed is False
     finally:
         store.close()
+
+def test_current_mono_delegation_does_not_select_an_exact_git_commit(source):
+    """Identical active task scope cannot authenticate either caller-chosen commit."""
+    rt, intake, ref, original = source
+    seen = []
+    for commit in ("a" * 40, "b" * 40):
+        substituted = replace(
+            original,
+            inputs=(ExactSubject(repository=ref.repository, ref=ref.ref, commit=commit),),
+            payload={
+                **original.payload,
+                "target_commit_authorized": True,  # self-asserted and untrusted
+                "issuer": "forged-receiver",
+                "receiver_nonce": "forged-nonce",
+            },
+        )
+        snapshot = (*source[:3], substituted)
+        proposal = build(snapshot)
+        inspected = contract().inspect_observed_local_work(
+            runtime=rt, delegation=ref, actor_ref=ACTOR,
+            expected_task_head=ref.binding_event_digest,
+            proposal=proposal, observed_work=proposal["work"],
+        )
+        assert inspected["source_proposal_revalidated"] is True
+        assert inspected["observed_work_matches_proposal"] is True
+        assert inspected["target_commit_authorized"] is False
+        assert "MONO_TARGET_COMMIT_UNSELECTED" in inspected["reasons"]
+        assert inspected["state"] == "HOLD" and inspected["effect"] == "NO_EFFECT"
+        assert inspected["producer_authenticated"] is False
+        assert inspected["dispatch_authorized"] is False
+        assert inspected["memory_admitted"] is False
+        seen.append(proposal["fingerprint"])
+    assert seen[0] != seen[1]
+    assert len(rt.tasks.events(intake["task_id"])) == 2

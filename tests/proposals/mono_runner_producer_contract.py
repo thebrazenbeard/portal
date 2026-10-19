@@ -107,7 +107,8 @@ def inspect_observed_local_work(
         source is not None
         and work_unit_fingerprint(observed_work) == source["work_fingerprint"]
     )
-    reasons = ["LOCAL_CLAIM_NOT_CANONICAL_AUTHORITY", "NO_SELECTED_MONO_RECEIVER_ISSUER"]
+    reasons = ["LOCAL_CLAIM_NOT_CANONICAL_AUTHORITY", "NO_SELECTED_MONO_RECEIVER_ISSUER",
+               "MONO_TARGET_COMMIT_UNSELECTED"]
     if source is None:
         reasons.append("TASK_SOURCE_UNVERIFIED")
     if not matched:
@@ -117,6 +118,7 @@ def inspect_observed_local_work(
     return {
         "state": "HOLD",
         "effect": "NO_EFFECT",
+        "target_commit_authorized": False,
         "producer_authenticated": False,
         "dispatch_authorized": False,
         "memory_admitted": False,
