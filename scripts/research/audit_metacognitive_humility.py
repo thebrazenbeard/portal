@@ -1,0 +1,146 @@
+"""Effectless PORTAL review of a sealed synthetic metacognition experiment.
+
+Checks evidence classification; does not certify learning, humility, sandbox
+security, executed callable identity, or a selected Vera runtime.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+
+
+class EvidenceHold(ValueError):
+    pass
+
+
+ARMS = ("self_selected_toy", "frozen_zero", "guided_parity",
+        "reflection_only", "random_choice", "always_abstain")
+SURFACES = ("transfer", "reversal")
+SHA = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def require_sha(text: str, label: str) -> None:
+    if type(text) is not str or SHA.fullmatch(text) is None:
+        raise EvidenceHold(f"{label}: invalid lowercase sha256")
+
+
+def _metric(record: object, name: str) -> tuple[int, float, float | None]:
+    if not isinstance(record, dict):
+        raise EvidenceHold(f"{name}: missing score")
+    n, errors, coverage, brier = (record.get(k) for k in
+                                  ("n", "errors", "coverage", "brier_on_answered"))
+    if type(n) is not int or n <= 0 or type(errors) is not int or not 0 <= errors <= n:
+        raise EvidenceHold(f"{name}: invalid n/error count")
+    if type(coverage) not in (float, int) or not math.isfinite(coverage) or not 0 <= coverage <= 1:
+        raise EvidenceHold(f"{name}: invalid coverage")
+    if coverage == 0:
+        if brier is not None or errors != 0:
+            raise EvidenceHold(f"{name}: no answered predictions to score")
+    elif type(brier) not in (float, int) or not math.isfinite(brier) or not 0 <= brier <= 1:
+        raise EvidenceHold(f"{name}: invalid brier")
+    return errors, float(coverage), None if brier is None else float(brier)
+
+
+def audit(*, result_file: Path, worker_file: Path, method_file: Path,
+          expected_result_sha: str, expected_worker_sha: str,
+          expected_method_sha: str) -> dict[str, object]:
+    for label, value in (("report", expected_result_sha), ("worker", expected_worker_sha),
+                         ("selection", expected_method_sha)):
+        require_sha(value, label)
+    for label, path, expected in (("report", result_file, expected_result_sha),
+                                   ("worker", worker_file, expected_worker_sha),
+                                   ("selection", method_file, expected_method_sha)):
+        if digest(path) != expected:
+            raise EvidenceHold(f"{label}: observed bytes differ from expected digest")
+    report = json.loads(result_file.read_text(encoding="utf-8"))
+    selection = json.loads(method_file.read_text(encoding="utf-8"))
+    if type(report) is not dict or type(selection) is not dict:
+        raise EvidenceHold("reports must be objects")
+    if report.get("runtime_qualified") is not False or report.get("independent_evaluator") is not False:
+        raise EvidenceHold("synthetic report incorrectly claims runtime/independent qualification")
+    if report.get("status") != "DEVELOPER_AUTHORED_SYNTHETIC_NOT_AUTONOMOUS_LEARNING":
+        raise EvidenceHold("report overstates evidence class")
+    if report.get("labels_exposed_to_worker") is not False or report.get("negative_claim_mismatch_rejected") is not True:
+        raise EvidenceHold("reported worker isolation / mismatch test unsupported")
+    if report.get("worker_sha256") != expected_worker_sha or selection.get("worker_sha256") != expected_worker_sha:
+        raise EvidenceHold("worker/source identity mismatch")
+    if report.get("selected") != selection.get("method") or type(selection.get("train_n")) is not int:
+        raise EvidenceHold("selected method declaration mismatch")
+    scores = report.get("scores")
+    if not isinstance(scores, dict) or set(scores) != {
+        f"{surf}/{arm}" for surf in SURFACES for arm in ARMS
+    }:
+        raise EvidenceHold("incomplete or unexpected arm/surface scoring inventory")
+    result = {}
+    for name, record in scores.items():
+        result[name] = _metric(record, name)
+    for surf in SURFACES:
+        counts = {scores[f"{surf}/{arm}"]["n"] for arm in ARMS}
+        if len(counts) != 1:
+            raise EvidenceHold("different case counts across matched arms")
+    ta, tb, tc = (result[f"transfer/{arm}"][0] for arm in
+                  ("self_selected_toy", "frozen_zero", "guided_parity"))
+    ra, rb = (result[f"reversal/{arm}"][0] for arm in
+              ("self_selected_toy", "frozen_zero"))
+    if result["transfer/always_abstain"][1] != 0 or result["reversal/always_abstain"][1] != 0:
+        raise EvidenceHold("always-abstain control must have zero coverage")
+    if result["reversal/self_selected_toy"][2] is None or result["reversal/frozen_zero"][2] is None:
+        raise EvidenceHold("calibration comparison absent")
+    return {
+        "schema": "PORTAL_SYNTHETIC_METACOG_HUMILITY_REVIEW_V1",
+        "claim_level": "HOST_SOURCE_SYNTHETIC_ONLY",
+        "status": "HOLD_NOT_QUALIFIED",
+        "epistemic_humility_required": True,
+        "epistemic_humility_empirically_qualified": False,
+        "metacognitive_self_development_qualified": False,
+        "measured_source_worker_sha256": expected_worker_sha,
+        "measured_result_sha256": expected_result_sha,
+        "selection_declaration_digest": expected_method_sha,
+        "selected_method_label": selection["method"],
+        "selected_method_executable_consumption_attested": False,
+        "candidate_beats_frozen_transfer_errors": ta < tb,
+        "candidate_beats_guided_transfer_errors": ta < tc,
+        "candidate_reversal_errors_exceed_frozen": ra > rb,
+        "candidate_reversal_brier_exceeds_frozen": result["reversal/self_selected_toy"][2] > result["reversal/frozen_zero"][2],
+        "always_abstain_has_zero_coverage": True,
+        "hold_reasons": [
+            "EVALUATOR_INDEPENDENCE_SELF_REPORTED_FALSE",
+            "DECLARED_METHOD_DIGEST_NOT_EXECUTABLE_INVOCATION_ATTESTATION",
+            "NO_INDEPENDENT_HELDOUT_OR_TRUE_COLD_RUNTIME_RESTART",
+            "ALL_ARMS_REQUIRE_EPISTEMIC_HUMILITY_INDEPENDENT_OF_SCORE",
+        ],
+        "authorization_effect": "NONE",
+    }
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--result", required=True, type=Path)
+    p.add_argument("--worker", required=True, type=Path)
+    p.add_argument("--selection", required=True, type=Path)
+    p.add_argument("--result-sha", required=True)
+    p.add_argument("--worker-sha", required=True)
+    p.add_argument("--selection-sha", required=True)
+    args = p.parse_args()
+    try:
+        report = audit(result_file=args.result, worker_file=args.worker,
+                       method_file=args.selection, expected_result_sha=args.result_sha,
+                       expected_worker_sha=args.worker_sha,
+                       expected_method_sha=args.selection_sha)
+    except (EvidenceHold, OSError, ValueError, TypeError) as err:
+        print(json.dumps({"status": "REJECTED", "reason": str(err)}, sort_keys=True))
+        return 3
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
