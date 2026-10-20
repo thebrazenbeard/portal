@@ -41,9 +41,18 @@ def _metric(record: object, name: str) -> tuple[int, float, float | None]:
         raise EvidenceHold(f"{name}: invalid n/error count")
     if type(coverage) not in (float, int) or not math.isfinite(coverage) or not 0 <= coverage <= 1:
         raise EvidenceHold(f"{name}: invalid coverage")
-    if coverage == 0:
-        if brier is not None or errors != 0:
+    # Coverage is a fraction of all presented cases, not a free-standing score.
+    # Allow concise decimal displays, but never accept a fractional case count.
+    answered = round(n * coverage)
+    if not math.isclose(n * coverage, answered, rel_tol=0.0, abs_tol=0.01):
+        raise EvidenceHold(f"{name}: coverage implies a fractional answered count")
+    if errors > answered:
+        raise EvidenceHold(f"{name}: errors exceed answered predictions")
+    if answered == 0:
+        if coverage != 0 or brier is not None or errors != 0:
             raise EvidenceHold(f"{name}: no answered predictions to score")
+        if not name.endswith("/always_abstain"):
+            raise EvidenceHold(f"{name}: zero coverage cannot support method comparison")
     elif type(brier) not in (float, int) or not math.isfinite(brier) or not 0 <= brier <= 1:
         raise EvidenceHold(f"{name}: invalid brier")
     return errors, float(coverage), None if brier is None else float(brier)
@@ -55,13 +64,19 @@ def audit(*, result_file: Path, worker_file: Path, method_file: Path,
     for label, value in (("report", expected_result_sha), ("worker", expected_worker_sha),
                          ("selection", expected_method_sha)):
         require_sha(value, label)
+    # Observe each pathname exactly once: parse the very bytes that were hashed.
+    # This is local snapshot consistency, NOT external source custody or
+    # attestation of a later consumer's bytes.
+    snapshots = {}
     for label, path, expected in (("report", result_file, expected_result_sha),
                                    ("worker", worker_file, expected_worker_sha),
                                    ("selection", method_file, expected_method_sha)):
-        if digest(path) != expected:
+        captured = path.read_bytes()
+        if hashlib.sha256(captured).hexdigest() != expected:
             raise EvidenceHold(f"{label}: observed bytes differ from expected digest")
-    report = json.loads(result_file.read_text(encoding="utf-8"))
-    selection = json.loads(method_file.read_text(encoding="utf-8"))
+        snapshots[label] = captured
+    report = json.loads(snapshots["report"].decode("utf-8"))
+    selection = json.loads(snapshots["selection"].decode("utf-8"))
     if type(report) is not dict or type(selection) is not dict:
         raise EvidenceHold("reports must be objects")
     if report.get("runtime_qualified") is not False or report.get("independent_evaluator") is not False:

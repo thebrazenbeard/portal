@@ -79,5 +79,33 @@ class SyntheticAuditTests(unittest.TestCase):
             self.inspect()
 
 
+    def test_errors_cannot_exceed_answered_predictions(self):
+        # VN1 reviewer #6289940673: 60 errors with only 6 answered is invalid.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=60, coverage=0.1, brier_on_answered=0.1)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "answered"):
+            self.inspect()
+
+    def test_fractional_answered_case_count_is_invalid(self):
+        self.data["scores"]["transfer/self_selected_toy"]["coverage"] = 0.12
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "answered"):
+            self.inspect()
+
+    def test_zero_coverage_self_selected_not_a_learning_comparison(self):
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            errors=0, coverage=0.0, brier_on_answered=None)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "zero coverage"):
+            self.inspect()
+    def test_report_snapshot_not_reread_after_hashing(self):
+        from unittest.mock import patch
+        # A second pathname read can select different bytes after initial hash.
+        # Source metadata must parse the same captured byte snapshot as hashed.
+        with patch.object(Path, "read_text",
+                          side_effect=AssertionError("path opened twice")):
+            result = self.inspect()
+        self.assertEqual(result["status"], "HOLD_NOT_QUALIFIED")
 if __name__ == "__main__":
     unittest.main()
