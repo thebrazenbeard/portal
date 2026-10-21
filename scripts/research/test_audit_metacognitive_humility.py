@@ -26,6 +26,7 @@ class SyntheticAuditTests(unittest.TestCase):
             scores[f"{surface}/always_abstain"] = dict(
                 n=60, errors=0, coverage=0.0, brier_on_answered=None)
         scores["transfer/frozen_zero"]["errors"] = 30
+        scores["transfer/frozen_zero"]["brier_on_answered"] = 0.2
         scores["reversal/frozen_zero"]["errors"] = 30
         scores["reversal/frozen_zero"]["brier_on_answered"] = 0.34
         scores["reversal/self_selected_toy"]["errors"] = 60
@@ -107,5 +108,20 @@ class SyntheticAuditTests(unittest.TestCase):
                           side_effect=AssertionError("path opened twice")):
             result = self.inspect()
         self.assertEqual(result["status"], "HOLD_NOT_QUALIFIED")
+    def test_impossible_binary_brier_with_all_errors_rejected(self):
+        # VN1 #6304681161: every wrong thresholded prediction contributes >= .25 loss.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=60, coverage=1.0, brier_on_answered=0.0)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "binary Brier"):
+            self.inspect()
+
+    def test_binary_brier_loss_floor_on_partial_errors(self):
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=30, coverage=1.0, brier_on_answered=0.12)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "binary Brier"):
+            self.inspect()
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,12 @@ def _metric(record: object, name: str) -> tuple[int, float, float | None]:
             raise EvidenceHold(f"{name}: zero coverage cannot support method comparison")
     elif type(brier) not in (float, int) or not math.isfinite(brier) or not 0 <= brier <= 1:
         raise EvidenceHold(f"{name}: invalid brier")
+    # Interpreting errors as thresholded binary mistakes and brier_on_answered
+    # as mean squared (p - y)^2 over the SAME answered cases:
+    # any wrong answer costs >= 0.25 Brier at the 0.5 threshold.
+    # This is only a consistency condition on an UNTRUSTED self-report.
+    if answered and errors and float(brier) + 1e-12 < 0.25 * errors / answered:
+        raise EvidenceHold(f"{name}: error count incompatible with binary Brier")
     return errors, float(coverage), None if brier is None else float(brier)
 
 
