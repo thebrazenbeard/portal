@@ -122,6 +122,23 @@ def audit(*, result_file: Path, worker_file: Path, method_file: Path,
         raise EvidenceHold("always-abstain control must have zero coverage")
     if result["reversal/self_selected_toy"][2] is None or result["reversal/frozen_zero"][2] is None:
         raise EvidenceHold("calibration comparison absent")
+    # Descriptive SELECTIVE risk counts use reported aggregate denominators.
+    # These remain self-reported, not paired case identity or utility evidence.
+    descriptive = {}
+    for name, record in scores.items():
+        errors, coverage, brier = result[name]
+        presented = record["n"]
+        answered = round(presented * coverage)
+        descriptive[name] = {
+            "reported_presented": presented,
+            "reported_answered": answered,
+            "reported_abstained": presented - answered,
+            "reported_coverage": coverage,
+            "reported_errors_on_answered": errors,
+            "reported_selective_risk": errors / answered if answered else None,
+            "reported_brier_on_answered": brier,
+        }
+
     return {
         "schema": "PORTAL_SYNTHETIC_METACOG_HUMILITY_REVIEW_V1",
         "claim_level": "HOST_SOURCE_SYNTHETIC_ONLY",
@@ -138,6 +155,9 @@ def audit(*, result_file: Path, worker_file: Path, method_file: Path,
         # aggregates, not a paired method-advantage measurement.
         "cross_arm_case_alignment": "UNVERIFIED_NO_CASE_IDS",
         "matched_arm_comparison_qualified": False,
+        "reported_selective_metrics": descriptive,
+        "comparative_utility_qualified": False,
+        "abstention_cost_status": "UNSPECIFIED_NOT_IMPUTED",
         "reported_aggregate_ordering": {
             "self_selected_fewer_reported_transfer_errors_than_frozen": ta < tb,
             "self_selected_fewer_reported_transfer_errors_than_guided": ta < tc,
@@ -150,6 +170,7 @@ def audit(*, result_file: Path, worker_file: Path, method_file: Path,
         "always_abstain_has_zero_coverage": True,
         "hold_reasons": [
             "NO_PER_CASE_IDS_OR_MATCHED_ARM_ALIGNMENT_WITNESS",
+            "NO_PRECOMMITTED_ABSTENTION_COST_OR_PAIRED_UTILITY",
             "EVALUATOR_INDEPENDENCE_SELF_REPORTED_FALSE",
             "DECLARED_METHOD_DIGEST_NOT_EXECUTABLE_INVOCATION_ATTESTATION",
             "NO_INDEPENDENT_HELDOUT_OR_TRUE_COLD_RUNTIME_RESTART",
