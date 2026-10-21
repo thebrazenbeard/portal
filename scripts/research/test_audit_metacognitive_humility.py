@@ -159,5 +159,44 @@ class SyntheticAuditTests(unittest.TestCase):
                       observed["hold_reasons"])
         self.assertTrue(observed["reported_aggregate_ordering"][
             "self_selected_fewer_reported_transfer_errors_than_frozen"])
+    def test_raw_error_count_advantage_not_selective_risk_advantage(self):
+        # VN1: 1/6 answered is WORSE conditional risk than 2/60.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=1, coverage=0.1, brier_on_answered=0.2)
+        self.data["scores"]["transfer/frozen_zero"].update(
+            n=60, errors=2, coverage=1.0, brier_on_answered=0.2)
+        self.save()
+        verdict = self.inspect()
+        observations = verdict["reported_selective_metrics"]
+        candidate = observations["transfer/self_selected_toy"]
+        frozen = observations["transfer/frozen_zero"]
+        self.assertEqual(candidate["reported_answered"], 6)
+        self.assertEqual(candidate["reported_abstained"], 54)
+        self.assertAlmostEqual(candidate["reported_selective_risk"], 1 / 6)
+        self.assertAlmostEqual(frozen["reported_selective_risk"], 2 / 60)
+        self.assertGreater(candidate["reported_selective_risk"],
+                           frozen["reported_selective_risk"])
+        self.assertTrue(verdict["reported_aggregate_ordering"][
+            "self_selected_fewer_reported_transfer_errors_than_frozen"])
+        self.assertFalse(verdict["comparative_utility_qualified"])
+        self.assertEqual(verdict["status"], "HOLD_NOT_QUALIFIED")
+
+    def test_abstain_has_no_selective_risk_and_cost_not_assumed(self):
+        verdict = self.inspect()
+        abstain = verdict["reported_selective_metrics"]["transfer/always_abstain"]
+        self.assertIsNone(abstain["reported_selective_risk"])
+        self.assertEqual(abstain["reported_answered"], 0)
+        self.assertEqual(abstain["reported_abstained"], 60)
+        self.assertEqual(verdict["abstention_cost_status"],
+                         "UNSPECIFIED_NOT_IMPUTED")
+        self.assertIn("NO_PRECOMMITTED_ABSTENTION_COST_OR_PAIRED_UTILITY",
+                      verdict["hold_reasons"])
+
+    def test_full_coverage_selective_risk_denominator(self):
+        verdict = self.inspect()
+        frozen = verdict["reported_selective_metrics"]["transfer/frozen_zero"]
+        self.assertEqual(frozen["reported_answered"], 60)
+        self.assertEqual(frozen["reported_abstained"], 0)
+        self.assertAlmostEqual(frozen["reported_selective_risk"], 30 / 60)
 if __name__ == "__main__":
     unittest.main()
