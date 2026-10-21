@@ -134,12 +134,22 @@ def audit(*, result_file: Path, worker_file: Path, method_file: Path,
         "selection_declaration_digest": expected_method_sha,
         "selected_method_label": selection["method"],
         "selected_method_executable_consumption_attested": False,
-        "candidate_beats_frozen_transfer_errors": ta < tb,
-        "candidate_beats_guided_transfer_errors": ta < tc,
-        "candidate_reversal_errors_exceed_frozen": ra > rb,
-        "candidate_reversal_brier_exceeds_frozen": result["reversal/self_selected_toy"][2] > result["reversal/frozen_zero"][2],
+        # Without per-case IDs, this is ordering of self-reported
+        # aggregates, not a paired method-advantage measurement.
+        "cross_arm_case_alignment": "UNVERIFIED_NO_CASE_IDS",
+        "matched_arm_comparison_qualified": False,
+        "reported_aggregate_ordering": {
+            "self_selected_fewer_reported_transfer_errors_than_frozen": ta < tb,
+            "self_selected_fewer_reported_transfer_errors_than_guided": ta < tc,
+            "self_selected_more_reported_reversal_errors_than_frozen": ra > rb,
+            "self_selected_higher_reported_reversal_brier_than_frozen": (
+                result["reversal/self_selected_toy"][2] >
+                result["reversal/frozen_zero"][2]
+            ),
+        },
         "always_abstain_has_zero_coverage": True,
         "hold_reasons": [
+            "NO_PER_CASE_IDS_OR_MATCHED_ARM_ALIGNMENT_WITNESS",
             "EVALUATOR_INDEPENDENCE_SELF_REPORTED_FALSE",
             "DECLARED_METHOD_DIGEST_NOT_EXECUTABLE_INVOCATION_ATTESTATION",
             "NO_INDEPENDENT_HELDOUT_OR_TRUE_COLD_RUNTIME_RESTART",

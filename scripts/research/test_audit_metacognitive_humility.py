@@ -146,5 +146,18 @@ class SyntheticAuditTests(unittest.TestCase):
         self.save()
         result = self.inspect()
         self.assertEqual(result["status"], "HOLD_NOT_QUALIFIED")
+    def test_aggregate_order_is_not_matched_case_comparison(self):
+        # Equal counts can conceal disjoint or easier/harder test populations:
+        # without evaluator-held case IDs, never claim matched-arm advantage.
+        observed = self.inspect()
+        self.assertEqual(observed["cross_arm_case_alignment"],
+                         "UNVERIFIED_NO_CASE_IDS")
+        self.assertFalse(observed["matched_arm_comparison_qualified"])
+        self.assertNotIn("candidate_beats_frozen_transfer_errors", observed)
+        self.assertNotIn("candidate_beats_guided_transfer_errors", observed)
+        self.assertIn("NO_PER_CASE_IDS_OR_MATCHED_ARM_ALIGNMENT_WITNESS",
+                      observed["hold_reasons"])
+        self.assertTrue(observed["reported_aggregate_ordering"][
+            "self_selected_fewer_reported_transfer_errors_than_frozen"])
 if __name__ == "__main__":
     unittest.main()
