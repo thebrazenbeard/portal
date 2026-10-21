@@ -123,5 +123,28 @@ class SyntheticAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(audit.EvidenceHold, "binary Brier"):
             self.inspect()
 
+    def test_impossible_zero_error_binary_brier_rejected(self):
+        # A threshold-correct binary probability has squared loss <= 0.25.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=0, coverage=1.0, brier_on_answered=0.3)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "binary Brier"):
+            self.inspect()
+
+    def test_impossible_partial_error_high_binary_brier_rejected(self):
+        # With half of answers wrong: maximum mean Brier = 0.25 + .75*0.5.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=30, coverage=1.0, brier_on_answered=0.8)
+        self.save()
+        with self.assertRaisesRegex(audit.EvidenceHold, "binary Brier"):
+            self.inspect()
+
+    def test_consistent_binary_brier_upper_boundary_is_allowed(self):
+        # Structural consistency is not authentication or actual H/M learning.
+        self.data["scores"]["transfer/self_selected_toy"].update(
+            n=60, errors=30, coverage=1.0, brier_on_answered=0.625)
+        self.save()
+        result = self.inspect()
+        self.assertEqual(result["status"], "HOLD_NOT_QUALIFIED")
 if __name__ == "__main__":
     unittest.main()
