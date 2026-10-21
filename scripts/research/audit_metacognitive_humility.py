@@ -61,6 +61,13 @@ def _metric(record: object, name: str) -> tuple[int, float, float | None]:
     # This is only a consistency condition on an UNTRUSTED self-report.
     if answered and errors and float(brier) + 1e-12 < 0.25 * errors / answered:
         raise EvidenceHold(f"{name}: error count incompatible with binary Brier")
+    # Each threshold-CORRECT binary prediction has Brier <= .25, while
+    # any threshold-WRONG prediction can contribute at most 1.0.
+    # Therefore the aggregate score cannot exceed .25 + .75 * error rate.
+    # As with the lower bound, this guards reported arithmetic ONLY:
+    # it does not authenticate labels, scores, methods or reviewer control.
+    if answered and float(brier) > 0.25 + 0.75 * errors / answered + 1e-12:
+        raise EvidenceHold(f"{name}: error count incompatible with binary Brier")
     return errors, float(coverage), None if brier is None else float(brier)
 
 
