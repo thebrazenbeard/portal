@@ -21,7 +21,8 @@ def classify(name: str) -> str | None:
     lower = name.lower()
     if lower.startswith(("mmproj", "projector")) and lower.endswith(".gguf"):
         return "MULTIMODAL_PROJECTOR"
-    if lower == "adapter_model.safetensors" or lower.startswith("adapter_model."):
+    if (lower == "adapter_model.safetensors" or lower.startswith("adapter_model.")
+            or (lower.endswith(".gguf") and ("lora" in lower or "adapter" in lower))):
         return "ADAPTER_WEIGHTS"
     if SHARD_RE.fullmatch(lower):
         return "WEIGHT_SHARD"
