@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import traceback
 
@@ -23,6 +24,8 @@ CONFIG = ROOT / "config.json"
 RUN = ROOT / "run"
 STATE = ROOT / "state"
 SOURCE_BLOB = "48e00014b89adeb392102ef45849fbd49fc9dc29"
+REPLACE_RETRY_WINDOW_SECONDS = 1.0
+REPLACE_RETRY_INTERVAL_SECONDS = 0.025
 
 def blob(path):
     raw = path.read_bytes()
@@ -40,12 +43,38 @@ def installed_fingerprint(root):
     return hashlib.sha256("\n".join(lines).encode()).hexdigest(), len(lines)
 
 def atomic_json(path, payload):
-    temp = path.with_suffix(".tmp")
-    with temp.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, sort_keys=True)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temp, path)
+    """Durably replace one JSON receipt; tolerate only bounded Windows sharing errors.
+
+    Readers can hold heartbeat.json without FILE_SHARE_DELETE, causing os.replace
+    to raise WinError 5 even though LocalService has Modify ACL. Each attempt has
+    its own temp name; never overwrite the destination with an incomplete payload.
+    """
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix="." + path.name + ".", suffix=".tmp", delete=False,
+        ) as handle:
+            temp = Path(handle.name)
+            json.dump(payload, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        deadline = time.monotonic() + REPLACE_RETRY_WINDOW_SECONDS
+        while True:
+            try:
+                os.replace(temp, path)
+                return
+            except PermissionError as exc:
+                # WinError 5 may be a sharing conflict OR true ACL failure.
+                # Neither is ignored: retry briefly, then propagate the error.
+                if (getattr(exc, "winerror", None) not in (5, 32)
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(min(REPLACE_RETRY_INTERVAL_SECONDS,
+                               max(0.0, deadline - time.monotonic())))
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
 
 def startup():
     cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
