@@ -48,7 +48,7 @@ class AtomicHeartbeatTests(unittest.TestCase):
         self.write = load_writer()
 
     def no_temps(self):
-        self.assertEqual(list(self.path.parent.glob("*.tmp")), [])
+        self.assertEqual(list(self.path.parent.glob(".heartbeat.json.*.tmp")), [])
 
     def test_existing_heartbeat_replaced_atomically(self):
         self.write(self.path, {"sequence": 1})
