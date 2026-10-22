@@ -16,6 +16,7 @@ from typing import Mapping
 
 _ID = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}\Z")
 _LABELS = frozenset(("0", "1"))
+_REF = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,199}\\Z")
 CLAIM = "SYNTHETIC_DEVELOPER_SUPPLIED_HYPOTHESIS_ARBITRATION"
 
 
@@ -106,7 +107,8 @@ def reconcile(
                 or type(label) is not str or label not in _LABELS
                 or type(ref) is not str or not ref or len(ref) > 200):
             raise ValueError("invalid or duplicate observation")
-        _id(ref, "observation ref")
+        if _REF.fullmatch(ref) is None:
+            raise ValueError("invalid observation ref")
         seen.add(item)
         normalized.append((item, label, ref))
     remaining = tuple(sorted(
