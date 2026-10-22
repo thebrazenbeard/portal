@@ -16,6 +16,7 @@ from typing import Mapping
 
 _ID = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}\Z")
 _LABELS = frozenset(("0", "1"))
+_RULE_ID = re.compile(r"[a-z][a-z0-9_-]{0,63}(?::[0-9]{1,2})?\Z")
 _REF = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,199}")
 CLAIM = "SYNTHETIC_DEVELOPER_SUPPLIED_HYPOTHESIS_ARBITRATION"
 
@@ -79,7 +80,8 @@ def reconcile(
     keys = train | withheld
     checked: dict[str, dict[str, str]] = {}
     for hypothesis, values in predictions.items():
-        _id(hypothesis, "hypothesis")
+        if type(hypothesis) is not str or _RULE_ID.fullmatch(hypothesis) is None:
+            raise ValueError("invalid bounded hypothesis identifier")
         if type(values) is not dict or set(values) != keys:
             raise ValueError("candidate labels missing or extra")
         for k, label in values.items():
