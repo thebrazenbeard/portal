@@ -16,7 +16,7 @@ from typing import Mapping
 
 _ID = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}\Z")
 _LABELS = frozenset(("0", "1"))
-_REF = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,199}\\Z")
+_REF = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9:._/-]{0,199}")
 CLAIM = "SYNTHETIC_DEVELOPER_SUPPLIED_HYPOTHESIS_ARBITRATION"
 
 
