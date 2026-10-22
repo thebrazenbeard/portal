@@ -82,6 +82,19 @@ class UncleanRestartPreflightTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check()
 
+    def test_symlinked_unhashed_dependency_directory_denied(self):
+        outside = self.root / "unhashed-external"
+        outside.mkdir()
+        (outside / "arbitrary.py").write_text("print('unhashed')", encoding="utf-8")
+        try:
+            (self.install / "unhashed_package").symlink_to(
+                outside, target_is_directory=True
+            )
+        except (OSError, NotImplementedError):
+            self.skipTest("host denies symlink creation")
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            self.check()
+
     def test_invalid_timeout_never_launches(self):
         with patch("observe_staged_qvr_unclean_restart.subprocess.Popen",
                    side_effect=AssertionError("must not launch")):
