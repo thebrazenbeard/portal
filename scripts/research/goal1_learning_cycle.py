@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import re
+import tempfile
+from pathlib import Path
 from typing import Callable
 
 ALLOWED = frozenset(("LEFT", "RIGHT", "ABSTAIN"))
@@ -66,7 +68,34 @@ def _observation(value: Observation) -> Observation:
     return value
 
 
-def learn_once(runtime, *, permit, trial_id: str, problem: str,
+def _sandbox_memory(runtime, sandbox_root: str | Path):
+    """Refuse wrong or linked files; names alone are not a state boundary.
+
+    Research guard against accidental canonical-state access, not a proof of
+    independent authorization. Caller must create an isolated temporary root.
+    """
+    memory = runtime.lifecycle.memory
+    root = Path(sandbox_root)
+    try:
+        resolved = root.resolve(strict=True)
+        path = Path(memory.path).resolve(strict=True)
+        temp = Path(tempfile.gettempdir()).resolve(strict=True)
+    except (OSError, TypeError, ValueError) as exc:
+        raise RuntimeError("Goal1 sandbox directory unavailable") from exc
+    if (not resolved.is_dir()
+            or root.absolute() != resolved
+            or resolved.parent != temp
+            or not resolved.name.startswith("vera-goal1-")
+            or path != resolved / "synthetic-memory.sqlite3"
+            or Path(memory.path).is_symlink()
+            or not path.is_file()
+            or memory.project_id != "goal1-synthetic-lab"
+            or memory.identity_id != "goal1-synthetic-runtime"):
+        raise RuntimeError("Goal1 refuses memory outside isolated synthetic sandbox")
+    return memory
+
+
+def learn_once(runtime, *, sandbox_root: str | Path, permit, trial_id: str, problem: str,
                evaluate: Callable[[str], Observation]) -> LearningAttempt:
     """Score an actual QVR action before sending feedback; store only a candidate.
 
@@ -75,6 +104,7 @@ def learn_once(runtime, *, permit, trial_id: str, problem: str,
     ledger (never in canonical project/person memory for this lab).
     """
     trial = _id(trial_id)
+    memory = _sandbox_memory(runtime, sandbox_root)
     question = _text(problem, "problem")
     prompt = "Synthetic no-effect puzzle. Reply ONLY LEFT, RIGHT or ABSTAIN. Task: " + question
     first, first_receipt = _decision(runtime, prompt=prompt, permit=permit,
@@ -96,7 +126,8 @@ def learn_once(runtime, *, permit, trial_id: str, problem: str,
     # Imports are local to avoid making this PORTAL research fixture a runtime
     # dependency. In the qualified experiment these resolve from selected Vera Mono.
     from vera_memory import AdmissionRequest, MemoryClass
-    memory = runtime.lifecycle.memory
+    if _sandbox_memory(runtime, sandbox_root) is not memory:
+        raise RuntimeError("Goal1 memory binding changed during inference")
     record = AdmissionRequest(
         record_id=f"goal1:{trial}:candidate", text=second,
         memory_class=MemoryClass.WORKING_PROJECT,
@@ -117,7 +148,7 @@ def learn_once(runtime, *, permit, trial_id: str, problem: str,
     return LearningAttempt(first, second, observed.evidence_ref, admission)
 
 
-def reuse_after_restart(runtime, *, permit, trial_id: str, new_problem: str,
+def reuse_after_restart(runtime, *, sandbox_root: str | Path, case_id: str, permit, trial_id: str, new_problem: str,
                         evaluate: Callable[[str], Observation]) -> LaterUseAttempt:
     """Read old candidate from injected memory and score a new QVR answer.
 
@@ -125,9 +156,10 @@ def reuse_after_restart(runtime, *, permit, trial_id: str, new_problem: str,
     evaluator cases were withheld; function name is a research intent only.
     """
     trial = _id(trial_id)
+    memory = _sandbox_memory(runtime, sandbox_root)
+    case = _id(case_id)
     question = _text(new_problem, "new_problem")
     from vera_memory import MemoryClass
-    memory = runtime.lifecycle.memory
     record = memory.read(f"goal1:{trial}:candidate")
     if (record.status != "CURRENT"
             or record.source_actor != "goal1-research-model-proposed"
@@ -142,7 +174,7 @@ def reuse_after_restart(runtime, *, permit, trial_id: str, new_problem: str,
               "(UNREVIEWED, may be wrong): " + record.text +
               ". Reply ONLY LEFT, RIGHT or ABSTAIN. New task: " + question)
     action, _ = _decision(runtime, prompt=prompt, permit=permit,
-                          invocation_id=f"goal1:{trial}:later-use")
+                          invocation_id=f"goal1:{trial}:later-use:{case}")
     if action == "ABSTAIN":
         return LaterUseAttempt(action, False, "NO_OUTCOME_ABSTAINED")
     observed = _observation(evaluate(action))
