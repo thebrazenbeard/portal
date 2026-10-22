@@ -34,6 +34,12 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(inventory([self.root])["files"][0]["kind"],
                          "ADAPTER_WEIGHTS")
 
+    def test_gguf_lora_is_adapter_not_standalone(self):
+        self.make("gguf/Vera-v0.5-LoRA-F16.gguf")
+        r = inventory([self.root])
+        self.assertEqual(r["files"][0]["kind"], "ADAPTER_WEIGHTS")
+        self.assertFalse(r["model_loadability_verified"])
+
     def test_completed_shards_filename_only(self):
         self.make("base/model-00001-of-00002.safetensors")
         self.make("base/model-00002-of-00002.safetensors")
