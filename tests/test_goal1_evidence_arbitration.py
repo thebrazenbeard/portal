@@ -65,6 +65,29 @@ class EvidenceArbitrationTests(unittest.TestCase):
         c=trial()
         self.assertEqual(a.fingerprint,b.fingerprint)
         self.assertEqual(a.fingerprint,c.fingerprint)
+    def test_model_generated_numeric_rule_names_accepted(self):
+        candidate_predictions = {
+            "at_least_ones:2": {k: str(int(v.count("1") >= 2)) for k, v in FEATURES.items()},
+            "parity_ones": {k: str(v.count("1") % 2) for k, v in FEATURES.items()},
+        }
+        r = reconcile(case_id="bounded-synthetic-1",
+                      predictions=candidate_predictions, training_ids=TRAIN,
+                      holdout_ids=HIDDEN,
+                      observed=(("train-d", "1", "eval:legitimate"),))
+        self.assertEqual(r.remaining, ("at_least_ones:2",))
+        self.assertEqual(dict(r.heldout_predictions),
+                         {"hidden-g": "0", "hidden-h": "1"})
+
+    def test_malformed_model_rule_names_are_rejected(self):
+        for bad in ("evil:__import__", "rule:999", "bad;import", "bad:2;run"):
+            with self.subTest(bad=bad):
+                proposals = {bad: candidate_table()["majority"],
+                             "parity_ones": candidate_table()["parity"]}
+                with self.assertRaises(ValueError):
+                    reconcile(case_id="bounded-synthetic-1",
+                              predictions=proposals, training_ids=TRAIN,
+                              holdout_ids=HIDDEN, observed=())
+
     def test_model_opinion_does_not_override_observed_label(self):
         r=trial((("train-d","1","evidence:observed"),))
         self.assertNotIn("parity",r.remaining)
