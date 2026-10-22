@@ -11,9 +11,7 @@ from enum import Enum
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parent
-if (ROOT / 'scripts' / 'research').exists():
-    ROOT = ROOT / 'scripts' / 'research'
+ROOT = Path(__file__).resolve().parents[1] / 'scripts' / 'research'
 sys.path.insert(0, str(ROOT))
 from goal1_learning_cycle import Observation, learn_once, reuse_after_restart
 
