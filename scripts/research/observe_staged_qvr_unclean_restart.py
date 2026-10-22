@@ -33,6 +33,8 @@ def git_blob(path: Path) -> str:
 def installed_tree_digest(root: Path) -> str:
     lines = []
     for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("symlink in installed artifact tree")
         if not path.is_file() or "__pycache__" in path.parts:
             continue
         lines.append(path.relative_to(root).as_posix() + " " +
