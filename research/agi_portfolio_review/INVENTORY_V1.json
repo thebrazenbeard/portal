@@ -28,12 +28,32 @@
       "default_branch": "main",
       "archived": false,
       "priority": "A",
-      "head_sha": null,
-      "inventory_status": "INVENTORIED_ONLY",
-      "source_review": [],
-      "model_reviews": [],
+      "head_sha": "efae5c6c522edc48e55c002e20f73733063d435",
+      "inventory_status": "PARTIAL_SOURCE_REVIEW",
+      "source_review": [
+        {
+          "path": "tools/query_deep_memory.py",
+          "git_blob": "55fca5ca32d6fab436dc2a6e9b00dea97f46e5f0",
+          "scope": "lines 126-174 blind model excerpt; isolated extracted functions from lines 109-165 tested with stubbed helpers",
+          "level": "REPOSITORY_SOURCE_PARTIAL"
+        }
+      ],
+      "model_reviews": [
+        {
+          "model": "qwen3:4b-instruct@Lappy",
+          "scope": "same 49-line source excerpt only",
+          "status": "FIRST_ROUND_RECORDED",
+          "receipt": "research/agi_portfolio_review/ROUND1_DEEPMEMORY_V1.json"
+        },
+        {
+          "model": "Granite3.3-2B@VN2",
+          "scope": "same 49-line source excerpt only, token-capped answer",
+          "status": "FIRST_ROUND_RECORDED",
+          "receipt": "research/agi_portfolio_review/ROUND1_DEEPMEMORY_V1.json"
+        }
+      ],
       "cross_review": [],
-      "qualification": "NOT_REVIEWED"
+      "qualification": "NOT_QUALIFIED_ONLY_PARTIAL_SOURCE_REVIEW"
     },
     {
       "repo": "thebrazenbeard/discovery",
