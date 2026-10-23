@@ -29,3 +29,11 @@ Microsoft `Phi-4-mini-reasoning` and `DeepSeek-R1-Distill-Qwen-1.5B` were checke
 A model stored on independent VN1 hardware is not necessarily an *independently qualified* source reviewer. Each completed review must bind the exact source Git commit and blob, model bytes, executable hash/version, prompt and response hashes, completion exit, and source-verifiable negative tests; compare blind first-round reports before sharing peers' findings. CPU capacity is limited—prefer short exact-source excerpts to whole-repo context dumps. Do not assume sustained background operation.
 
 No Windows machine-wide Visual C++ runtime installation, Service Control Manager modification, `VeraMonoPilot` repair/restart, provider route cutover, VeraMesh mutation, credential/trust or canonical memory write was made.
+
+## Follow-up qualification limitations (same turn)
+
+The basic Granite generation receipt is real; **automated hostile source review remains unqualified**. Three separate `llama-cli` attempts with longer, shorter, and minimal source prompts were terminated by subprocess timeouts at **165 s, 90 s, and 85 s**, respectively. Those attempts did not produce usable scored review receipts. Do not count them as three reviews. The older CPU throughput is limited, but the pattern could additionally reflect CLI conversation-loop behavior; newer llama.cpp issue #27214 reports scripted `llama-cli` calls waiting for another turn unless run in explicit single-turn mode. That report is supporting context, **not proof** that b4179 on VN1 has the same defect.
+
+The b4179 archive also includes `llama-simple.exe`, whose help shows one-shot prompt invocation, but **no verified end-to-end result** from this executable exists in the published evidence. Attempts to stage that test encountered intermittent VN1 Executor transport errors, not a qualified result. A next review acceptance requires actual completed model response and exit 0 bound to frozen Git source; model loading alone is insufficient.
+
+Do not conflate Windows binary compatibility repair with complete independent AGI portfolio reviewer readiness.
