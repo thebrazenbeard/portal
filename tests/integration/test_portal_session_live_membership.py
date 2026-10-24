@@ -254,6 +254,8 @@ def test_selected_host_rejects_stale_head_before_new_wave_admission(
     ]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["session_id"] == "head-drift"
+    assert output["protected_effects_authorized"] is False
+    assert output["admitted"] == 0
     assert ("thebrazenbeard/project-runner", "main") in MovedHeadTransport.reads
     assert len(prepared) == 1
     kwargs, plan = prepared[0]
