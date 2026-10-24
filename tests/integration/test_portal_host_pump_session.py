@@ -63,7 +63,7 @@ def test_resident_session_host_pump_verification_refills_freed_lane(
     monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
 
     state_db = tmp_path / "portal.sqlite3"
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     for subject_id in ("alpha", "beta"):
         store.advertise_route(
             PortalRouteAdvertisement(

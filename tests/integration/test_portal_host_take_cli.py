@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 import portal.cli as portal_cli
 from portal.adapters import PortalRouteBinding
@@ -9,6 +12,14 @@ from portal.host_bridge import PortalHostBridgeStore
 from portal.route_resolver import PortalRouteAdvertisement
 from portal.session import PortalSessionResult
 from portal.wave_runtime import PortalWavePacket
+
+
+@pytest.fixture(autouse=True)
+def _local_head_reader(monkeypatch):
+    monkeypatch.setattr(
+        portal_cli, "GitHubRestTransport",
+        lambda **_kwargs: SimpleNamespace(read_ref=lambda _r, _f: "a" * 40),
+    )
 
 
 def _queue(
@@ -83,7 +94,7 @@ def _queue(
 def test_take_pending_dispatch_filters_adapter_and_marks_attempt_atomically(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     workbridge = _queue(
         store,
         run_id="portfolio::g1",
@@ -124,7 +135,7 @@ def test_take_pending_dispatch_filters_adapter_and_marks_attempt_atomically(
 
 
 def test_take_pending_dispatch_rejects_empty_adapter_filter(tmp_path: Path) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     _queue(
         store,
         run_id="portfolio::g1",
@@ -152,7 +163,7 @@ def test_host_take_cli_returns_exact_attempted_dispatch(
     capsys,
 ) -> None:
     state_db = tmp_path / "portal.sqlite3"
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",

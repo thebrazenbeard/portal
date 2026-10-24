@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
+from .host_bridge import PortalHostSourceHeadHeld
 from .host_pump import PortalHostDriverResult
 
 
@@ -17,6 +19,7 @@ _ECHO_FIELDS = (
     "subject_kind",
     "subject_id",
 )
+_HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _required_text(value: object, label: str) -> str:
@@ -40,6 +43,7 @@ class PortalCommandHostDriver:
         command: Sequence[str],
         timeout_seconds: float = 300.0,
         cwd: Path | None = None,
+        head_reader: Callable[[str, str], str] | None = None,
     ) -> None:
         if isinstance(command, (str, bytes)):
             raise ValueError("command must be a non-empty argv sequence")
@@ -59,6 +63,7 @@ class PortalCommandHostDriver:
         self.command = tuple(part.strip() for part in argv)
         self.timeout_seconds = float(timeout_seconds)
         self.cwd = Path(cwd) if cwd is not None else None
+        self.head_reader = head_reader
 
     def execute(
         self,
@@ -71,6 +76,28 @@ class PortalCommandHostDriver:
             field: _required_text(dispatch.get(field), field)
             for field in _ECHO_FIELDS
         }
+
+        # This read narrows the attempt-to-effect race. The receiving adapter
+        # must still pin/CAS the expected head for source-changing operations.
+        repository = _required_text(dispatch.get("repository"), "repository")
+        ref = _required_text(dispatch.get("ref"), "ref")
+        exact_head = _required_text(dispatch.get("exact_head"), "exact_head")
+        if self.head_reader is None or _HEAD_SHA.fullmatch(exact_head) is None:
+            raise PortalHostSourceHeadHeld(
+                "host driver source head is not verifiable"
+            )
+        try:
+            live_head = self.head_reader(repository, ref)
+        except Exception as exc:
+            raise PortalHostSourceHeadHeld(
+                "host driver source head is unavailable"
+            ) from exc
+        if (
+            not isinstance(live_head, str)
+            or _HEAD_SHA.fullmatch(live_head) is None
+            or live_head != exact_head
+        ):
+            raise PortalHostSourceHeadHeld("host driver source head is not current")
 
         request_payload = {
             "schema": _REQUEST_SCHEMA,
