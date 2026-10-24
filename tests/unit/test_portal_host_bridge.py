@@ -67,7 +67,7 @@ def _route(**overrides) -> PortalRouteAdvertisement:
 
 
 def test_host_route_advertisement_expires_and_fails_closed(tmp_path: Path) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
 
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
@@ -86,7 +86,7 @@ def test_host_route_advertisement_expires_and_fails_closed(tmp_path: Path) -> No
 def test_host_dispatch_is_durable_and_idempotent_before_external_attempt(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     result = _result()
@@ -115,7 +115,7 @@ def test_host_dispatch_is_durable_and_idempotent_before_external_attempt(
 def test_attempt_marker_turns_unfinished_host_effect_into_outcome_unknown(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     result = _result()
@@ -162,7 +162,7 @@ def test_attempt_marker_turns_unfinished_host_effect_into_outcome_unknown(
 
 
 def test_host_reconciliation_can_verify_completion(tmp_path: Path) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     result = _result()
@@ -205,7 +205,7 @@ def test_host_reconciliation_can_verify_completion(tmp_path: Path) -> None:
 def test_different_second_attempt_is_refused_after_effect_boundary(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     result = _result()
@@ -238,7 +238,7 @@ def test_different_second_attempt_is_refused_after_effect_boundary(
 
 
 def test_verified_complete_requires_prior_attempt(tmp_path: Path) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     result = _result()
@@ -274,7 +274,7 @@ def test_complete_uses_owning_host_adapter_reconciliation(
     monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
 
     state_db = tmp_path / "portal.sqlite3"
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(
         _route(),
         ttl_seconds=60.0,
@@ -344,7 +344,7 @@ def test_complete_refuses_route_bound_subject_without_owning_adapter(
 
     monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
     state_db = tmp_path / "portal.sqlite3"
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(_route(), ttl_seconds=60.0, observed_at=100.0)
     adapter = PortalHostExecutionAdapter(store=store, clock=lambda: 120.0)
     controller = portal_session.PortalCommandSession(state_db)
@@ -376,7 +376,7 @@ def test_complete_refuses_route_bound_subject_without_owning_adapter(
 def test_bulk_route_advertisement_rolls_back_on_stale_member(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     existing = _route(
         route_id="repo-native:thebrazenbeard/portal",
         target_id="thebrazenbeard/portal",
@@ -409,7 +409,7 @@ def test_bulk_route_advertisement_rolls_back_on_stale_member(
 def test_host_snapshot_rolls_back_all_members_on_stale_route(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(
         _route(),
         ttl_seconds=300.0,

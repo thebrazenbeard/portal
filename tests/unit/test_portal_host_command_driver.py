@@ -74,6 +74,7 @@ def test_command_driver_sends_exact_bound_request_and_accepts_verified_result(
         command=("adapter-wrapper", "--stdio"),
         timeout_seconds=12.0,
         cwd=tmp_path,
+        head_reader=lambda _r, _f: "a" * 40,
     )
     result = driver.execute(dispatch, attempt_id="attempt-1")
 
@@ -106,7 +107,7 @@ def test_command_driver_does_not_promote_process_exit_to_completion(
         ),
     )
 
-    driver = PortalCommandHostDriver(command=("adapter-wrapper",))
+    driver = PortalCommandHostDriver(command=("adapter-wrapper",), head_reader=lambda _r, _f: "a" * 40)
     with pytest.raises(ValueError, match="driver result schema"):
         driver.execute(dispatch, attempt_id="attempt-1")
 
@@ -127,7 +128,7 @@ def test_command_driver_rejects_mismatched_attempt_or_route(
         ),
     )
 
-    driver = PortalCommandHostDriver(command=("adapter-wrapper",))
+    driver = PortalCommandHostDriver(command=("adapter-wrapper",), head_reader=lambda _r, _f: "a" * 40)
     with pytest.raises(ValueError, match="attempt_id"):
         driver.execute(dispatch, attempt_id="attempt-1")
 
@@ -148,7 +149,7 @@ def test_command_driver_rejects_cross_subject_evidence(
         ),
     )
 
-    driver = PortalCommandHostDriver(command=("adapter-wrapper",))
+    driver = PortalCommandHostDriver(command=("adapter-wrapper",), head_reader=lambda _r, _f: "a" * 40)
     with pytest.raises(ValueError, match="subject_id"):
         driver.execute(dispatch, attempt_id="attempt-1")
 
@@ -165,7 +166,7 @@ def test_command_driver_nonzero_exit_is_not_treated_as_result(
         ),
     )
 
-    driver = PortalCommandHostDriver(command=("adapter-wrapper",))
+    driver = PortalCommandHostDriver(command=("adapter-wrapper",), head_reader=lambda _r, _f: "a" * 40)
     with pytest.raises(RuntimeError, match="exit code 17"):
         driver.execute(_dispatch(), attempt_id="attempt-1")
 
@@ -182,7 +183,7 @@ def test_command_driver_invalid_json_is_rejected(
         ),
     )
 
-    driver = PortalCommandHostDriver(command=("adapter-wrapper",))
+    driver = PortalCommandHostDriver(command=("adapter-wrapper",), head_reader=lambda _r, _f: "a" * 40)
     with pytest.raises(ValueError, match="valid JSON"):
         driver.execute(_dispatch(), attempt_id="attempt-1")
 
@@ -201,6 +202,7 @@ def test_command_driver_timeout_propagates_for_host_pump_to_mark_unknown(
     driver = PortalCommandHostDriver(
         command=("adapter-wrapper",),
         timeout_seconds=3.0,
+        head_reader=lambda _r, _f: "a" * 40,
     )
     with pytest.raises(subprocess.TimeoutExpired):
         driver.execute(_dispatch(), attempt_id="attempt-1")
