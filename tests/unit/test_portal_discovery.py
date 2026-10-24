@@ -119,6 +119,64 @@ def test_live_registry_rejects_duplicate_repository_identity():
         )
 
 
+def test_live_registry_duplicate_private_identity_is_redacted():
+    private_name = "synthetic-private-repository"
+    duplicate = _repo(private_name, private=True)
+    with pytest.raises(ValueError, match="duplicate discovered repository") as error:
+        build_live_project_registry(
+            owner="thebrazenbeard",
+            repositories=(duplicate, duplicate),
+        )
+    assert private_name not in str(error.value)
+
+
+def test_live_registry_ambiguous_private_binding_is_redacted():
+    private_name = "synthetic-private-ambiguous"
+    one = ProjectDefinition.from_mapping(
+        {
+            "id": "one", "name": "one", "visibility": "private",
+            "repositories": [f"thebrazenbeard/{private_name}"],
+            "capabilities": ["read"], "assignment_scope": "NONE",
+            "review_scope": "NONE", "family_id": "one",
+            "scheduling_state": "SCHEDULABLE",
+        }
+    )
+    two = ProjectDefinition.from_mapping(
+        {
+            "id": "two", "name": "two", "visibility": "private",
+            "repositories": [f"thebrazenbeard/{private_name}"],
+            "capabilities": ["read"], "assignment_scope": "NONE",
+            "review_scope": "NONE", "family_id": "two",
+            "scheduling_state": "SCHEDULABLE",
+        }
+    )
+    with pytest.raises(ValueError, match="curated repository binding is ambiguous") as error:
+        build_live_project_registry(
+            owner="thebrazenbeard",
+            repositories=(_repo(private_name, private=True),),
+            curated_projects=(one, two),
+        )
+    assert private_name not in str(error.value)
+
+
+def test_live_registry_duplicate_private_project_id_is_redacted():
+    private_name = "synthetic-private-project-id"
+    first = _repo(private_name, private=True)
+    second = RepositoryInventoryItem(
+        name=private_name,
+        full_name="thebrazenbeard/synthetic-other-private-repository",
+        private=True,
+        archived=False,
+        default_branch="main",
+    )
+    with pytest.raises(ValueError, match="duplicate live project id") as error:
+        build_live_project_registry(
+            owner="thebrazenbeard",
+            repositories=(first, second),
+        )
+    assert private_name not in str(error.value)
+
+
 def test_live_registry_rejects_curated_repository_ambiguity():
     first = ProjectDefinition.from_mapping(
         {

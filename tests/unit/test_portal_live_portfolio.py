@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import portal.live_portfolio as live_portfolio
 from portal.discovery import RepositoryInventoryItem
 from portal.live_portfolio import refresh_live_public_portfolio
@@ -202,6 +204,30 @@ def test_live_overlay_covers_current_public_membership_without_leaking_private_n
     assert "secret" not in raw_wave
     assert "gone" not in raw_corpus
     assert "gone" not in raw_wave
+
+
+@pytest.mark.parametrize("mixed_visibility", (False, True))
+def test_public_live_overlay_redacts_duplicate_private_identity_on_failure(
+    tmp_path: Path, mixed_visibility: bool
+) -> None:
+    corpus_path, wave_path = _baseline(tmp_path)
+    private_name = "synthetic-private-identity"
+    duplicate = (
+        _repo(private_name, private=not mixed_visibility),
+        _repo(private_name, private=True),
+    )
+
+    with pytest.raises(ValueError, match="duplicate live repository") as error:
+        refresh_live_public_portfolio(
+            baseline_corpus_path=corpus_path,
+            baseline_wave_path=wave_path,
+            repositories=duplicate,
+            observed_at="2026-10-24T00:00:00Z",
+            output_dir=tmp_path / "public-output",
+        )
+
+    assert private_name not in str(error.value)
+    assert not (tmp_path / "public-output").exists()
 
 
 def test_live_overlay_wave_uses_exact_local_corpus_digest_and_safe_discovery_work(
