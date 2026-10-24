@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import portal.cli as portal_cli
+from portal.discovery import RepositoryInventoryItem
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,42 @@ class FakeSession:
             "summary": {"active": 1, "held": 0, "terminal": 0},
             "subjects": [],
         }
+
+
+def test_session_discovery_failure_redacts_private_identity_from_stderr(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    private_name = "synthetic-private-duplicate"
+
+    class DuplicatePrivateCatalog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def list_owned_repositories(self, owner):
+            duplicate = RepositoryInventoryItem(
+                name=private_name,
+                full_name=f"{owner}/{private_name}",
+                private=True,
+                archived=False,
+                default_branch="main",
+            )
+            return (duplicate, duplicate)
+
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", DuplicatePrivateCatalog)
+    code = portal_cli.entrypoint([
+        "run",
+        "--session-id", "synthetic",
+        "--nodes", str(ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"),
+        "--state-db", str(tmp_path / "portal.sqlite3"),
+        "--discover-owner", "thebrazenbeard",
+        "--once",
+    ])
+
+    output = capsys.readouterr()
+    assert code == 2
+    assert "duplicate discovered repository" in output.err
+    assert private_name not in output.err
+    assert private_name not in output.out
 
 
 def test_session_run_mode_uses_command_session(tmp_path, monkeypatch, capsys) -> None:
