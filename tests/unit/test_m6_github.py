@@ -260,3 +260,36 @@ def test_live_read_precondition_drift_is_superseded_not_failed():
 
     assert outcome.status is WorkUnitStatus.SUPERSEDED
     assert outcome.reason == "backend precondition no longer matches exact subject"
+
+
+def test_live_proof_captures_latest_consumer_and_preserves_post_capture_cas():
+    from scripts.m6_hc_transcendence_live_proof import _live_transcendence_subject
+
+    transport = FakeReadTransport()
+    target_key = (
+        "thebrazenbeard/transcendence",
+        "architecture/consciousness-backup-v1",
+    )
+    transport.heads[target_key] = "f" * 40
+    backend = _backend(transport)
+    current = _live_transcendence_subject(GitHubCurrentSubjectReader(backend))
+    assert current.commit == "f" * 40
+
+    work = frontier_to_github_inspection_work(_frontier(), current)
+    inspection = GitHubReadInspectionBackend(backend)
+    assert inspection.execute(work).succeeded is True
+
+    # Moving after the snapshot must still be rejected, not silently accepted.
+    transport.heads[target_key] = "e" * 40
+    assert inspection.execute(work).classification == "PRECONDITION_FAILED"
+
+
+def test_live_proof_requires_available_consumer_snapshot():
+    from scripts.m6_hc_transcendence_live_proof import _live_transcendence_subject
+
+    class UnavailableReader:
+        def read(self, subject):
+            return None
+
+    with pytest.raises(RuntimeError, match="currentness snapshot is unavailable"):
+        _live_transcendence_subject(UnavailableReader())
