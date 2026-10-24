@@ -64,7 +64,9 @@ def _live_index(
             )
         key = repo.full_name.casefold()
         if key in index:
-            raise ValueError(f"duplicate live repository: {repo.full_name}")
+            # This index is also used by the public-safe overlay before private
+            # identities are filtered. Exceptions may reach public diagnostics.
+            raise ValueError("duplicate live repository identity (redacted)")
         index[key] = repo
     return index
 
