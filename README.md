@@ -261,3 +261,18 @@ This repository was bootstrapped from:
 The machine-readable binding is in [`.portal-bootstrap.json`](.portal-bootstrap.json).
 
 Project Runner's inherited operator documentation remains in [`PROJECT_RUNNER.md`](PROJECT_RUNNER.md). PORTAL's coordination contract is in [`PORTAL.md`](PORTAL.md).
+
+### Vera-branded desktop appearance
+
+The PORTAL Desktop frontend preserves its local cognition and governance
+boundaries while using a styled dark surface rather than default Tk widgets.
+The compact logo asset at `portal/assets/vera_icon.png` is a downsized
+copy of the user-provided Vera emblem; the burgundy-and-rose palette
+references the companion Vera PC wallpaper. The wallpaper is design
+reference material, not a runtime dependency or a claim about model identity.
+
+The UI attributes model answers to their actual cognition route; it does
+not claim a different local model is the current ChatGPT session. Desktop
+status polling uses a separate short-timeout client, and message requests
+retain their longer timeout. Neither appearance nor branding grants
+protected-effect authority.

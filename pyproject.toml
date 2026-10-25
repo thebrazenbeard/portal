@@ -25,3 +25,6 @@ testpaths = ["tests"]
 
 [tool.setuptools]
 packages = ["runner", "portal"]
+
+[tool.setuptools.package-data]
+portal = ["assets/*.png"]

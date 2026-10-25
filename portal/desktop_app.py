@@ -117,17 +117,36 @@ class DesktopViewModel:
         )
 
 
+PORTAL_PALETTE = {
+    # Lappy's structured dark desktop layout, with the supplied Vera artwork's
+    # burgundy/rose color language. Branding never changes authority.
+    "background": "#140910",
+    "surface": "#210F1B",
+    "surface_raised": "#321927",
+    "editor": "#170A14",
+    "border": "#623748",
+    "text": "#FAE8E9",
+    "muted": "#D6B5BC",
+    "subtle": "#A17B88",
+    "accent": "#EDA1A5",
+    "accent_soft": "#F5B6B4",
+    "accent_text": "#230C18",
+    "warning": "#F7C790",
+}
+
 class PortalDesktopApp:
     def __init__(self, *, runtime_root: Path) -> None:
         import tkinter as tk
-        from tkinter import ttk
 
+        c = PORTAL_PALETTE
         self._tk = tk
         self.root = tk.Tk()
         self.root.title("PORTAL Desktop — Vera")
-        self.root.geometry("1120x760")
-        self.root.minsize(900, 620)
+        self.root.geometry("1280x820")
+        self.root.minsize(1024, 680)
+        self.root.configure(bg=c["background"])
 
+        # Keep the qualified IPC and independent status/cognition timeouts.
         self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
         self.status_client = FileBridgeClient(runtime_root, timeout_seconds=5.0)
         self.view_model = DesktopViewModel(
@@ -135,82 +154,189 @@ class PortalDesktopApp:
         )
         self._refresh_lock = threading.Lock()
 
-        shell = ttk.Frame(self.root, padding=10)
-        shell.pack(fill="both", expand=True)
-
-        header = ttk.Frame(shell)
-        header.pack(fill="x")
+        top = tk.Frame(self.root, bg=c["surface"], height=88)
+        top.pack(side="top", fill="x")
+        top.pack_propagate(False)
+        brand = tk.Frame(top, bg=c["surface"])
+        brand.pack(side="left", padx=28, pady=14)
+        icon_path = Path(__file__).resolve().parent / "assets" / "vera_icon.png"
+        self._brand_image = None
+        if icon_path.is_file():
+            try:
+                self._brand_image = tk.PhotoImage(file=str(icon_path)).subsample(2, 2)
+            except tk.TclError:
+                self._brand_image = None
+        if self._brand_image is not None:
+            tk.Label(brand, image=self._brand_image, bg=c["surface"],
+                     borderwidth=0).pack(side="left", padx=(0, 15))
+        else:
+            mark = tk.Canvas(brand, width=52, height=52,
+                             bg=c["surface"], highlightthickness=0)
+            mark.pack(side="left", padx=(0, 15))
+            mark.create_text(26, 26, text="V", fill=c["accent"],
+                             font=("Segoe UI", 34, "bold"))
+        titles = tk.Frame(brand, bg=c["surface"])
+        titles.pack(side="left")
+        tk.Label(titles, text="VERA", font=("Segoe UI", 21, "bold"),
+                 bg=c["surface"], fg=c["text"]).pack(anchor="w")
+        tk.Label(titles, text="PORTAL DESKTOP  /  LOCAL RUNTIME",
+                 font=("Segoe UI", 8, "bold"), bg=c["surface"],
+                 fg=c["muted"]).pack(anchor="w", pady=(0, 3))
+        connection = tk.Frame(top, bg=c["surface"])
+        connection.pack(side="right", padx=30, pady=15)
         self.health_var = tk.StringVar(value="Runtime: checking…")
         self.route_var = tk.StringVar(value="Cognition route: unknown")
-        ttk.Label(header, textvariable=self.health_var).pack(side="left")
-        ttk.Label(header, textvariable=self.route_var).pack(side="right")
+        tk.Label(connection, textvariable=self.health_var,
+                 font=("Segoe UI", 11, "bold"),
+                 bg=c["surface"], fg=c["accent"]).pack(anchor="e")
+        tk.Label(connection, text="LIVE RUNTIME TELEMETRY",
+                 font=("Segoe UI", 8, "bold"),
+                 bg=c["surface"], fg=c["subtle"]).pack(anchor="e", pady=(5, 0))
 
-        body = ttk.Panedwindow(shell, orient="horizontal")
-        body.pack(fill="both", expand=True, pady=(10, 8))
+        shell = tk.Frame(self.root, bg=c["background"])
+        shell.pack(fill="both", expand=True, padx=24, pady=(20, 8))
+        body = tk.PanedWindow(
+            shell, orient="horizontal", bg=c["background"], borderwidth=0,
+            sashwidth=12, sashrelief="flat", relief="flat", showhandle=False,
+        )
+        body.pack(fill="both", expand=True)
+        conversation_frame = tk.Frame(
+            body, bg=c["surface"], highlightthickness=1,
+            highlightbackground=c["border"],
+        )
+        operations = tk.Frame(body, bg=c["background"])
+        body.add(conversation_frame, minsize=470, stretch="always")
+        body.add(operations, minsize=310, stretch="always")
 
-        conversation_frame = ttk.Labelframe(body, text="Conversation", padding=8)
-        operations_frame = ttk.Labelframe(body, text="Runtime", padding=8)
-        body.add(conversation_frame, weight=3)
-        body.add(operations_frame, weight=2)
+        intro = tk.Frame(conversation_frame, bg=c["surface"])
+        intro.pack(fill="x", padx=22, pady=(22, 17))
+        tk.Label(intro, text="01  /  CONVERSATION",
+                 bg=c["surface"], fg=c["accent"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(intro, text="Talk to Vera", bg=c["surface"],
+                 fg=c["text"], font=("Segoe UI", 22, "bold")
+                 ).pack(anchor="w", pady=(7, 0))
+        tk.Label(intro, text="Your conversation uses the selected local model route.",
+                 bg=c["surface"], fg=c["muted"],
+                 font=("Segoe UI", 10)).pack(anchor="w", pady=(5, 0))
 
+        transcript = tk.Frame(conversation_frame, bg=c["editor"],
+                              highlightthickness=1,
+                              highlightbackground=c["border"])
+        transcript.pack(fill="both", expand=True, padx=18, pady=(0, 15))
         self.conversation = tk.Text(
-            conversation_frame,
-            wrap="word",
-            state="disabled",
-            height=28,
+            transcript, wrap="word", state="disabled", height=4,
+            borderwidth=0, bg=c["editor"], fg=c["text"],
+            insertbackground=c["accent"], selectbackground=c["border"],
+            selectforeground=c["text"], relief="flat",
+            font=("Segoe UI", 11), padx=19, pady=19, spacing3=9,
         )
-        self.conversation.pack(fill="both", expand=True)
+        self.conversation.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(
+            transcript, orient="vertical", command=self.conversation.yview,
+            bg=c["surface_raised"], troughcolor=c["editor"], width=10,
+            borderwidth=0, relief="flat",
+        )
+        scrollbar.pack(side="right", fill="y")
+        self.conversation.configure(yscrollcommand=scrollbar.set)
+        self.conversation.tag_configure(
+            "speaker_you", foreground=c["accent"],
+            font=("Segoe UI", 10, "bold"), spacing1=10,
+        )
+        self.conversation.tag_configure(
+            "speaker_model", foreground=c["muted"],
+            font=("Segoe UI", 10, "bold"), spacing1=10,
+        )
+        self.conversation.tag_configure(
+            "message", foreground=c["text"],
+            font=("Segoe UI", 11), spacing3=12,
+        )
+        self._empty_conversation = tk.Label(
+            transcript,
+            text="Your conversation begins here.",
+            bg=c["editor"], fg=c["subtle"], font=("Segoe UI", 11),
+        )
+        self._empty_conversation.place(relx=0.5, rely=0.46, anchor="center")
 
-        composer = ttk.Frame(conversation_frame)
-        composer.pack(fill="x", pady=(8, 0))
+        composer = tk.Frame(conversation_frame, bg=c["surface"])
+        composer.pack(fill="x", padx=18, pady=(0, 19))
+        entry_frame = tk.Frame(
+            composer, bg=c["surface_raised"], highlightthickness=1,
+            highlightbackground=c["border"],
+        )
+        entry_frame.pack(fill="x")
         self.message_var = tk.StringVar()
-        self.message_entry = ttk.Entry(
-            composer,
-            textvariable=self.message_var,
+        self.message_entry = tk.Entry(
+            entry_frame, textvariable=self.message_var,
+            bg=c["surface_raised"], fg=c["text"], relief="flat",
+            insertbackground=c["accent"], borderwidth=0,
+            font=("Segoe UI", 11),
         )
-        self.message_entry.pack(side="left", fill="x", expand=True)
+        self.message_entry.pack(side="left", fill="x", expand=True,
+                                padx=(16, 10), pady=13)
         self.message_entry.bind("<Return>", self._send_from_event)
-        self.send_button = ttk.Button(
-            composer,
-            text="Send",
-            command=self.send_message,
+        self.send_button = tk.Button(
+            entry_frame, text="Send →", command=self.send_message,
+            bg=c["accent"], fg=c["accent_text"],
+            activebackground=c["accent_soft"], activeforeground=c["accent_text"],
+            font=("Segoe UI", 10, "bold"), borderwidth=0,
+            relief="flat", padx=22, pady=12, cursor="hand2",
         )
-        self.send_button.pack(side="left", padx=(8, 0))
+        self.send_button.pack(side="right", padx=5, pady=5)
 
-        ttk.Label(operations_frame, text="Last autonomous activity").pack(
-            anchor="w"
-        )
+        def panel(kicker: str, title: str, *, grow: bool = False) -> tk.Frame:
+            frame = tk.Frame(operations, bg=c["surface"],
+                             highlightthickness=1,
+                             highlightbackground=c["border"])
+            frame.pack(fill="both", expand=grow, pady=(0, 10))
+            tk.Label(frame, text=kicker, bg=c["surface"],
+                     fg=c["accent"], font=("Segoe UI", 8, "bold")
+                     ).pack(anchor="w", padx=18, pady=(14, 5))
+            tk.Label(frame, text=title, bg=c["surface"],
+                     fg=c["text"], font=("Segoe UI", 13, "bold")
+                     ).pack(anchor="w", padx=18, pady=(0, 5))
+            return frame
+
+        route_panel = panel("02  /  CONNECTIVITY", "Cognition route")
+        tk.Label(route_panel, textvariable=self.route_var,
+                 bg=c["surface"], fg=c["muted"], justify="left",
+                 wraplength=405, font=("Segoe UI", 9)
+                 ).pack(anchor="w", padx=18, pady=(0, 14))
+
+        autonomous_panel = panel("03  /  RESIDENT", "Autonomous activity")
         self.autonomous_text = tk.Text(
-            operations_frame,
-            height=8,
-            wrap="word",
-            state="disabled",
+            autonomous_panel, height=3, wrap="word", state="disabled",
+            bg=c["surface"], fg=c["muted"], relief="flat", borderwidth=0,
+            font=("Segoe UI", 9), padx=18, pady=4,
         )
-        self.autonomous_text.pack(fill="x", pady=(2, 8))
+        self.autonomous_text.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(operations_frame, text="Activity").pack(anchor="w")
+        activity_panel = panel("04  /  TELEMETRY", "Recent activity", grow=True)
         self.activity_text = tk.Text(
-            operations_frame,
-            height=16,
-            wrap="word",
-            state="disabled",
+            activity_panel, height=8, wrap="word", state="disabled",
+            bg=c["surface"], fg=c["muted"], relief="flat", borderwidth=0,
+            font=("Consolas", 9), padx=18, pady=7,
         )
-        self.activity_text.pack(fill="both", expand=True, pady=(2, 8))
+        self.activity_text.pack(fill="both", expand=True, pady=(0, 10))
 
-        ttk.Label(operations_frame, text="Pending protected effects").pack(
-            anchor="w"
-        )
+        effects_panel = panel("05  /  GOVERNANCE", "Protected effects")
         self.effects_var = tk.StringVar(
             value="None. Cognition carries no protected-effect authority."
         )
-        ttk.Label(
-            operations_frame,
-            textvariable=self.effects_var,
-            wraplength=360,
-        ).pack(fill="x", pady=(2, 0))
+        tk.Label(effects_panel, textvariable=self.effects_var,
+                 bg=c["surface"], fg=c["warning"], justify="left",
+                 wraplength=405, font=("Segoe UI", 9)
+                 ).pack(anchor="w", padx=18, pady=(0, 14))
 
+        footer = tk.Frame(self.root, bg=c["background"])
+        footer.pack(fill="x", padx=28, pady=(0, 13))
         self.status_var = tk.StringVar(value="")
-        ttk.Label(shell, textvariable=self.status_var).pack(fill="x")
+        tk.Label(footer, textvariable=self.status_var,
+                 bg=c["background"], fg=c["muted"],
+                 font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(footer, text="LOCAL RUNTIME  ·  OBSERVATION ONLY",
+                 bg=c["background"], fg=c["subtle"],
+                 font=("Segoe UI", 8, "bold")).pack(side="right")
 
         self.root.after(100, self.refresh_async)
         self.root.after(3000, self._scheduled_refresh)
@@ -230,8 +356,12 @@ class PortalDesktopApp:
         widget.configure(state="disabled")
 
     def _append_conversation(self, speaker: str, text: str) -> None:
+        if getattr(self, "_empty_conversation", None) is not None:
+            self._empty_conversation.place_forget()
+        tag = "speaker_you" if speaker in ("You", "Patrick") else "speaker_model"
         self.conversation.configure(state="normal")
-        self.conversation.insert("end", f"{speaker}: {text}\n\n")
+        self.conversation.insert("end", speaker + "\n", tag)
+        self.conversation.insert("end", text + "\n\n", "message")
         self.conversation.see("end")
         self.conversation.configure(state="disabled")
 
