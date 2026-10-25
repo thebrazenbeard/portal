@@ -7,7 +7,9 @@ installed runtime must have them, and desktop_qualify fails if it does not.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import time
+from types import ModuleType
 
 import pytest
 
@@ -109,3 +111,138 @@ def test_v2_meso_ingress_is_durable_and_effect_inert(
         assert reopened.get_volition_signal_receipt(receipt["signal_event_id"])
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize(
+    "changed", ["source-sha", "resident-restart", "component-lost", "inactive", "unchanged"],
+)
+def test_v2_qualification_rejects_resident_change_during_meso_ingress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    """An earlier host read cannot qualify a host that changed during MESO."""
+    frozen = _source_spec("VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2")
+    frozen.write(tmp_path / "RUNTIME_INSTALL_SPEC.json")
+    before = frozen.to_mapping()
+    state = {"after_meso": False, "human_id": None}
+    accepted = {
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "canonical_memory_write": False,
+        "protected_effect_authority": False,
+    }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request(self, command: str, **kwargs):
+            if command == "desktop_status":
+                manifest = before
+                pid, started_at = 1001, 1000.0
+                reported_state = "ACTIVE"
+                components = {
+                    name: {"loaded": True}
+                    for name in ("vera_mono", "portal", "pre_active", "volition")
+                }
+                if state["after_meso"]:
+                    if changed == "source-sha":
+                        manifest = frozen.to_mapping()
+                        manifest["sources"][-1]["sha"] = "f" * 40
+                    elif changed == "resident-restart":
+                        pid, started_at = 2002, 2000.0
+                    elif changed == "component-lost":
+                        components["volition"] = {"loaded": False}
+                    elif changed == "inactive":
+                        reported_state = "STOPPED"
+                return {
+                    "state": reported_state, "source_manifest": manifest,
+                    "runtime_id": "runtime-v2", "pid": pid,
+                    "started_at": started_at,
+                    "components": components,
+                    "protected_effect_authority": False,
+                }
+            if command == "desktop_discover_routes":
+                return {"routes": [{
+                    "local": True, "available": True, "current": True,
+                    "incremental_paid_compute": False, "auto_admissible": True,
+                }]}
+            if command == "desktop_cognize":
+                state["human_id"] = kwargs["request_id"]
+                return {
+                    "state": "COMPLETED",
+                    "response_text": "PORTAL_DESKTOP_HUMAN_OK",
+                    "protected_effect_authority": False,
+                    "route_id": "local", "evidence_id": "human-evidence",
+                }
+            if command == "desktop_recent_activity":
+                return {"items": [
+                    {
+                        "request_id": request_id, "state": "COMPLETED",
+                        "route_id": "local", "evidence_id": "evidence",
+                        "protected_effect_authority": False,
+                        "acceptance": accepted,
+                    }
+                    for request_id in (state["human_id"], "auto-turn", "volition-turn")
+                ]}
+            raise AssertionError(f"unexpected request: {command}")
+
+    class FakeStore:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request_autonomous_turn(self, **kwargs) -> str:
+            return "auto-turn"
+
+        def list_events(self, *, kind: str):
+            assert kind == "autonomous.turn"
+            return [
+                {"id": "auto-turn", "status": "DONE"},
+                {"id": "volition-turn", "status": "DONE"},
+            ]
+
+        def get_volition_signal_receipt(self, event_id: str):
+            assert event_id == "volition-signal"
+            return {
+                "state_revision": 1,
+                "cognition_event_id": "volition-turn",
+                "goal_id": "goal:1", "choice_class": "NONE",
+            }
+
+        def close(self) -> None:
+            pass
+
+    class FakeVolitionBridge:
+        def __init__(self, store) -> None:
+            pass
+
+        def enqueue_signal(self, **kwargs) -> str:
+            return "volition-signal"
+
+    def changed_after_meso(*args, **kwargs):
+        state["after_meso"] = True
+        return {"claim_ceiling": "MESO_INTENT_INGRESS_ONLY_NOT_OUTCOME_OR_GOAL_CREDIT"}
+
+    monkeypatch.setattr(desktop_qualify, "FileBridgeClient", FakeClient)
+    monkeypatch.setattr(desktop_qualify, "qualify_meso_ingress", changed_after_meso)
+    # The default PORTAL CI environment deliberately has no Pre-Active extra.
+    # This test controls its import boundary; the separate optional integration
+    # test above exercises the actual installed libraries when available.
+    fake_pre_active = ModuleType("pre_active")
+    fake_pre_active.__path__ = []
+    fake_pre_active.Store = FakeStore
+    fake_bridge = ModuleType("pre_active.volition_bridge")
+    fake_bridge.VolitionBridge = FakeVolitionBridge
+    fake_pre_active.volition_bridge = fake_bridge
+    monkeypatch.setitem(sys.modules, "pre_active", fake_pre_active)
+    monkeypatch.setitem(sys.modules, "pre_active.volition_bridge", fake_bridge)
+
+    if changed == "unchanged":
+        result = desktop_qualify.qualify_runtime(tmp_path, timeout_seconds=1.0)
+        assert result["schema"] == "VERA_DESKTOP_RUNTIME_QUALIFICATION_V2"
+        assert result["qualified"] is True
+        assert result["meso_ingress"]["claim_ceiling"].startswith("MESO_INTENT_INGRESS_")
+        assert (tmp_path / "QUALIFICATION.json").is_file()
+    else:
+        with pytest.raises(RuntimeError, match="resident .* changed"):
+            desktop_qualify.qualify_runtime(tmp_path, timeout_seconds=1.0)
+        assert not (tmp_path / "QUALIFICATION.json").exists()
+    assert state["after_meso"] is True
