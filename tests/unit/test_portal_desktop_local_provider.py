@@ -4,16 +4,21 @@ import json
 
 import pytest
 
-from portal import desktop_runtime
+from portal import desktop_cognition, desktop_runtime
 from portal.desktop_cognition import CognitionRoute
 
+OLLAMA_DIGEST = "a" * 64
 
-def _route(provider="pre_active_local", model="vera-v10r3-step20"):
+
+def _route(provider="pre_active_local", model="vera-v10r3-step20", *, registry_digest=None):
+    fields = ({"observed_registry_digest": registry_digest or OLLAMA_DIGEST}
+              if provider == "ollama" else {})
     return CognitionRoute(
         route_id=f"{provider}:{model}", provider=provider, model_or_agent=model,
         local=True, available=True, current=True, capabilities=("text",),
         incremental_paid_compute=False, auto_admissible=True,
         effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
+        **fields,
     )
 
 
@@ -56,6 +61,48 @@ def _stub(monkeypatch, body, status=200):
     return seen
 
 
+def _stub_ollama(monkeypatch, body, *, digests=(OLLAMA_DIGEST, OLLAMA_DIGEST),
+                 tag_payloads=None):
+    """One real route shape over a deterministic GET, POST, GET loopback sequence."""
+    seen = {"connections": [], "requests": []}
+    tag_payloads = list(tag_payloads) if tag_payloads is not None else [
+        {"models": [{"name": "vera-local:latest", "digest": digest}]}
+        for digest in digests
+    ]
+
+    class Response:
+        status = 200
+
+        def __init__(self, payload):
+            self.encoded = json.dumps(payload).encode("utf-8")
+
+        def read(self, limit):
+            return self.encoded[:limit]
+
+        def close(self):
+            pass
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            seen["connections"].append((host, port, timeout))
+
+        def request(self, method, path, body=None, headers=None):
+            seen["requests"].append((method, path, body, headers))
+            self.path = path
+
+        def getresponse(self):
+            if self.path == "/api/tags":
+                return Response(tag_payloads.pop(0))
+            return Response(body)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(desktop_runtime, "_DeadlineHTTPConnection", Connection)
+    monkeypatch.setattr(desktop_cognition, "_DeadlineHTTPConnection", Connection)
+    return seen
+
+
 def test_pre_active_local_uses_direct_loopback_and_exact_model(monkeypatch):
     seen = _stub(monkeypatch, _answer())
     assert desktop_runtime.invoke_local_text(_route(), "hello") == "trained vera answer"
@@ -82,26 +129,81 @@ def test_opt_in_pre_active_chat_sends_role_structured_history(monkeypatch):
 def test_opt_in_ollama_chat_uses_api_chat_and_rejects_tool_response(monkeypatch):
     route = _route("ollama", "vera-local:latest")
     messages = [{"role": "user", "content": "hello"}]
-    seen = _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
-                              "message": {"role": "assistant", "content": "answer"}})
+    seen = _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                                     "message": {"role": "assistant", "content": "answer"}})
     assert desktop_runtime.invoke_local_messages(route, messages) == "answer"
-    assert seen["request"][1] == "/api/chat"
-    assert json.loads(seen["request"][2])["messages"] == messages
-    _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
-                        "message": {"role": "assistant", "content": "unsafe", "tool_calls": []}})
+    assert [request[1] for request in seen["requests"]] == [
+        "/api/tags", "/api/chat", "/api/tags",
+    ]
+    assert json.loads(seen["requests"][1][2])["messages"] == messages
+    _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                             "message": {"role": "assistant", "content": "unsafe", "tool_calls": []}})
     with pytest.raises(RuntimeError, match="tool call"):
         desktop_runtime.invoke_local_messages(route, messages)
 
 
 def test_ollama_uses_direct_loopback(monkeypatch):
-    seen = _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
-                              "response": "ollama answer"})
+    seen = _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                                     "response": "ollama answer"})
     assert desktop_runtime.invoke_local_text(_route("ollama", "vera-local:latest"), "hello") == "ollama answer"
-    assert seen["connections"] == [("127.0.0.1", 11434, 120.0)]
-    assert seen["request"][1] == "/api/generate"
-    assert json.loads(seen["request"][2]) == {
+    assert seen["connections"] == [("127.0.0.1", 11434, 2.0),
+                                   ("127.0.0.1", 11434, 120.0),
+                                   ("127.0.0.1", 11434, 2.0)]
+    assert [request[1] for request in seen["requests"]] == [
+        "/api/tags", "/api/generate", "/api/tags",
+    ]
+    assert json.loads(seen["requests"][1][2]) == {
         "model": "vera-local:latest", "prompt": "hello", "stream": False,
     }
+
+
+@pytest.mark.parametrize("invoke", [
+    lambda route: desktop_runtime.invoke_local_text(route, "hello"),
+    lambda route: desktop_runtime.invoke_local_messages(route, [{"role": "user", "content": "hello"}]),
+])
+def test_ollama_tag_changed_before_inference_never_posts(monkeypatch, invoke):
+    seen = _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                                     "response": "forged", "message": {"role": "assistant", "content": "forged"}},
+                        digests=("b" * 64,))
+    with pytest.raises(RuntimeError, match="registry identity changed"):
+        invoke(_route("ollama", "vera-local:latest"))
+    assert [request[1] for request in seen["requests"]] == ["/api/tags"]
+
+
+@pytest.mark.parametrize("invoke,expected_post", [
+    (lambda route: desktop_runtime.invoke_local_text(route, "hello"), "/api/generate"),
+    (lambda route: desktop_runtime.invoke_local_messages(route, [{"role": "user", "content": "hello"}]), "/api/chat"),
+])
+def test_ollama_tag_changed_during_inference_discards_answer(monkeypatch, invoke, expected_post):
+    seen = _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                                     "response": "forged", "message": {"role": "assistant", "content": "forged"}},
+                        digests=(OLLAMA_DIGEST, "b" * 64))
+    with pytest.raises(RuntimeError, match="registry identity changed"):
+        invoke(_route("ollama", "vera-local:latest"))
+    assert [request[1] for request in seen["requests"]] == [
+        "/api/tags", expected_post, "/api/tags",
+    ]
+
+
+@pytest.mark.parametrize("tag_payload", [
+    {"models": [{"name": "vera-local:latest"}]},
+    {"models": [{"name": "vera-local:latest", "digest": "untrusted"}]},
+    {"models": [{"name": "vera-local:latest", "digest": OLLAMA_DIGEST}] * 2},
+])
+def test_ollama_registry_missing_invalid_or_duplicate_fails_before_post(monkeypatch, tag_payload):
+    seen = _stub_ollama(monkeypatch, {"model": "vera-local:latest", "done": True,
+                                     "response": "must-not-return"}, tag_payloads=[tag_payload])
+    with pytest.raises(RuntimeError, match="registry identity changed"):
+        desktop_runtime.invoke_local_text(_route("ollama", "vera-local:latest"), "hello")
+    assert [request[1] for request in seen["requests"]] == ["/api/tags"]
+
+
+def test_ollama_without_qualified_registry_digest_cannot_infer(monkeypatch):
+    route = _route("ollama", "vera-local:latest", registry_digest="invalid")
+    monkeypatch.setattr(desktop_runtime, "_DeadlineHTTPConnection",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network opened")))
+    with pytest.raises(RuntimeError, match="registry digest required"):
+        desktop_runtime.invoke_local_text(route, "hello")
 
 
 def test_proxy_environment_cannot_redirect_prompt(monkeypatch):

@@ -12,6 +12,8 @@ from portal.desktop_cognition import (
     select_cognition_route,
 )
 
+OLLAMA_DIGEST = "a" * 64
+
 
 def _stub_discovery(monkeypatch, body, status=200):
     encoded = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
@@ -83,6 +85,14 @@ def test_local_discovery_rejects_invalid_or_oversized_body(monkeypatch, body):
     assert seen["read_limit"] == desktop_cognition._MAX_LOCAL_DISCOVERY_BYTES + 1
 
 
+def test_local_discovery_rejects_duplicate_registry_json_keys(monkeypatch):
+    raw = (b'{"models":[{"name":"vera-local:latest","digest":"' +
+           OLLAMA_DIGEST.encode("ascii") + b'","digest":"' +
+           ("b" * 64).encode("ascii") + b'"}]}')
+    _stub_discovery(monkeypatch, raw)
+    assert desktop_cognition._default_ollama_tags() is None
+
+
 def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes() -> None:
     routes = discover_cognition_routes(
         command_probe=lambda name, args: (
@@ -90,8 +100,10 @@ def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes()
         ),
         ollama_tags=lambda: {
             "models": [
-                {"name": "vera-local:latest", "modified_at": "2026-10-06T20:00:00Z"},
-                {"name": "qwen3:8b", "modified_at": "2026-10-01T12:00:00Z"},
+                {"name": "vera-local:latest", "digest": OLLAMA_DIGEST,
+                 "modified_at": "2026-10-06T20:00:00Z"},
+                {"name": "qwen3:8b", "digest": "b" * 64,
+                 "modified_at": "2026-10-01T12:00:00Z"},
             ]
         },
     )
@@ -104,6 +116,7 @@ def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes()
     assert local.auto_admissible is True
     assert local.capabilities == ("text",)
     assert local.effect_authority_ceiling == "COGNITION_ONLY_NO_PROTECTED_EFFECT"
+    assert local.observed_registry_digest == OLLAMA_DIGEST
 
     codex = by_id["codex:cli"]
     assert codex.available is True
@@ -116,7 +129,8 @@ def test_trained_pre_active_adapter_is_discovered_and_preferred_over_ollama_vera
         command_probe=lambda _name, _args: None,
         ollama_tags=lambda: {
             "models": [
-                {"name": "vera-local:latest", "modified_at": "2026-08-01T00:00:00Z"},
+                {"name": "vera-local:latest", "digest": OLLAMA_DIGEST,
+                 "modified_at": "2026-08-01T00:00:00Z"},
             ]
         },
         pre_active_models=lambda: {
@@ -152,7 +166,8 @@ def test_base_only_pre_active_model_is_discovered_but_ollama_vera_remains_prefer
         command_probe=lambda _name, _args: None,
         ollama_tags=lambda: {
             "models": [
-                {"name": "vera-local:latest", "modified_at": "2026-08-01T00:00:00Z"},
+                {"name": "vera-local:latest", "digest": OLLAMA_DIGEST,
+                 "modified_at": "2026-08-01T00:00:00Z"},
             ]
         },
         pre_active_models=lambda: {
@@ -171,6 +186,44 @@ def test_base_only_pre_active_model_is_discovered_but_ollama_vera_remains_prefer
     selected = select_cognition_route(CognitionRequest(), routes)
     assert selected is not None
     assert selected.route_id == "ollama:vera-local:latest"
+
+
+@pytest.mark.parametrize("models", [
+    [{"name": "vera-local:latest"}],
+    [{"name": "vera-local:latest", "digest": "A" * 64}],
+    [{"name": "vera-local:latest", "digest": OLLAMA_DIGEST}] * 2,
+    [{"name": "vera-local:latest", "digest": "b" * 64},
+     {"name": "vera-local:latest", "digest": OLLAMA_DIGEST}],
+])
+def test_ollama_ambiguous_or_missing_registry_digest_is_never_advertised(models):
+    assert discover_cognition_routes(
+        command_probe=lambda *_: None,
+        ollama_tags=lambda: {"models": models},
+        pre_active_models=lambda: None,
+    ) == ()
+
+
+def test_ollama_registry_whitespace_alias_cannot_duplicate_normalized_route():
+    routes = discover_cognition_routes(
+        command_probe=lambda *_: None,
+        ollama_tags=lambda: {"models": [
+            {"name": "vera-local:latest", "digest": OLLAMA_DIGEST},
+            {"name": " vera-local:latest ", "digest": OLLAMA_DIGEST},
+        ]},
+        pre_active_models=lambda: None,
+    )
+    assert len(routes) == 1
+    assert routes[0].route_id == "ollama:vera-local:latest"
+    assert routes[0].observed_registry_digest == OLLAMA_DIGEST
+
+    no_valid_tags = discover_cognition_routes(
+        command_probe=lambda *_: None,
+        ollama_tags=lambda: {"models": [{
+            "name": " vera-local:latest ", "digest": OLLAMA_DIGEST,
+        }]},
+        pre_active_models=lambda: None,
+    )
+    assert no_valid_tags == ()
 
 
 def test_missing_local_models_and_codex_produce_no_available_routes() -> None:

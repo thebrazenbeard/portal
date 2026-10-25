@@ -44,6 +44,16 @@ The resident-host source composes:
 
 Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
 
+For an Ollama text route, the host now requires one exact model tag and a valid
+self-reported registry digest, then rechecks that digest immediately before and
+after local inference. A missing, ambiguous, or changed registry identity fails
+closed. These checks do **not** attest loaded model weights, guarantee that a
+tag did not change and revert during inference, or qualify an installed runtime.
+The digest is retained on the in-process route and exposed in current route
+discovery; the existing durable cognition ledger and Vera acceptance receipt
+do **not** persist that digest. Their model tag and evidence hashes must not be
+presented as durable model-weight provenance.
+
 ### Optional Rezon Collective observer (source-only)
 
 The resident host can also expose one **existing, complete Rezon Collective
