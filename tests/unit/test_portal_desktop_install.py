@@ -137,3 +137,33 @@ def test_invalid_or_duplicate_sources_are_rejected() -> None:
                 RuntimeSource("volition", "x/v", "main", SHA_D),
             ),
         ).validate()
+
+
+@pytest.mark.parametrize("component,repository", [
+    ("portal", "attacker/portal"),
+    ("vera-mono", "thebrazenbeard/portal"),
+    ("pre-active", "thebrazenbeard/pre-active-other"),
+    ("volition", "thebrazenbeard/volition.git"),
+])
+def test_runtime_source_rejects_noncanonical_install_repositories(
+    component: str, repository: str,
+) -> None:
+    with pytest.raises(ValueError, match="not canonical"):
+        RuntimeSource(component, repository, "main", SHA_A).validate()
+
+
+def test_stage_rejects_substituted_repository_before_writing(tmp_path: Path) -> None:
+    stage = tmp_path / "desktop-stage"
+    spec = InstallSpec(
+        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        install_id="supply-chain-test",
+        sources=(
+            RuntimeSource("vera-mono", "thebrazenbeard/vera-mono", "main", SHA_A),
+            RuntimeSource("portal", "untrusted/portal", "main", SHA_B),
+            RuntimeSource("pre-active", "thebrazenbeard/pre-active", "main", SHA_C),
+            RuntimeSource("volition", "thebrazenbeard/volition", "main", SHA_D),
+        ),
+    )
+    with pytest.raises(ValueError, match="not canonical"):
+        prepare_stage_root(stage, spec)
+    assert not stage.exists()

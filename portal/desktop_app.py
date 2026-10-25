@@ -26,8 +26,11 @@ class DesktopSnapshot:
 
 
 class DesktopViewModel:
-    def __init__(self, client: RuntimeClient) -> None:
+    def __init__(
+        self, client: RuntimeClient, *, status_client: RuntimeClient | None = None,
+    ) -> None:
         self.client = client
+        self.status_client = status_client or client
 
     @staticmethod
     def _preferred_route(
@@ -54,9 +57,9 @@ class DesktopViewModel:
         return str(route_id) if route_id is not None else None
 
     def refresh(self) -> DesktopSnapshot:
-        status = self.client.request("desktop_status")
-        route_payload = self.client.request("desktop_discover_routes")
-        activity_payload = self.client.request(
+        status = self.status_client.request("desktop_status")
+        route_payload = self.status_client.request("desktop_discover_routes")
+        activity_payload = self.status_client.request(
             "desktop_recent_activity",
             limit=50,
         )
@@ -126,7 +129,11 @@ class PortalDesktopApp:
         self.root.minsize(900, 620)
 
         self.client = FileBridgeClient(runtime_root, timeout_seconds=180.0)
-        self.view_model = DesktopViewModel(self.client)
+        self.status_client = FileBridgeClient(runtime_root, timeout_seconds=5.0)
+        self.view_model = DesktopViewModel(
+            self.client, status_client=self.status_client,
+        )
+        self._refresh_lock = threading.Lock()
 
         shell = ttk.Frame(self.root, padding=10)
         shell.pack(fill="both", expand=True)
@@ -228,6 +235,13 @@ class PortalDesktopApp:
         self.conversation.see("end")
         self.conversation.configure(state="disabled")
 
+    @staticmethod
+    def _response_speaker(route_id: object, state: object) -> str:
+        if state != "COMPLETED" or not isinstance(route_id, str) or not route_id.strip():
+            return "Runtime response"
+        safe_route = "".join(char if char.isprintable() else " " for char in route_id.strip())
+        return f"Cognition route ({safe_route[:96]})"
+
     def _render_snapshot(self, snapshot: DesktopSnapshot) -> None:
         runtime_id = (
             snapshot.runtime_id[:12] + "…"
@@ -259,18 +273,19 @@ class PortalDesktopApp:
         )
 
     def refresh_async(self) -> None:
+        if not self._refresh_lock.acquire(blocking=False):
+            return
+
         def work() -> None:
             try:
                 snapshot = self.view_model.refresh()
             except Exception as exc:
-                self.root.after(
-                    0,
-                    lambda: self.health_var.set(
-                        f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
-                    ),
-                )
-                return
-            self.root.after(0, lambda: self._render_snapshot(snapshot))
+                error = f"Runtime: DEGRADED · {type(exc).__name__}: {exc}"
+                self.root.after(0, lambda: self.health_var.set(error))
+            else:
+                self.root.after(0, lambda: self._render_snapshot(snapshot))
+            finally:
+                self._refresh_lock.release()
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -308,7 +323,9 @@ class PortalDesktopApp:
                 state = "FAILED"
 
             def finish() -> None:
-                self._append_conversation("Vera", response)
+                self._append_conversation(
+                    self._response_speaker(route, state), response,
+                )
                 self.status_var.set(
                     f"{state}"
                     + (f" via {route}" if route else "")

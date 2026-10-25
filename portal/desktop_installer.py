@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -14,13 +15,62 @@ from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_UNSAFE_CMD_PATH_CHARS = frozenset('%!^"&|<>\r\n')
+
+
+def _validated_cmd_path(path: Path) -> str:
+    """Fail before writing a CMD launcher whose path would be reinterpreted."""
+    value = str(path)
+    if not value or any(char in _UNSAFE_CMD_PATH_CHARS or ord(char) < 32 for char in value):
+        raise ValueError("Windows CMD launcher path contains unsafe characters")
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Windows CMD launcher path must be ASCII") from exc
+    return value
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    if path.is_symlink() or path.is_junction():
+        return True
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except (FileNotFoundError, OSError):
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _reject_reparse_ancestors(path: Path) -> None:
+    for ancestor in (path, *path.parents):
+        if _is_link_or_reparse(ancestor):
+            raise RuntimeError(
+                f"runtime staging path contains a symlink, junction, "
+                f"or reparse point: {ancestor}"
+            )
+
+
+def _require_fresh_runtime_leaf(runtime_root: Path) -> None:
+    """Never stage over prior evidence or prepositioned filesystem redirects."""
+    _reject_reparse_ancestors(runtime_root)
+    if not runtime_root.exists():
+        return
+    if not runtime_root.is_dir():
+        raise RuntimeError("runtime stage leaf exists and is not a directory")
+    if any(runtime_root.iterdir()):
+        raise RuntimeError(
+            "runtime stage leaf is not empty; inspect it and use a new staged install leaf"
+        )
 
 
 def launcher_text(runtime_root: Path, python: Path, module: str) -> str:
+    root_value = _validated_cmd_path(runtime_root)
+    python_value = _validated_cmd_path(python)
+    if module not in ("portal.desktop_host", "portal.desktop_app"):
+        raise ValueError("unsupported Windows CMD launcher module")
     return (
         "@echo off\r\n"
-        f'set "VERA_RUNTIME_ROOT={runtime_root}"\r\n'
-        f'"{python}" -m {module}\r\n'
+        f'set "VERA_RUNTIME_ROOT={root_value}"\r\n'
+        f'"{python_value}" -m {module}\r\n'
     )
 
 
@@ -31,6 +81,7 @@ def build_logon_task_command(
 ) -> list[str]:
     if not _TASK_NAME_RE.fullmatch(task_name):
         raise ValueError("task_name contains unsupported characters")
+    launcher_value = _validated_cmd_path(Path(launcher).resolve())
     return [
         "schtasks.exe",
         "/Create",
@@ -40,7 +91,7 @@ def build_logon_task_command(
         "/TN",
         task_name,
         "/TR",
-        str(Path(launcher).resolve()),
+        launcher_value,
     ]
 
 
@@ -62,18 +113,24 @@ def _run(
 
 
 def _clone_exact(source: RuntimeSource, destination: Path) -> None:
-    if not (destination / ".git").is_dir():
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _run(
-            [
-                "git",
-                "clone",
-                "--filter=blob:none",
-                "--no-checkout",
-                f"https://github.com/{source.repository}.git",
-                str(destination),
-            ]
+    source.validate()
+    _reject_reparse_ancestors(destination)
+    if destination.exists() or destination.is_symlink():
+        raise RuntimeError(
+            f"{source.component} source destination already exists; "
+            "use a new staged install leaf"
         )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            "git",
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            f"https://github.com/{source.repository}.git",
+            str(destination),
+        ]
+    )
     _run(
         [
             "git",
@@ -104,6 +161,18 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
             f"{source.component} checkout mismatch: "
             f"expected {source.sha}, got {observed}"
         )
+    status = _run(
+        [
+            "git", "-C", str(destination), "status", "--porcelain=v1",
+            "--untracked-files=all", "--ignored=matching",
+        ],
+        capture=True,
+    ).stdout
+    if status.strip():
+        raise RuntimeError(
+            f"{source.component} source checkout contains modified, "
+            "untracked, or ignored files; refusing editable install"
+        )
 
 
 def _venv_python(runtime_root: Path) -> Path:
@@ -119,7 +188,24 @@ def _ensure_venv(runtime_root: Path) -> Path:
     return python
 
 
+def _assert_fresh_component_destinations(runtime_root: Path, spec: InstallSpec) -> None:
+    spec.validate()
+    sources = runtime_root / "sources"
+    _reject_reparse_ancestors(sources)
+    if not sources.resolve().is_relative_to(runtime_root.resolve()):
+        raise RuntimeError("source staging directory escapes the chosen runtime root")
+    for source in spec.sources:
+        destination = sources / source.component
+        if destination.exists() or destination.is_symlink():
+            raise RuntimeError(
+                f"{source.component} source destination already exists; "
+                "use a new staged install leaf"
+            )
+
+
 def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
+    # Check the entire set before a single clone has effects.
+    _assert_fresh_component_destinations(runtime_root, spec)
     sources = runtime_root / "sources"
     for source in spec.sources:
         _clone_exact(source, sources / source.component)
@@ -283,6 +369,14 @@ def install(
     spec: InstallSpec,
     activate: bool,
 ) -> dict[str, object]:
+    # Preflight the eventual Windows command files before cloning, installing,
+    # or starting a host; normalized absolute paths survive an ONLOGON cwd.
+    _require_fresh_runtime_leaf(Path(runtime_root))
+    runtime_root = Path(runtime_root).resolve()
+    launcher_text(runtime_root, _venv_python(runtime_root), "portal.desktop_host")
+    launcher_text(runtime_root, _venv_python(runtime_root), "portal.desktop_app")
+    spec.validate()
+    _assert_fresh_component_destinations(runtime_root, spec)
     runtime_root = prepare_stage_root(runtime_root, spec)
     spec.write(runtime_root / "RUNTIME_INSTALL_SPEC.json")
 
@@ -409,7 +503,7 @@ def main() -> None:
     parser.add_argument("--portal-sha", required=True)
     parser.add_argument(
         "--portal-ref",
-        default="work/portal-desktop-vera-runtime-v1",
+        default="main",
     )
     parser.add_argument("--vera-mono-sha", required=True)
     parser.add_argument("--pre-active-sha", required=True)

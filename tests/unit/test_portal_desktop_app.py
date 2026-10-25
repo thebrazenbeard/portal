@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 
-from portal.desktop_app import DesktopViewModel
+from portal import desktop_app
+from portal.desktop_app import DesktopViewModel, PortalDesktopApp
 
 
 @dataclass
@@ -111,3 +113,79 @@ def test_view_model_rejects_empty_message_without_ipc_call() -> None:
     else:
         raise AssertionError("expected ValueError")
     assert client.calls == []
+
+
+def test_status_client_does_not_shorten_human_cognition_timeout() -> None:
+    cognition = FakeClient([])
+    status = FakeClient([])
+    vm = DesktopViewModel(cognition, status_client=status)
+
+    vm.refresh()
+    vm.send_message("hi")
+
+    assert [command for command, _ in status.calls] == [
+        "desktop_status", "desktop_discover_routes", "desktop_recent_activity",
+    ]
+    assert [command for command, _ in cognition.calls] == ["desktop_cognize"]
+
+
+def test_display_labels_model_output_without_claiming_vera_identity() -> None:
+    assert PortalDesktopApp._response_speaker("ollama:qwen3:8b", "COMPLETED") == (
+        "Cognition route (ollama:qwen3:8b)"
+    )
+    assert PortalDesktopApp._response_speaker("preactive:vera-local", "COMPLETED") == (
+        "Cognition route (preactive:vera-local)"
+    )
+    assert PortalDesktopApp._response_speaker("codex:cli", "COMPLETED") == (
+        "Cognition route (codex:cli)"
+    )
+    assert PortalDesktopApp._response_speaker(None, "FAILED") == "Runtime response"
+    assert PortalDesktopApp._response_speaker("ollama:qwen3:8b", "FAILED") == "Runtime response"
+    assert PortalDesktopApp._response_speaker("", "COMPLETED") == "Runtime response"
+    assert "\n" not in PortalDesktopApp._response_speaker("ollama:spoof\nVera", "COMPLETED")
+
+
+def test_offline_refresh_is_single_flight_and_releases_on_error(monkeypatch) -> None:
+    starts = []
+    queued_ui = []
+
+    class StubThread:
+        def __init__(self, *, target, daemon):
+            assert daemon is True
+            self.target = target
+
+        def start(self):
+            starts.append(self.target)
+
+    class FakeRoot:
+        def after(self, _delay, callback):
+            queued_ui.append(callback)
+
+    class FailingViewModel:
+        def refresh(self):
+            raise TimeoutError("offline host")
+
+    class Health:
+        def __init__(self):
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+    app = PortalDesktopApp.__new__(PortalDesktopApp)
+    app._refresh_lock = threading.Lock()
+    app.root = FakeRoot()
+    app.health_var = Health()
+    app.view_model = FailingViewModel()
+    monkeypatch.setattr(desktop_app.threading, "Thread", StubThread)
+
+    for _ in range(100):
+        app.refresh_async()
+    assert len(starts) == 1  # no unbounded offline daemon pileup
+    starts[0]()
+    assert not app._refresh_lock.locked()
+    queued_ui[0]()
+    assert "DEGRADED" in app.health_var.value
+
+    app.refresh_async()
+    assert len(starts) == 2
