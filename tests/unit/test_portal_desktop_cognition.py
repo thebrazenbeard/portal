@@ -70,9 +70,12 @@ def test_local_discovery_does_not_follow_redirects(monkeypatch, status):
 
 
 @pytest.mark.parametrize("body", [
-    b"\xff",
-    b"x" * (desktop_cognition._MAX_LOCAL_DISCOVERY_BYTES + 1),
-    b"[]",
+    pytest.param(b"\xff", id="invalid-utf8"),
+    pytest.param(
+        b"x" * (desktop_cognition._MAX_LOCAL_DISCOVERY_BYTES + 1),
+        id="oversized-response",
+    ),
+    pytest.param(b"[]", id="unexpected-json-array"),
 ])
 def test_local_discovery_rejects_invalid_or_oversized_body(monkeypatch, body):
     seen = _stub_discovery(monkeypatch, body)
