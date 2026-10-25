@@ -52,10 +52,23 @@ class _DeadlineSocket:
         self._sock.settimeout(_remaining_http_time(self._deadline))
         self._sock.sendall(data)
 
-    def makefile(self, mode: str):
-        if mode != "rb":
+    def makefile(
+        self, mode: str = "r", buffering: int | None = None, *,
+        encoding=None, errors=None, newline=None,
+    ):
+        # Match the socket.makefile call shape while remaining binary/read-only.
+        # http.client currently calls makefile("rb"); explicit buffering also
+        # must not cause an accidental TypeError or skip the shared deadline.
+        if mode != "rb" or any(v is not None for v in (encoding, errors, newline)):
             raise ValueError("only HTTP response binary reads are supported")
-        return io.BufferedReader(_DeadlineBodyReader(self._sock, self._deadline))
+        if buffering is not None and (type(buffering) is not int or buffering < -1):
+            raise ValueError("invalid HTTP response buffer size")
+        reader = _DeadlineBodyReader(self._sock, self._deadline)
+        if buffering == 0:
+            return reader
+        if buffering in (None, -1):
+            return io.BufferedReader(reader)
+        return io.BufferedReader(reader, buffer_size=buffering)
 
     def close(self) -> None:
         self._sock.close()

@@ -40,6 +40,12 @@ def _server(*, mode: str):
                         self.wfile.flush()
                         time.sleep(0.025)
                     self.wfile.write(_BODY)
+                elif mode == "close-delimited":
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(_BODY)
+                    self.wfile.flush()
+                    self.close_connection = True
                 else:
                     self.send_response(200)
                     self.send_header("Content-Length", str(len(_BODY)))
@@ -72,6 +78,80 @@ def _request(port: int, timeout: float) -> dict[str, object]:
         timeout_seconds=timeout,
         payload={"model": _MODEL, "prompt": "hello", "stream": False},
     )
+
+
+def test_deadline_socket_makefile_supports_socket_binary_buffering():
+    import io
+    from portal.desktop_http_deadline import _DeadlineSocket
+
+    class StubSocket:
+        def settimeout(self, seconds):
+            assert seconds > 0
+
+        def makefile(self, mode, buffering=0):
+            assert (mode, buffering) == ("rb", 0)
+            return io.BytesIO(b"expected")
+
+    socket = _DeadlineSocket(StubSocket(), time.monotonic() + 2)
+    with socket.makefile("rb", buffering=0) as reader:
+        assert reader.read() == b"expected"
+
+
+def test_deadline_socket_makefile_positive_buffer_and_close_ownership():
+    import io
+    from portal.desktop_http_deadline import _DeadlineSocket
+
+    class OwnedRaw(io.BytesIO):
+        def __init__(self):
+            super().__init__(b"fully-buffered")
+            self.was_closed = False
+
+        def close(self):
+            self.was_closed = True
+            super().close()
+
+    class StubSocket:
+        def __init__(self):
+            self.raw = OwnedRaw()
+
+        def settimeout(self, seconds):
+            assert seconds > 0
+
+        def makefile(self, mode, buffering=0):
+            assert (mode, buffering) == ("rb", 0)
+            return self.raw
+
+    stub = StubSocket()
+    with _DeadlineSocket(stub, time.monotonic() + 2).makefile("rb", buffering=4) as reader:
+        assert reader.read() == b"fully-buffered"
+    assert stub.raw.was_closed
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"buffering": -2},
+        {"buffering": "512"},
+        {"buffering": True},
+        {"buffering": 0.5},
+        {"encoding": "utf-8"},
+        {"newline": "\\n"},
+    ],
+)
+def test_deadline_socket_rejects_unsupported_makefile_options(kwargs):
+    from portal.desktop_http_deadline import _DeadlineSocket
+
+    class StubSocket:
+        def makefile(self, *_args, **_kwargs):
+            raise AssertionError("invalid makefile request should not open a reader")
+
+    with pytest.raises(ValueError):
+        _DeadlineSocket(StubSocket(), time.monotonic() + 2).makefile("rb", **kwargs)
+
+
+def test_http10_close_delimited_body_without_content_length():
+    with _server(mode="close-delimited") as port:
+        assert _request(port, 2.0)["response"] == "hello"
 
 
 @pytest.mark.parametrize("mode", ["slow-body", "slow-headers"])
