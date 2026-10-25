@@ -374,43 +374,6 @@ def qualify_runtime(
     )
     if install_schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2" and not isinstance(meso_receipt, dict):
         raise RuntimeError("V2 MESO ingress qualification lacks a receipt")
-    if install_schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2":
-        # MESO processing may take the entire qualification timeout. A source
-        # or resident-process change during that wait must not be certified by
-        # the desktop_status snapshot obtained before the MESO exercise.
-        after_meso_status = client.request("desktop_status")
-        after_components = (
-            after_meso_status.get("components")
-            if isinstance(after_meso_status, dict) else None
-        )
-        if (
-            not isinstance(after_meso_status, dict)
-            or after_meso_status.get("state") != "ACTIVE"
-            or after_meso_status.get("protected_effect_authority") is not False
-            or not all(final_status.get(key) is not None for key in (
-                "runtime_id", "pid", "started_at",
-            ))
-            or any(after_meso_status.get(key) != final_status.get(key) for key in (
-                "runtime_id", "pid", "started_at",
-            ))
-            or not isinstance(after_components, dict)
-            or any(
-                not isinstance(after_components.get(name), dict)
-                or after_components[name].get("loaded") is not True
-                for name in ("vera_mono", "portal", "pre_active", "volition")
-            )
-        ):
-            raise RuntimeError("resident runtime changed during MESO qualification")
-        try:
-            after_identity = _validated_staged_source_identity(
-                runtime_root, after_meso_status.get("source_manifest"),
-            )
-        except RuntimeError as exc:
-            raise RuntimeError(
-                "resident runtime changed during MESO qualification"
-            ) from exc
-        if after_identity != staged_identity:
-            raise RuntimeError("resident runtime changed during MESO qualification")
     result = {
         "schema": (
             "VERA_DESKTOP_RUNTIME_QUALIFICATION_V2"

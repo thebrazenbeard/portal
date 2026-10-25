@@ -178,6 +178,9 @@ leaf to inspect rather than erasing evidence.
 **Security boundary:** the file IPC bridge currently depends on filesystem
 permissions, not authenticated requests; someone able to write its request
 directory can submit cognition requests and a `shutdown` command. The
+resident host reads at most 64 KiB from any claimed JSON request before
+decoding or parsing it; oversized requests return a failed bridge receipt.
+This resource limit is **not** caller authentication or an OS sandbox. The
 `state/cognition/desktop-cognition.sqlite3` ledger retains plaintext prompts
 and responses (including SQLite sidecar files while active). Never place
 credentials in conversation prompts, make the runtime leaf multi-user writable,
