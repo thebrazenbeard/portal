@@ -7,7 +7,9 @@ installed runtime must have them, and desktop_qualify fails if it does not.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import time
+from types import ModuleType
 
 import pytest
 
@@ -118,9 +120,6 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str,
 ) -> None:
     """An earlier host read cannot qualify a host that changed during MESO."""
-    import pre_active
-    import pre_active.volition_bridge
-
     frozen = _source_spec("VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2")
     frozen.write(tmp_path / "RUNTIME_INSTALL_SPEC.json")
     before = frozen.to_mapping()
@@ -224,8 +223,17 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
 
     monkeypatch.setattr(desktop_qualify, "FileBridgeClient", FakeClient)
     monkeypatch.setattr(desktop_qualify, "qualify_meso_ingress", changed_after_meso)
-    monkeypatch.setattr(pre_active, "Store", FakeStore)
-    monkeypatch.setattr(pre_active.volition_bridge, "VolitionBridge", FakeVolitionBridge)
+    # The default PORTAL CI environment deliberately has no Pre-Active extra.
+    # This test controls its import boundary; the separate optional integration
+    # test above exercises the actual installed libraries when available.
+    fake_pre_active = ModuleType("pre_active")
+    fake_pre_active.__path__ = []
+    fake_pre_active.Store = FakeStore
+    fake_bridge = ModuleType("pre_active.volition_bridge")
+    fake_bridge.VolitionBridge = FakeVolitionBridge
+    fake_pre_active.volition_bridge = fake_bridge
+    monkeypatch.setitem(sys.modules, "pre_active", fake_pre_active)
+    monkeypatch.setitem(sys.modules, "pre_active.volition_bridge", fake_bridge)
 
     if changed == "unchanged":
         result = desktop_qualify.qualify_runtime(tmp_path, timeout_seconds=1.0)
