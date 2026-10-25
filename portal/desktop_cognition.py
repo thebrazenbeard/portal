@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import http.client
 import json
 import shutil
 import subprocess
 from typing import Callable, Mapping
-import urllib.request
 
 
 @dataclass(frozen=True)
@@ -54,28 +54,37 @@ def _default_command_probe(name: str, args: tuple[str, ...]) -> str | None:
     return value or name
 
 
-def _default_ollama_tags() -> Mapping[str, object] | None:
+_MAX_LOCAL_DISCOVERY_BYTES = 128 * 1024
+
+
+def _local_discovery_json(port: int, path: str) -> Mapping[str, object] | None:
+    """Probe only a fixed numeric-loopback endpoint, without proxies or redirects."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2.0)
     try:
-        with urllib.request.urlopen(
-            "http://127.0.0.1:11434/api/tags",
-            timeout=2.0,
-        ) as response:
-            value = json.load(response)
-    except (OSError, ValueError):
+        connection.request("GET", path, headers={"Accept": "application/json"})
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        raw = response.read(_MAX_LOCAL_DISCOVERY_BYTES + 1)
+        if len(raw) > _MAX_LOCAL_DISCOVERY_BYTES:
+            return None
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _default_ollama_tags() -> Mapping[str, object] | None:
+    return _local_discovery_json(11434, "/api/tags")
 
 
 def _default_pre_active_models() -> Mapping[str, object] | None:
-    try:
-        with urllib.request.urlopen(
-            "http://127.0.0.1:18081/v1/models",
-            timeout=2.0,
-        ) as response:
-            value = json.load(response)
-    except (OSError, ValueError):
-        return None
-    return value if isinstance(value, dict) else None
+    return _local_discovery_json(18081, "/v1/models")
 
 
 def discover_cognition_routes(

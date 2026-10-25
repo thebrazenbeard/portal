@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import http.client
 import json
 from pathlib import Path
 import sqlite3
 import time
 from typing import Callable
-import urllib.request
 
 from .desktop_cognition import (
     CognitionRequest,
@@ -185,46 +185,87 @@ class CognitionLedger:
 RouteDiscovery = Callable[[], tuple[CognitionRoute, ...]]
 RouteInvoker = Callable[[CognitionRoute, str], str]
 
+_MAX_LOCAL_PROMPT_BYTES = 16 * 1024
+_MAX_LOCAL_RESPONSE_BYTES = 256 * 1024
+_MAX_LOCAL_RESPONSE_CHARS = 32 * 1024
+
+
+def _post_loopback_json(
+    *, port: int, path: str, model: str, task: str, payload: dict[str, object],
+    timeout_seconds: float,
+) -> dict[str, object]:
+    """Use a direct numeric-loopback connection: never a proxy or redirect."""
+    if not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 128:
+        raise ValueError("local model identifier is missing or too long")
+    if not isinstance(task, str) or not task.strip() or len(task.encode("utf-8")) > _MAX_LOCAL_PROMPT_BYTES:
+        raise ValueError("local cognition prompt is missing or too large")
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    if len(encoded) > _MAX_LOCAL_PROMPT_BYTES + 1024:
+        raise ValueError("local model request is too large")
+
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout_seconds)
+    try:
+        connection.request(
+            "POST", path, body=encoded,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            raise RuntimeError(f"local model HTTP status {response.status}")
+        content = response.read(_MAX_LOCAL_RESPONSE_BYTES + 1)
+        if len(content) > _MAX_LOCAL_RESPONSE_BYTES:
+            raise RuntimeError("local model response exceeded size limit")
+    finally:
+        connection.close()
+
+    try:
+        data = json.loads(content.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise RuntimeError("local model response is not valid UTF-8 JSON") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("local model response is not an object")
+    if data.get("model") != model:
+        raise RuntimeError("local model response identity mismatch")
+    if "tool_calls" in data or "function_call" in data:
+        raise RuntimeError("local model attempted a tool call")
+    return data
+
+
+def _local_answer_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError("local model response was empty")
+    text = value.strip()
+    if len(text) > _MAX_LOCAL_RESPONSE_CHARS:
+        raise RuntimeError("local model response text exceeded size limit")
+    return text
+
 
 def invoke_local_text(route: CognitionRoute, task: str) -> str:
     if route.provider == "ollama":
-        payload = json.dumps(
-            {
-                "model": route.model_or_agent,
-                "prompt": task,
-                "stream": False,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            "http://127.0.0.1:11434/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
+        body = _post_loopback_json(
+            port=11434,
+            path="/api/generate",
+            model=route.model_or_agent,
+            task=task,
+            timeout_seconds=60.0,
+            payload={"model": route.model_or_agent, "prompt": task, "stream": False},
         )
-        with urllib.request.urlopen(request, timeout=120.0) as response:
-            body = json.load(response)
-        if not isinstance(body, dict) or body.get("done") is not True:
+        if body.get("done") is not True:
             raise RuntimeError("Ollama response did not complete")
-        text = body.get("response")
-        if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("Ollama response was empty")
-        return text.strip()
+        return _local_answer_text(body.get("response"))
 
     if route.provider == "pre_active_local":
-        payload = json.dumps(
-            {
+        body = _post_loopback_json(
+            port=18081,
+            path="/v1/chat/completions",
+            model=route.model_or_agent,
+            task=task,
+            timeout_seconds=90.0,
+            payload={
                 "model": route.model_or_agent,
                 "messages": [{"role": "user", "content": task}],
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            "http://127.0.0.1:18081/v1/chat/completions",
-            data=payload,
-            headers={"Content-Type": "application/json"},
+            },
         )
-        with urllib.request.urlopen(request, timeout=180.0) as response:
-            body = json.load(response)
-        if not isinstance(body, dict):
-            raise RuntimeError("Pre-Active model response is not an object")
         choices = body.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("Pre-Active model response has no choices")
@@ -234,10 +275,13 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
         message = first.get("message")
         if not isinstance(message, dict):
             raise RuntimeError("Pre-Active model choice has no message")
-        text = message.get("content")
-        if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("Pre-Active model response was empty")
-        return text.strip()
+        if (
+            "tool_calls" in message
+            or "function_call" in message
+            or first.get("finish_reason") == "tool_calls"
+        ):
+            raise RuntimeError("local model attempted a tool call")
+        return _local_answer_text(message.get("content"))
 
     raise RuntimeError(f"no resident adapter for provider: {route.provider}")
 
