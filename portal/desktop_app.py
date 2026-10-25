@@ -31,6 +31,7 @@ class DesktopViewModel:
     ) -> None:
         self.client = client
         self.status_client = status_client or client
+        self.conversation_session_id = uuid.uuid4().hex
 
     @staticmethod
     def _preferred_route(
@@ -102,19 +103,24 @@ class DesktopViewModel:
         *,
         request_id: str | None = None,
         created_at: float | None = None,
+        remember_context: bool = False,
+        conversation_session_id: str | None = None,
     ) -> dict[str, object]:
         task = message.strip()
         if not task:
             raise ValueError("message is required")
-        return self.client.request(
-            "desktop_cognize",
-            request_id=request_id or uuid.uuid4().hex,
-            source="HUMAN",
-            reason="desktop conversation message",
-            task=task,
-            created_at=float(time.time() if created_at is None else created_at),
-            required_capabilities=["text"],
-        )
+        payload: dict[str, object] = {
+            "source": "HUMAN",
+            "reason": "desktop conversation message",
+            "task": task,
+            "created_at": float(time.time() if created_at is None else created_at),
+            "required_capabilities": ["text"],
+        }
+        if remember_context:
+            payload["conversation_session_id"] = (
+                conversation_session_id or self.conversation_session_id
+            )
+        return self.client.request("desktop_cognize", request_id=request_id or uuid.uuid4().hex, **payload)
 
 
 PORTAL_PALETTE = {
@@ -219,6 +225,14 @@ class PortalDesktopApp:
         tk.Label(intro, text="Your conversation uses the selected local model route.",
                  bg=c["surface"], fg=c["muted"],
                  font=("Segoe UI", 10)).pack(anchor="w", pady=(5, 0))
+        self.context_enabled = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            intro, text="Remember recent turns in this window (volatile; off by default)",
+            variable=self.context_enabled, command=self._context_toggle,
+            bg=c["surface"], fg=c["muted"],
+            selectcolor=c["surface_raised"], activebackground=c["surface"],
+            activeforeground=c["text"], font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(8, 0))
 
         transcript = tk.Frame(conversation_frame, bg=c["editor"],
                               highlightthickness=1,
@@ -427,6 +441,12 @@ class PortalDesktopApp:
         self.send_message()
         return "break"
 
+    def _context_toggle(self) -> None:
+        if not self.context_enabled.get():
+            # Retire the handle so toggling back on cannot reattach the old
+            # resident history. The old cache is ephemeral and LRU-bounded.
+            self.view_model.conversation_session_id = uuid.uuid4().hex
+
     def send_message(self) -> None:
         message = self.message_var.get().strip()
         if not message:
@@ -435,10 +455,20 @@ class PortalDesktopApp:
         self._append_conversation("Patrick", message)
         self.status_var.set("Vera is thinking…")
         self.send_button.configure(state="disabled")
+        # Tk widgets and session selection belong to the UI thread. Freeze
+        # both before the worker starts; a mid-flight toggle must not silently
+        # change this request's context binding.
+        context_id = (
+            self.view_model.conversation_session_id
+            if self.context_enabled.get() else None
+        )
 
         def work() -> None:
             try:
-                result = self.view_model.send_message(message)
+                result = self.view_model.send_message(
+                    message, remember_context=context_id is not None,
+                    conversation_session_id=context_id,
+                )
                 response = str(
                     result.get("response_text")
                     or result.get("error")

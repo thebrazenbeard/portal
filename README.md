@@ -54,6 +54,17 @@ Or directly:
 
     python -m portal.desktop_app
 
+The conversation window has an **opt-in recent-turn context** checkbox, off
+by default. When enabled, the resident host passes up to six completed
+user/assistant pairs (at most 6 KiB per session; at most 32 sessions in an
+LRU cache) to its local Ollama `/api/chat` or Pre-Active chat route. Each
+window uses an unpredictable session identifier; file IPC transmits only the
+current message and that identifier. Context stays in process memory, never
+hydrates from autonomous tasks or SQLite, and is lost on host restart. This
+is conversational convenience, not learning or persistent memory. The
+existing per-request SQLite ledger still retains the **current** plaintext
+prompt/response; the security and ACL cautions below continue to apply.
+
 ### Windows operator-owned staged launch
 
 `portal-desktop` alone does **not** install or start a resident Vera host. The staged

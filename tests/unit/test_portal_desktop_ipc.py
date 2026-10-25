@@ -14,7 +14,7 @@ from portal.desktop_ipc import (
     DesktopRuntimeCommandHandler,
     FileBridgeClient,
 )
-from portal.desktop_runtime import CognitionLedger, ResidentCognitionEngine
+from portal.desktop_runtime import CognitionLedger, CognitionRequestEnvelope, ResidentCognitionEngine
 
 
 LOCAL = CognitionRoute(
@@ -96,6 +96,59 @@ def test_handler_recent_activity_returns_persisted_cognition(tmp_path: Path) -> 
         activity = handler.handle({"command": "desktop_recent_activity", "limit": 5})
         assert activity["items"][0]["request_id"] == "recent-1"
         assert activity["items"][0]["source"] == "HUMAN"
+        ledger.connection.execute(
+            "UPDATE desktop_cognition_runs SET acceptance_json=? WHERE request_id=?",
+            (json.dumps({"status": "REVIEW", "task": "private prompt", "nested": {"task": "private prompt"}}),
+             "recent-1"),
+        )
+        telemetry = handler.handle({"command": "desktop_recent_activity", "limit": 5})
+        assert telemetry["items"][0]["acceptance"] == {"status": "REVIEW"}
+        assert "private prompt" not in json.dumps(telemetry)
+        ledger.connection.execute(
+            "UPDATE desktop_cognition_runs SET acceptance_json=? WHERE request_id=?",
+            (json.dumps({"status": "private prompt", "context_digest": "secret"}), "recent-1"),
+        )
+        assert handler.handle({"command": "desktop_recent_activity"})["items"][0]["acceptance"] is None
+    finally:
+        ledger.close()
+
+
+def test_handler_rejects_invalid_session_before_ledger_write(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.sqlite3")
+    try:
+        engine = ResidentCognitionEngine(ledger=ledger, discover_routes=lambda: (LOCAL,))
+        handler = DesktopRuntimeCommandHandler(
+            engine=engine, discover_routes=lambda: (LOCAL,), runtime_status=lambda: {},
+        )
+        with pytest.raises(ValueError, match="conversation session"):
+            handler.handle({"command": "desktop_cognize", "request_id": "bad-session",
+                            "task": "secret", "reason": "test", "source": "HUMAN",
+                            "conversation_session_id": "other"})
+        assert ledger.get("bad-session") is None
+    finally:
+        ledger.close()
+
+
+def test_recent_activity_redacts_private_reason_and_exception_text(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda _route, task: (_ for _ in ()).throw(ValueError("task-secret:" + task)),
+        )
+        handler = DesktopRuntimeCommandHandler(
+            engine=engine, discover_routes=lambda: (LOCAL,), runtime_status=lambda: {},
+        )
+        result = engine.process(
+            CognitionRequestEnvelope("sensitive", "HUMAN", "private-path:/sensitive", "my-secret-task", 1),
+        )
+        assert "my-secret-task" in result.error
+        assert "private-path" in ledger.get("sensitive")["reason"]
+        telemetry = handler.handle({"command": "desktop_recent_activity"})
+        assert telemetry["items"][0]["reason"] == "desktop conversation"
+        assert telemetry["items"][0]["error"] == "ValueError"
+        assert "my-secret-task" not in json.dumps(telemetry)
+        assert "private-path" not in json.dumps(telemetry)
     finally:
         ledger.close()
 

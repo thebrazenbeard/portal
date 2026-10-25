@@ -66,6 +66,29 @@ def test_pre_active_local_uses_direct_loopback_and_exact_model(monkeypatch):
     assert seen["closed"] is True
 
 
+def test_opt_in_pre_active_chat_sends_role_structured_history(monkeypatch):
+    seen = _stub(monkeypatch, _answer())
+    messages = [{"role": "user", "content": "first"},
+                {"role": "assistant", "content": "answer"},
+                {"role": "user", "content": "next"}]
+    assert desktop_runtime.invoke_local_messages(_route(), messages) == "trained vera answer"
+    assert json.loads(seen["request"][2])["messages"] == messages
+
+
+def test_opt_in_ollama_chat_uses_api_chat_and_rejects_tool_response(monkeypatch):
+    route = _route("ollama", "vera-local:latest")
+    messages = [{"role": "user", "content": "hello"}]
+    seen = _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
+                              "message": {"role": "assistant", "content": "answer"}})
+    assert desktop_runtime.invoke_local_messages(route, messages) == "answer"
+    assert seen["request"][1] == "/api/chat"
+    assert json.loads(seen["request"][2])["messages"] == messages
+    _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
+                        "message": {"role": "assistant", "content": "unsafe", "tool_calls": []}})
+    with pytest.raises(RuntimeError, match="tool call"):
+        desktop_runtime.invoke_local_messages(route, messages)
+
+
 def test_ollama_uses_direct_loopback(monkeypatch):
     seen = _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
                               "response": "ollama answer"})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import OrderedDict
 import hashlib
 import http.client
 import json
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS desktop_cognition_runs (
     started_at REAL,
     completed_at REAL,
     updated_at REAL NOT NULL,
-    evidence_id TEXT NOT NULL
+    evidence_id TEXT NOT NULL,
+    conversation_binding_digest TEXT
 );
 """
 
@@ -76,6 +78,8 @@ class CognitionLedger:
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(desktop_cognition_runs)")}
         if "acceptance_json" not in columns:
             self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN acceptance_json TEXT")
+        if "conversation_binding_digest" not in columns:
+            self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN conversation_binding_digest TEXT")
 
     def close(self) -> None:
         self.connection.close()
@@ -113,6 +117,7 @@ class CognitionLedger:
         error: str | None = None,
         started_at: float | None = None,
         completed_at: float | None = None,
+        conversation_binding_digest: str | None = None,
     ) -> str:
         evidence_payload = {
             "schema": "PORTAL_DESKTOP_COGNITION_EVIDENCE_V1",
@@ -125,6 +130,7 @@ class CognitionLedger:
             "response_text": response_text,
             "error": error,
             "protected_effect_authority": False,
+            "conversation_binding_digest": conversation_binding_digest,
         }
         evidence_id = "cognition:" + hashlib.sha256(
             json.dumps(
@@ -134,14 +140,15 @@ class CognitionLedger:
                 ensure_ascii=False,
             ).encode("utf-8")
         ).hexdigest()
-        self.connection.execute(
+        cursor = self.connection.execute(
             """
             INSERT INTO desktop_cognition_runs(
                 request_id, source, reason, task, created_at,
                 state, retryable, route_id, provider, model_or_agent,
                 response_text, error, protected_effect_authority,
-                started_at, completed_at, updated_at, evidence_id
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)
+                started_at, completed_at, updated_at, evidence_id,
+                conversation_binding_digest
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)
             ON CONFLICT(request_id) DO UPDATE SET
                 source=excluded.source,
                 reason=excluded.reason,
@@ -158,7 +165,10 @@ class CognitionLedger:
                 started_at=excluded.started_at,
                 completed_at=excluded.completed_at,
                 updated_at=excluded.updated_at,
-                evidence_id=excluded.evidence_id
+                evidence_id=excluded.evidence_id,
+                conversation_binding_digest=excluded.conversation_binding_digest
+            WHERE desktop_cognition_runs.conversation_binding_digest
+                  IS excluded.conversation_binding_digest
             """,
             (
                 request.request_id,
@@ -177,17 +187,24 @@ class CognitionLedger:
                 completed_at,
                 now,
                 evidence_id,
+                conversation_binding_digest,
             ),
         )
+        if cursor.rowcount != 1:
+            raise ValueError("request_id already binds a different conversation session")
         return evidence_id
 
 
 RouteDiscovery = Callable[[], tuple[CognitionRoute, ...]]
 RouteInvoker = Callable[[CognitionRoute, str], str]
+ChatInvoker = Callable[[CognitionRoute, list[dict[str, str]]], str]
 
 _MAX_LOCAL_PROMPT_BYTES = 16 * 1024
 _MAX_LOCAL_RESPONSE_BYTES = 256 * 1024
 _MAX_LOCAL_RESPONSE_CHARS = 32 * 1024
+_MAX_CONTEXT_PAIRS = 6
+_MAX_CONTEXT_BYTES = 6 * 1024
+_MAX_CONTEXT_SESSIONS = 32
 
 
 def _post_loopback_json(
@@ -290,6 +307,49 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
     raise RuntimeError(f"no resident adapter for provider: {route.provider}")
 
 
+def invoke_local_messages(route: CognitionRoute, messages: list[dict[str, str]]) -> str:
+    """Opt-in role-preserving local chat; never offers the model tools."""
+    if not messages or messages[-1].get("role") != "user":
+        raise ValueError("local conversation must finish with a user message")
+    if any(item.get("role") not in ("user", "assistant") or
+           not isinstance(item.get("content"), str) for item in messages):
+        raise ValueError("local conversation contains an invalid role or content")
+    task = messages[-1]["content"]
+    if route.provider == "ollama":
+        body = _post_loopback_json(
+            port=11434, path="/api/chat", model=route.model_or_agent,
+            task=task, timeout_seconds=120.0,
+            payload={"model": route.model_or_agent, "messages": messages, "stream": False},
+        )
+        if body.get("done") is not True:
+            raise RuntimeError("Ollama response did not complete")
+        message = body.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            raise RuntimeError("Ollama chat did not return an assistant message")
+        if "tool_calls" in message or "function_call" in message:
+            raise RuntimeError("local model attempted a tool call")
+        return _local_answer_text(message.get("content"))
+    if route.provider == "pre_active_local":
+        body = _post_loopback_json(
+            port=18081, path="/v1/chat/completions", model=route.model_or_agent,
+            task=task, timeout_seconds=180.0,
+            payload={"model": route.model_or_agent, "messages": messages},
+        )
+        choices = body.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise RuntimeError("Pre-Active model response requires exactly one choice")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise RuntimeError("Pre-Active model choice is not an object")
+        message = first.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            raise RuntimeError("Pre-Active model response role is not assistant")
+        if "tool_calls" in message or "function_call" in message or first.get("finish_reason") != "stop":
+            raise RuntimeError("Pre-Active model did not complete a tool-free text response")
+        return _local_answer_text(message.get("content"))
+    raise RuntimeError(f"no local chat adapter for provider: {route.provider}")
+
+
 # Compatibility alias for callers that explicitly import the old helper.
 invoke_ollama_text = invoke_local_text
 
@@ -301,14 +361,51 @@ class ResidentCognitionEngine:
         ledger: CognitionLedger,
         discover_routes: RouteDiscovery = discover_cognition_routes,
         invoke_route: RouteInvoker = invoke_local_text,
+        invoke_chat: ChatInvoker = invoke_local_messages,
         authorized_route_ids: frozenset[str] = frozenset(),
         accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.discover_routes = discover_routes
         self.invoke_route = invoke_route
+        self.invoke_chat = invoke_chat
         self.authorized_route_ids = authorized_route_ids
         self.accept_result = accept_result
+        # Resident process memory only. Never hydrate from the durable cognition
+        # ledger: that ledger also contains unrelated autonomous tasks.
+        self._context: OrderedDict[str, tuple[str, list[tuple[str, str]]]] = OrderedDict()
+
+    def _chat_messages(
+        self, session: str, route: CognitionRoute, task: str,
+    ) -> list[dict[str, str]]:
+        prior = self._context.get(session)
+        pairs = list(prior[1]) if prior is not None and prior[0] == route.route_id else []
+        while True:
+            messages = [message for user, assistant in pairs for message in (
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": assistant},
+            )] + [{"role": "user", "content": task}]
+            # Maintain the actual JSON envelope limit including escaping; a
+            # malformed/oversized current message fails as an ordinary request.
+            body = ({"model": route.model_or_agent, "messages": messages,
+                     "stream": False} if route.provider == "ollama" else
+                    {"model": route.model_or_agent, "messages": messages})
+            if len(json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")) <= _MAX_LOCAL_PROMPT_BYTES + 1024 or not pairs:
+                return messages
+            pairs.pop(0)
+
+    def _remember(self, session: str, route: CognitionRoute, task: str, reply: str) -> None:
+        prior = self._context.get(session)
+        pairs = list(prior[1]) if prior is not None and prior[0] == route.route_id else []
+        pairs.append((task, reply))
+        while pairs and (len(pairs) > _MAX_CONTEXT_PAIRS or
+                         sum(len(user.encode("utf-8")) + len(assistant.encode("utf-8"))
+                             for user, assistant in pairs) > _MAX_CONTEXT_BYTES):
+            pairs.pop(0)
+        self._context[session] = (route.route_id, pairs)
+        self._context.move_to_end(session)
+        while len(self._context) > _MAX_CONTEXT_SESSIONS:
+            self._context.popitem(last=False)
 
     @staticmethod
     def _result_from_stored(row: dict[str, object]) -> CognitionResult:
@@ -331,9 +428,26 @@ class ResidentCognitionEngine:
         request: CognitionRequestEnvelope,
         *,
         now: float | None = None,
+        conversation_session_id: str | None = None,
     ) -> CognitionResult:
+        if conversation_session_id is not None:
+            if request.source != "HUMAN":
+                raise ValueError("conversation context is HUMAN-only")
+            if not isinstance(conversation_session_id, str) or len(conversation_session_id) != 32 or any(
+                char not in "0123456789abcdef" for char in conversation_session_id
+            ):
+                raise ValueError("invalid conversation session identifier")
+        # Durable *opaque* binding protects idempotent request replay across
+        # sessions and host restarts, without storing the raw session ID or
+        # any earlier conversation turns in SQLite.
+        session_binding = (
+            hashlib.sha256(("PORTAL_CONVERSATION_SESSION_V1:" + conversation_session_id).encode("ascii")).hexdigest()
+            if conversation_session_id is not None else None
+        )
         observed_now = float(time.time() if now is None else now)
         stored = self.ledger.get(request.request_id)
+        if stored is not None and stored["conversation_binding_digest"] != session_binding:
+            raise ValueError("request_id already binds a different conversation session")
         if stored is not None and any(stored[key] != getattr(request, key) for key in ("source", "reason", "task")):
             raise ValueError("request_id already binds a different cognition request")
         if stored is not None and stored["state"] == "COMPLETED":
@@ -355,6 +469,7 @@ class ResidentCognitionEngine:
                 now=observed_now,
                 error="no_admissible_cognition_route",
                 completed_at=observed_now,
+                conversation_binding_digest=session_binding,
             )
             return CognitionResult(
                 request_id=request.request_id,
@@ -374,9 +489,13 @@ class ResidentCognitionEngine:
             now=observed_now,
             route=route,
             started_at=started_at,
+            conversation_binding_digest=session_binding,
         )
         try:
-            response_text = self.invoke_route(route, request.task)
+            response_text = (
+                self.invoke_chat(route, self._chat_messages(conversation_session_id, route, request.task))
+                if conversation_session_id is not None else self.invoke_route(route, request.task)
+            )
             if not isinstance(response_text, str) or not response_text.strip():
                 raise ValueError("cognition response must be nonempty text")
             acceptance = (
@@ -399,6 +518,7 @@ class ResidentCognitionEngine:
                 error=error,
                 started_at=started_at,
                 completed_at=observed_now,
+                conversation_binding_digest=session_binding,
             )
             return CognitionResult(
                 request_id=request.request_id,
@@ -420,7 +540,10 @@ class ResidentCognitionEngine:
             response_text=response_text,
             started_at=started_at,
             completed_at=observed_now,
+            conversation_binding_digest=session_binding,
         )
+        if conversation_session_id is not None:
+            self._remember(conversation_session_id, route, request.task, response_text)
         return CognitionResult(
             request_id=request.request_id,
             state="COMPLETED",
