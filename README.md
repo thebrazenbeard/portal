@@ -69,6 +69,25 @@ environment before launch**:
 - `PORTAL_REZON_PORT` — optional numeric port (`8765` by default), on local
   IPv4 loopback only.
 
+Because the socket and HMAC audience are both bound to `127.0.0.1`, the
+resident PORTAL process and Rezon gateway **must run on the same host**. For
+VN2's observed Rezon port, an operator can use the explicit, read-only
+preflight on VN2 after privately configuring the observer environment:
+
+```bash
+python -m scripts.qualify_rezon_colocation \
+  --episode "$PORTAL_REZON_EPISODE_ID" --port 18765
+```
+
+Exit `0` means one existing complete episode passed the source client's
+authenticated observer read; exit `2` means `HOLD`. Output never contains the
+observer token or synthesis content. **Even a PASS does not certify** an
+installed PORTAL service, permanent observer enrollment, cross-host network
+access, model identity, or protected-effect authority. An incomplete or absent
+episode is an expected HOLD, not a reason to relax the gate. Co-location is a
+deliberate security constraint: do not expose this adapter on the LAN merely
+to connect PORTAL on Lappy or VN1 to VN2.
+
 A caller must *also* send `desktop_cognize` with
 `required_capabilities: ["rezon_collective_advisory"]`, `task` equal to that
 exact episode ID, and no conversation-session context. Only one current
