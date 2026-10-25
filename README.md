@@ -54,6 +54,93 @@ Or directly:
 
     python -m portal.desktop_app
 
+### Windows operator-owned staged launch
+
+`portal-desktop` alone does **not** install or start a resident Vera host. The staged
+installer requires Windows, Python 3.12+ with Tkinter, Git, network access to
+the four source repositories, and an **already running local text model**
+(normally Ollama on `127.0.0.1:11434`, or a compatible qualified local provider
+on `127.0.0.1:18081`). Model availability and response compatibility must be
+checked on the actual machine; no model download or service installation is
+performed by this procedure.
+
+From a freshly inspected checkout of `thebrazenbeard/portal@main`, use
+PowerShell to resolve and inspect the exact four source revisions before
+allowing the installer to clone, install, or start anything:
+
+```powershell
+$sourceHeads = @{}
+foreach ($repo in @('vera-mono', 'portal', 'pre-active', 'volition')) {
+    $line = git ls-remote "https://github.com/thebrazenbeard/$repo.git" 'refs/heads/main'
+    if ($LASTEXITCODE -ne 0 -or -not ($line -match '^([0-9a-f]{40})\s+refs/heads/main$')) {
+        throw "Cannot resolve exact main revision for $repo"
+    }
+    $sourceHeads[$repo] = $Matches[1]
+    Write-Host "$repo $($sourceHeads[$repo])"
+}
+if ((git rev-parse HEAD).Trim() -ne $sourceHeads['portal']) {
+    throw 'Local PORTAL checkout is not the resolved current main; inspect/update first'
+}
+```
+
+After reviewing those hashes and the source, select a **dedicated leaf**, for
+example `D:\VERA\PortalDesktop\desktop-1` (never `D:\VERA` itself). Create
+an **empty, real (not symlinked/junction) leaf** and inspect its ACL **before**
+installing; verify the intended account controls it and untrusted users cannot
+read or write it. Check it again after
+staging. Do not proceed on a shared or permissive folder; these commands do not
+change Windows ACLs for you. Use a simple ASCII path: the launcher rejects
+percent signs, quotes, delayed-expansion marks, and CMD metacharacters rather
+than creating a command script that could reinterpret them. Installation
+accepts only the four canonical `thebrazenbeard` component repositories;
+exact hashes still need independent inspection because pinning alone does not
+make upstream code trustworthy.
+
+```powershell
+$runtimeRoot = 'D:\VERA\PortalDesktop\desktop-1'
+New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+icacls $runtimeRoot
+# Review the ACL output and stop if other users have access.
+py -3.12 -m portal.desktop_installer `
+    --runtime-root $runtimeRoot `
+    --install-id desktop-1 `
+    --portal-ref main `
+    --portal-sha $sourceHeads['portal'] `
+    --vera-mono-sha $sourceHeads['vera-mono'] `
+    --pre-active-sha $sourceHeads['pre-active'] `
+    --volition-sha $sourceHeads['volition']
+
+# Only after installer qualification succeeds:
+icacls $runtimeRoot
+& "$runtimeRoot\PortalDesktop.cmd"
+```
+
+This command deliberately omits `--activate`: it starts a staged host for
+qualification but does **not** register a logon task. `--activate` separately
+requests persistent logon activation and should be used only after inspecting
+the qualification and installation receipts. A new exact source set requires
+a new install leaf; a nonempty leaf is rejected even when the SHAs match. An
+interrupted install that has cloned a component is **not resumable** by this
+installer: inspect its evidence and choose a new leaf. It never resets, cleans,
+or overwrites an existing source checkout. Every fresh checkout must be clean
+(including untracked and ignored files) before editable installation.
+
+**Security boundary:** the file IPC bridge currently depends on filesystem
+permissions, not authenticated requests; someone able to write its request
+directory can submit cognition requests and a `shutdown` command. The
+`state/cognition/desktop-cognition.sqlite3` ledger retains plaintext prompts
+and responses (including SQLite sidecar files while active). Never place
+credentials in conversation prompts, make the runtime leaf multi-user writable,
+or infer privacy simply because inference uses a loopback address. Local
+model discovery is not proof that a provider performs every operation offline.
+
+The generated `PortalDesktop.cmd` binds the installed runtime root explicitly.
+The bare `portal-desktop` command uses an environment/default root and may not
+point at this staged installation. A qualified receipt proves only that its
+bounded checks passed on that exact installed subject; it does not establish
+continuing operation, AI advancement, protected-effect authority, or a direct
+connection to this ChatGPT session.
+
 The desktop/runtime path preserves the same evidence rules as the portfolio coordinator:
 
 `COGNITION != PROTECTED_EFFECT_AUTHORITY`

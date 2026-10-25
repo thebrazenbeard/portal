@@ -26,8 +26,10 @@ class RuntimeSource:
     def validate(self) -> None:
         if self.component not in _COMPONENTS:
             raise ValueError(f"unsupported runtime component: {self.component}")
-        if "/" not in self.repository or self.repository.count("/") != 1:
-            raise ValueError(f"invalid repository: {self.repository}")
+        if self.repository != f"thebrazenbeard/{self.component}":
+            raise ValueError(
+                f"runtime source repository is not canonical for {self.component}"
+            )
         if not self.ref.strip():
             raise ValueError("source ref is required")
         if not _SHA_RE.fullmatch(self.sha):
