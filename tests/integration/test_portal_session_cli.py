@@ -425,6 +425,11 @@ def test_session_run_persists_non_secret_resume_envelope(
     FakeSession.calls.clear()
     monkeypatch.setattr(portal_cli, "PortalCommandSession", FakeSession)
 
+    def forbid_live_discovery(*_args, **_kwargs):
+        raise AssertionError("resume envelope must not discover GitHub repositories")
+
+    monkeypatch.setattr(portal_cli, "GitHubRepositoryCatalog", forbid_live_discovery)
+
     nodes_path = ROOT / "tests" / "fixtures" / "portal-nodes-valid.yaml"
     code = portal_cli.entrypoint([
         "run",
@@ -437,6 +442,7 @@ def test_session_run_persists_non_secret_resume_envelope(
         "--max-per-lane", "1",
         "--verifier", "vera-review",
         "--discovered-effect-ceiling", "SOURCE_ONLY",
+        "--static-projects",
         "--host-bridge",
         "--host-node-occupancy",
         "--host-frontier-currentness",
@@ -464,6 +470,7 @@ def test_session_run_persists_non_secret_resume_envelope(
     assert spec["max_per_lane"] == 1
     assert spec["verifier"] == "vera-review"
     assert spec["discovered_effect_ceiling"] == "SOURCE_ONLY"
+    assert spec["static_projects"] is True
     assert spec["host_bridge"] is True
     assert spec["host_node_occupancy"] is True
     assert spec["host_frontier_currentness"] is True
