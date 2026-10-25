@@ -34,6 +34,7 @@ class CognitionRoute:
 CommandProbe = Callable[[str, tuple[str, ...]], str | None]
 OllamaTagsProbe = Callable[[], Mapping[str, object] | None]
 PreActiveModelsProbe = Callable[[], Mapping[str, object] | None]
+RezonObserverProbe = Callable[[], tuple[str, str] | None]
 
 
 def _default_command_probe(name: str, args: tuple[str, ...]) -> str | None:
@@ -100,6 +101,7 @@ def discover_cognition_routes(
     command_probe: CommandProbe = _default_command_probe,
     ollama_tags: OllamaTagsProbe = _default_ollama_tags,
     pre_active_models: PreActiveModelsProbe = _default_pre_active_models,
+    rezon_observer: RezonObserverProbe | None = None,
 ) -> tuple[CognitionRoute, ...]:
     routes: list[CognitionRoute] = []
 
@@ -222,6 +224,32 @@ def discover_cognition_routes(
             )
         )
 
+    # The Rezon observer is a deliberately separate capability, not a text
+    # route. Only an authenticated read of one complete episode advertises it;
+    # a listening /healthz endpoint is never sufficient for discovery.
+    # Default route discovery is safe for ordinary text, autonomous requests,
+    # desktop status and chat. The resident engine explicitly supplies this
+    # probe only *after* checking source, capability, session and host consent.
+    observed_episode = rezon_observer() if rezon_observer is not None else None
+    if observed_episode is not None:
+        episode_id, fingerprint = observed_episode
+        routes.append(
+            CognitionRoute(
+                route_id=f"rezon:{episode_id}",
+                provider="rezon_collective_observer",
+                model_or_agent=episode_id,
+                local=True,
+                available=True,
+                current=True,
+                capabilities=("rezon_collective_advisory",),
+                incremental_paid_compute=False,
+                auto_admissible=False,
+                effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
+                preference=70,
+                observed_version=fingerprint,
+            )
+        )
+
     return tuple(sorted(routes, key=lambda route: route.route_id))
 
 
@@ -237,6 +265,11 @@ def select_cognition_route(
         if not route.available or not route.current:
             continue
         if not required.issubset(route.capabilities):
+            continue
+        # Empty/underspecified capability requests must not accidentally
+        # acquire an episode-bound Rezon observer even with host admission.
+        if ("rezon_collective_advisory" in route.capabilities
+                and "rezon_collective_advisory" not in required):
             continue
         if not route.auto_admissible and route.route_id not in authorized_route_ids:
             continue

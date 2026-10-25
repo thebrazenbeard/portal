@@ -11,12 +11,14 @@ import time
 from typing import Callable
 
 from .desktop_http_deadline import _DeadlineHTTPConnection
+from .desktop_rezon import invoke_rezon_observer
 from .desktop_cognition import (
     CognitionRequest,
     CognitionRoute,
     discover_cognition_routes,
     select_cognition_route,
 )
+from .desktop_rezon import authorized_rezon_route_ids, discover_rezon_observer
 
 
 @dataclass(frozen=True)
@@ -436,6 +438,11 @@ def _local_answer_text(value: object) -> str:
 
 
 def invoke_local_text(route: CognitionRoute, task: str) -> str:
+    if route.provider == "rezon_collective_observer":
+        if route.route_id != f"rezon:{route.model_or_agent}":
+            raise ValueError("Rezon route identity mismatch")
+        return invoke_rezon_observer(route.model_or_agent, route.observed_version, task)
+
     if route.provider == "ollama":
         body = _post_loopback_json(
             port=11434,
@@ -641,6 +648,25 @@ class ResidentCognitionEngine:
 
         try:
             routes = self.discover_routes()
+            # Default route discovery is side-effect-free with respect to
+            # private Rezon state. Read an episode only for an explicitly
+            # admitted human advisory request, never for ordinary text,
+            # autonomous execution, or conversation context.
+            explicit_rezon_request = (
+                request.source == "HUMAN"
+                and conversation_session_id is None
+                and "rezon_collective_advisory" in request.required_capabilities
+                and bool(self.authorized_route_ids & authorized_rezon_route_ids())
+            )
+            if explicit_rezon_request and not any(
+                item.provider == "rezon_collective_observer" for item in routes
+            ):
+                routes += discover_cognition_routes(
+                    command_probe=lambda *_: None,
+                    ollama_tags=lambda: None,
+                    pre_active_models=lambda: None,
+                    rezon_observer=discover_rezon_observer,
+                )
             route = select_cognition_route(
                 CognitionRequest(
                     required_capabilities=request.required_capabilities,
@@ -660,6 +686,14 @@ class ResidentCognitionEngine:
                 request_id=request.request_id, state="FAILED", route_id=None,
                 response_text=None, retryable=True, evidence_id=evidence_id, error=error,
             )
+        # Even with host admission, an observed Rezon episode is never an
+        # autonomous or conversation-session cognition route.
+        # An admitted observer reads potentially private episode contents.
+        # Autonomous requests and ordinary chat-context sessions have no
+        # implied consent to move Rezon material into the cognition ledger.
+        if (route is not None and route.provider == "rezon_collective_observer"
+                and (request.source != "HUMAN" or conversation_session_id is not None)):
+            route = None
         if route is None:
             evidence_id = self.ledger.finish(
                 request,

@@ -16,6 +16,7 @@ from .desktop_pre_active import (
     process_one_volition_signal,
 )
 from .desktop_runtime import CognitionLedger, ResidentCognitionEngine
+from .desktop_rezon import authorized_rezon_route_ids
 from .desktop_vera_acceptance import VeraRuntimeAcceptance
 
 
@@ -231,6 +232,7 @@ def run_host(runtime_root: Path) -> int:
     )
     cognition_engine = ResidentCognitionEngine(
         ledger=cognition_ledger,
+        authorized_route_ids=authorized_rezon_route_ids(),
         accept_result=VeraRuntimeAcceptance(
             vera,
             runtime_id=runtime_id,
