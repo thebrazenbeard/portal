@@ -20,6 +20,7 @@ def _route(provider="pre_active_local", model="vera-v10r3-step20"):
 def _answer(**extra):
     return {"model": "vera-v10r3-step20", "choices": [{
         "message": {"role": "assistant", "content": "trained vera answer"},
+        "finish_reason": "stop",
     }], **extra}
 
 
@@ -55,7 +56,7 @@ def _stub(monkeypatch, body, status=200):
 def test_pre_active_local_uses_direct_loopback_and_exact_model(monkeypatch):
     seen = _stub(monkeypatch, _answer())
     assert desktop_runtime.invoke_local_text(_route(), "hello") == "trained vera answer"
-    assert seen["connections"] == [("127.0.0.1", 18081, 90.0)]
+    assert seen["connections"] == [("127.0.0.1", 18081, 180.0)]
     method, path, encoded, headers = seen["request"]
     assert method == "POST" and path == "/v1/chat/completions"
     assert headers["Content-Type"] == "application/json"
@@ -69,7 +70,7 @@ def test_ollama_uses_direct_loopback(monkeypatch):
     seen = _stub(monkeypatch, {"model": "vera-local:latest", "done": True,
                               "response": "ollama answer"})
     assert desktop_runtime.invoke_local_text(_route("ollama", "vera-local:latest"), "hello") == "ollama answer"
-    assert seen["connections"] == [("127.0.0.1", 11434, 60.0)]
+    assert seen["connections"] == [("127.0.0.1", 11434, 120.0)]
     assert seen["request"][1] == "/api/generate"
     assert json.loads(seen["request"][2]) == {
         "model": "vera-local:latest", "prompt": "hello", "stream": False,
@@ -80,7 +81,7 @@ def test_proxy_environment_cannot_redirect_prompt(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://untrusted.example:8080")
     seen = _stub(monkeypatch, _answer())
     desktop_runtime.invoke_local_text(_route(), "private prompt")
-    assert seen["connections"] == [("127.0.0.1", 18081, 90.0)]
+    assert seen["connections"] == [("127.0.0.1", 18081, 180.0)]
 
 
 @pytest.mark.parametrize("status", [301, 302, 307, 308, 401, 503])
@@ -102,14 +103,46 @@ def test_missing_or_wrong_model_echo_is_rejected(monkeypatch, body):
 
 
 @pytest.mark.parametrize("body", [
-    _answer(choices=[{"message": {"content": "hi", "tool_calls": [{}]}}]),
-    _answer(choices=[{"message": {"content": "hi"}, "finish_reason": "tool_calls"}]),
+    _answer(choices=[{"message": {"role": "assistant", "content": "hi", "tool_calls": [{}]}, "finish_reason": "stop"}]),
+    _answer(choices=[{"message": {"role": "assistant", "content": "hi", "function_call": {}}, "finish_reason": "stop"}]),
+    _answer(choices=[{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "tool_calls"}]),
+    _answer(choices=[{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "function_call"}]),
     _answer(tool_calls=[{}]),
 ])
 def test_tool_call_responses_are_rejected(monkeypatch, body):
     _stub(monkeypatch, body)
     with pytest.raises(RuntimeError, match="tool call"):
         desktop_runtime.invoke_local_text(_route(), "hello")
+
+
+@pytest.mark.parametrize("role", ["tool", "system", "user", "", None])
+def test_pre_active_requires_assistant_role(monkeypatch, role):
+    _stub(monkeypatch, _answer(choices=[{
+        "message": {"role": role, "content": "spoofed answer"}, "finish_reason": "stop",
+    }]))
+    with pytest.raises(RuntimeError, match="role is not assistant"):
+        desktop_runtime.invoke_local_text(_route(), "hello")
+
+
+@pytest.mark.parametrize("reason", [None, "content_filter", "function_call", "length", "unexpected"])
+def test_pre_active_requires_completed_text_finish_reason(monkeypatch, reason):
+    _stub(monkeypatch, _answer(choices=[{
+        "message": {"role": "assistant", "content": "answer"}, "finish_reason": reason,
+    }]))
+    with pytest.raises(RuntimeError, match="tool call" if reason == "function_call" else "did not finish normally"):
+        desktop_runtime.invoke_local_text(_route(), "hello")
+
+
+@pytest.mark.parametrize("choices", [[], [
+    {"message": {"role": "assistant", "content": "one"}, "finish_reason": "stop"},
+    {"message": {"role": "assistant", "content": "two"}, "finish_reason": "stop"},
+]])
+def test_pre_active_requires_exactly_one_choice(monkeypatch, choices):
+    _stub(monkeypatch, _answer(choices=choices))
+    with pytest.raises(RuntimeError, match="exactly one choice"):
+        desktop_runtime.invoke_local_text(_route(), "hello")
+
+
 
 
 def test_response_size_is_bounded(monkeypatch):

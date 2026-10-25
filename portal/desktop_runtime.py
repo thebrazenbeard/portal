@@ -247,7 +247,7 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             path="/api/generate",
             model=route.model_or_agent,
             task=task,
-            timeout_seconds=60.0,
+            timeout_seconds=120.0,
             payload={"model": route.model_or_agent, "prompt": task, "stream": False},
         )
         if body.get("done") is not True:
@@ -260,27 +260,31 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
             path="/v1/chat/completions",
             model=route.model_or_agent,
             task=task,
-            timeout_seconds=90.0,
+            timeout_seconds=180.0,
             payload={
                 "model": route.model_or_agent,
                 "messages": [{"role": "user", "content": task}],
             },
         )
         choices = body.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("Pre-Active model response has no choices")
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise RuntimeError("Pre-Active model response requires exactly one choice")
         first = choices[0]
         if not isinstance(first, dict):
             raise RuntimeError("Pre-Active model choice is not an object")
         message = first.get("message")
         if not isinstance(message, dict):
             raise RuntimeError("Pre-Active model choice has no message")
+        if message.get("role") != "assistant":
+            raise RuntimeError("Pre-Active model response role is not assistant")
         if (
             "tool_calls" in message
             or "function_call" in message
-            or first.get("finish_reason") == "tool_calls"
+            or first.get("finish_reason") in ("tool_calls", "function_call")
         ):
             raise RuntimeError("local model attempted a tool call")
+        if first.get("finish_reason") != "stop":
+            raise RuntimeError("Pre-Active model response did not finish normally")
         return _local_answer_text(message.get("content"))
 
     raise RuntimeError(f"no resident adapter for provider: {route.provider}")
