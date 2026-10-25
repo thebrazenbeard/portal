@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from typing import Callable, Mapping
 
+from .desktop_http_deadline import _DeadlineHTTPConnection
+
 
 @dataclass(frozen=True)
 class CognitionRequest:
@@ -55,11 +57,13 @@ def _default_command_probe(name: str, args: tuple[str, ...]) -> str | None:
 
 
 _MAX_LOCAL_DISCOVERY_BYTES = 128 * 1024
+_DISCOVERY_TOTAL_TIMEOUT_SECONDS = 2.0
 
 
 def _local_discovery_json(port: int, path: str) -> Mapping[str, object] | None:
     """Probe only a fixed numeric-loopback endpoint, without proxies or redirects."""
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2.0)
+    connection = _DeadlineHTTPConnection("127.0.0.1", port, timeout=_DISCOVERY_TOTAL_TIMEOUT_SECONDS)
+    response = None
     try:
         connection.request("GET", path, headers={"Accept": "application/json"})
         response = connection.getresponse()
@@ -71,7 +75,11 @@ def _local_discovery_json(port: int, path: str) -> Mapping[str, object] | None:
     except (OSError, http.client.HTTPException):
         return None
     finally:
-        connection.close()
+        try:
+            if response is not None:
+                response.close()
+        finally:
+            connection.close()
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeError, ValueError):

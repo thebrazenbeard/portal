@@ -44,6 +44,14 @@ The resident-host source composes:
 
 Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
 
+The resident host's opt-in numeric-loopback HTTP discovery and inference
+adapters use one monotonic deadline per connection across request, response
+headers, and body.
+Receiving intermittent bytes does not extend that limit. HTTP/1.0 and
+`Connection: close` responses retain their socket until the bounded response
+body is consumed. This is a source/test contract; it does not qualify a
+continuous host, model availability, or autonomous execution on a device.
+
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
 Run the desktop shell from an installed/source environment with:

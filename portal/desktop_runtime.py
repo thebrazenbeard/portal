@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections import OrderedDict
 import hashlib
-import http.client
 import json
 from pathlib import Path
 import sqlite3
 import time
 from typing import Callable
 
+from .desktop_http_deadline import _DeadlineHTTPConnection
 from .desktop_cognition import (
     CognitionRequest,
     CognitionRoute,
@@ -220,7 +220,8 @@ def _post_loopback_json(
     if len(encoded) > _MAX_LOCAL_PROMPT_BYTES + 1024:
         raise ValueError("local model request is too large")
 
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout_seconds)
+    connection = _DeadlineHTTPConnection("127.0.0.1", port, timeout=timeout_seconds)
+    response = None
     try:
         connection.request(
             "POST", path, body=encoded,
@@ -233,7 +234,11 @@ def _post_loopback_json(
         if len(content) > _MAX_LOCAL_RESPONSE_BYTES:
             raise RuntimeError("local model response exceeded size limit")
     finally:
-        connection.close()
+        try:
+            if response is not None:
+                response.close()
+        finally:
+            connection.close()
 
     try:
         data = json.loads(content.decode("utf-8"))
