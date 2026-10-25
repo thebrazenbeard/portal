@@ -79,6 +79,16 @@ qualification, not evidence that the local Lappy deployment is installed.
 
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
+The qualification probe requires an exact human response (a prompt echo is
+insufficient), a fresh provenance-bound autonomous turn whose accepted response
+digest matches its challenge, and an admissible no-incremental-paid-compute
+local **text** route for human, autonomous, and Volition cognition. Public
+acceptance telemetry retains only digests and the explicit no-effect flags,
+not task or response text. The manual `--allow-no-local-route` diagnostic
+opt-out does not establish local inference; staged installation always requires
+the local route. These are bounded transport and instruction-following checks,
+not model-weight attestation or general intelligence qualification.
+
 Run the desktop shell from an installed/source environment with:
 
     portal-desktop

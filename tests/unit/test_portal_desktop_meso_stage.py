@@ -6,7 +6,9 @@ installed runtime must have them, and desktop_qualify fails if it does not.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+import re
 import sys
 import time
 from types import ModuleType
@@ -123,7 +125,7 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
     frozen = _source_spec("VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2")
     frozen.write(tmp_path / "RUNTIME_INSTALL_SPEC.json")
     before = frozen.to_mapping()
-    state = {"after_meso": False, "human_id": None}
+    state = {"after_meso": False, "human_id": None, "auto_key": None}
     accepted = {
         "status": "ACCEPTED_HOST_OBSERVATION",
         "canonical_memory_write": False,
@@ -162,6 +164,7 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
                 }
             if command == "desktop_discover_routes":
                 return {"routes": [{
+                    "route_id": "local", "capabilities": ["text"],
                     "local": True, "available": True, "current": True,
                     "incremental_paid_compute": False, "auto_admissible": True,
                 }]}
@@ -177,9 +180,18 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
                 return {"items": [
                     {
                         "request_id": request_id, "state": "COMPLETED",
-                        "route_id": "local", "evidence_id": "evidence",
+                        "route_id": "local", "evidence_id": (
+                            "human-evidence" if request_id == state["human_id"]
+                            else "evidence"
+                        ),
                         "protected_effect_authority": False,
-                        "acceptance": accepted,
+                        "acceptance": {
+                            **accepted,
+                            "response_sha256": hashlib.sha256(
+                                ("PORTAL_DESKTOP_AUTONOMOUS_OK" if request_id == "auto-turn"
+                                 else "PORTAL_DESKTOP_HUMAN_OK").encode("utf-8")
+                            ).hexdigest(),
+                        },
                     }
                     for request_id in (state["human_id"], "auto-turn", "volition-turn")
                 ]}
@@ -190,12 +202,21 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
             pass
 
         def request_autonomous_turn(self, **kwargs) -> str:
+            state["auto_key"] = kwargs["dedup_key"]
             return "auto-turn"
 
         def list_events(self, *, kind: str):
             assert kind == "autonomous.turn"
             return [
-                {"id": "auto-turn", "status": "DONE"},
+                {
+                    "id": "auto-turn", "status": "DONE",
+                    "dedup_key": state["auto_key"],
+                    "payload": {
+                        "task": "Reply only with PORTAL_DESKTOP_AUTONOMOUS_OK",
+                        "capabilities": ["text"], "source": "ENDOGENOUS",
+                        "reason": "staged resident autonomous cognition qualification",
+                    },
+                },
                 {"id": "volition-turn", "status": "DONE"},
             ]
 
@@ -246,3 +267,4 @@ def test_v2_qualification_rejects_resident_change_during_meso_ingress(
             desktop_qualify.qualify_runtime(tmp_path, timeout_seconds=1.0)
         assert not (tmp_path / "QUALIFICATION.json").exists()
     assert state["after_meso"] is True
+    assert re.fullmatch(r"portal-desktop-staged-qualification-v2-[0-9a-f]{32}", state["auto_key"])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -8,6 +9,15 @@ import uuid
 
 from .desktop_ipc import FileBridgeClient
 from .desktop_install import InstallSpec
+
+
+_HUMAN_SENTINEL = "PORTAL_DESKTOP_HUMAN_OK"
+_AUTONOMOUS_SENTINEL = "PORTAL_DESKTOP_AUTONOMOUS_OK"
+_AUTONOMOUS_REASON = "staged resident autonomous cognition qualification"
+
+
+def _response_digest(expected: str) -> str:
+    return hashlib.sha256(expected.encode("utf-8")).hexdigest()
 
 
 def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1):
@@ -155,6 +165,10 @@ def qualify_runtime(
         route
         for route in routes
         if isinstance(route, dict)
+        and isinstance(route.get("route_id"), str)
+        and bool(route["route_id"])
+        and isinstance(route.get("capabilities"), list)
+        and "text" in route["capabilities"]
         and route.get("local") is True
         and route.get("available") is True
         and route.get("current") is True
@@ -162,7 +176,12 @@ def qualify_runtime(
         and route.get("auto_admissible") is True
     ]
     if require_local_route and not local_routes:
-        raise RuntimeError("no admissible local no-incremental-paid-compute route")
+        raise RuntimeError("no admissible local text no-incremental-paid-compute route")
+    local_route_ids = {route["route_id"] for route in local_routes}
+
+    def require_selected_local_route(route_id: object, *, phase: str) -> None:
+        if require_local_route and route_id not in local_route_ids:
+            raise RuntimeError(f"{phase} cognition route was not an admissible local text route")
 
     human_request_id = "qualification-human-" + uuid.uuid4().hex
     human = client.request(
@@ -170,15 +189,16 @@ def qualify_runtime(
         request_id=human_request_id,
         source="HUMAN",
         reason="staged runtime qualification",
-        task="Reply only with PORTAL_DESKTOP_HUMAN_OK",
+        task=f"Reply only with {_HUMAN_SENTINEL}",
         created_at=time.time(),
         required_capabilities=["text"],
     )
     if human.get("state") != "COMPLETED":
         raise RuntimeError(f"human cognition did not complete: {human}")
     human_text = str(human.get("response_text") or "").strip()
-    if "PORTAL_DESKTOP_HUMAN_OK" not in human_text:
+    if human_text != _HUMAN_SENTINEL:
         raise RuntimeError(f"unexpected human cognition response: {human_text!r}")
+    require_selected_local_route(human.get("route_id"), phase="human")
     if human.get("protected_effect_authority") is not False:
         raise RuntimeError("human cognition claimed protected effect authority")
 
@@ -198,11 +218,18 @@ def qualify_runtime(
     if human_record is None:
         raise RuntimeError("human cognition evidence is missing")
     human_acceptance = human_record.get("acceptance")
+    require_selected_local_route(human_record.get("route_id"), phase="human")
+    if (
+        human_record.get("route_id") != human.get("route_id")
+        or human_record.get("evidence_id") != human.get("evidence_id")
+    ):
+        raise RuntimeError("human cognition route/evidence receipt mismatch")
     if (
         not isinstance(human_acceptance, dict)
         or human_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
         or human_acceptance.get("canonical_memory_write") is not False
         or human_acceptance.get("protected_effect_authority") is not False
+        or human_acceptance.get("response_sha256") != _response_digest(_HUMAN_SENTINEL)
     ):
         raise RuntimeError(
             f"human cognition lacks qualified Vera host acceptance: {human_acceptance!r}"
@@ -210,15 +237,16 @@ def qualify_runtime(
 
     from pre_active import Store
 
+    autonomous_dedup_key = "portal-desktop-staged-qualification-v2-" + uuid.uuid4().hex
     store = Store(runtime_root / "state" / "pre-active" / "runtime.sqlite3")
     try:
         autonomous_event_id = store.request_autonomous_turn(
-            task="Reply only with PORTAL_DESKTOP_AUTONOMOUS_OK",
+            task=f"Reply only with {_AUTONOMOUS_SENTINEL}",
             capabilities={"text"},
             source="ENDOGENOUS",
-            reason="staged resident autonomous cognition qualification",
+            reason=_AUTONOMOUS_REASON,
             now=time.time(),
-            dedup_key="portal-desktop-staged-qualification-v1",
+            dedup_key=autonomous_dedup_key,
         )
     finally:
         store.close()
@@ -233,6 +261,16 @@ def qualify_runtime(
             )
         finally:
             check.close()
+        if row is not None and (
+            row.get("dedup_key") != autonomous_dedup_key
+            or row.get("payload") != {
+                "task": f"Reply only with {_AUTONOMOUS_SENTINEL}",
+                "capabilities": ["text"],
+                "source": "ENDOGENOUS",
+                "reason": _AUTONOMOUS_REASON,
+            }
+        ):
+            raise RuntimeError("autonomous qualification event provenance mismatch")
         if row is not None and row.get("status") == "DONE":
             return row
         return None
@@ -262,6 +300,11 @@ def qualify_runtime(
     if autonomous_record.get("protected_effect_authority") is not False:
         raise RuntimeError("autonomous cognition claimed protected effect authority")
     autonomous_acceptance = autonomous_record.get("acceptance")
+    require_selected_local_route(autonomous_record.get("route_id"), phase="autonomous")
+    if isinstance(autonomous_acceptance, dict) and (
+        autonomous_acceptance.get("response_sha256") != _response_digest(_AUTONOMOUS_SENTINEL)
+    ):
+        raise RuntimeError("autonomous cognition response did not match qualification challenge")
     if (
         not isinstance(autonomous_acceptance, dict)
         or autonomous_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
@@ -352,10 +395,12 @@ def qualify_runtime(
     if volition_record is None:
         raise RuntimeError("Volition cognition activity is missing")
     volition_acceptance = volition_record.get("acceptance")
+    require_selected_local_route(volition_record.get("route_id"), phase="volition")
     if (
         volition_record.get("state") != "COMPLETED"
         or not isinstance(volition_acceptance, dict)
         or volition_acceptance.get("status") != "ACCEPTED_HOST_OBSERVATION"
+        or volition_acceptance.get("canonical_memory_write") is not False
         or volition_acceptance.get("protected_effect_authority") is not False
         or volition_record.get("protected_effect_authority") is not False
     ):
