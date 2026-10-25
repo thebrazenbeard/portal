@@ -25,6 +25,9 @@ def _stub_discovery(monkeypatch, body, status=200):
             seen["read_limit"] = limit
             return encoded[:limit]
 
+        def close(self):
+            seen["response_closed"] = True
+
     class Connection:
         def __init__(self, host, port, timeout):
             seen["connections"].append((host, port, timeout))
@@ -38,7 +41,7 @@ def _stub_discovery(monkeypatch, body, status=200):
         def close(self):
             seen["closed"] = True
 
-    monkeypatch.setattr(desktop_cognition.http.client, "HTTPConnection", Connection)
+    monkeypatch.setattr(desktop_cognition, "_DeadlineHTTPConnection", Connection)
     return seen
 
 
@@ -56,6 +59,7 @@ def test_local_discovery_is_direct_loopback_and_proxy_independent(
     assert seen["connections"] == [("127.0.0.1", port, 2.0)]
     assert seen["requests"] == [("GET", path, {"Accept": "application/json"})]
     assert seen["closed"] is True
+    assert seen["response_closed"] is True
 
 
 @pytest.mark.parametrize("status", [302, 307, 401, 503])

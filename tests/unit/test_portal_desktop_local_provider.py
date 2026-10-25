@@ -36,6 +36,9 @@ def _stub(monkeypatch, body, status=200):
             seen["read_limit"] = limit
             return data[:limit]
 
+        def close(self):
+            seen["response_closed"] = True
+
     class Connection:
         def __init__(self, host, port, timeout):
             seen["connections"].append((host, port, timeout))
@@ -49,7 +52,7 @@ def _stub(monkeypatch, body, status=200):
         def close(self):
             seen["closed"] = True
 
-    monkeypatch.setattr(desktop_runtime.http.client, "HTTPConnection", Connection)
+    monkeypatch.setattr(desktop_runtime, "_DeadlineHTTPConnection", Connection)
     return seen
 
 
@@ -64,6 +67,7 @@ def test_pre_active_local_uses_direct_loopback_and_exact_model(monkeypatch):
         "role": "user", "content": "hello",
     }]}
     assert seen["closed"] is True
+    assert seen["response_closed"] is True
 
 
 def test_opt_in_pre_active_chat_sends_role_structured_history(monkeypatch):
@@ -184,7 +188,7 @@ def test_invalid_utf8_json_rejected(monkeypatch):
 @pytest.mark.parametrize("task", ["", " ", "x" * (16 * 1024 + 1)])
 def test_invalid_prompt_rejected_before_network(monkeypatch, task):
     monkeypatch.setattr(
-        desktop_runtime.http.client, "HTTPConnection",
+        desktop_runtime, "_DeadlineHTTPConnection",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network opened")),
     )
     with pytest.raises(ValueError, match="prompt"):
