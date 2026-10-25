@@ -44,6 +44,73 @@ The resident-host source composes:
 
 Local cognition providers are discovered at runtime rather than hard-coded. Locally installed Ollama models, including a trained Vera model when one is actually present and admissible, can satisfy text cognition without making ChatGPT a runtime dependency. Discovery is not authority: merely finding Codex, a model, or another provider does not authorize paid compute, protected effects, or provider mutation.
 
+### Optional Rezon Collective observer (source-only)
+
+The resident host can also expose one **existing, complete Rezon Collective
+episode** as a separate `rezon_collective_advisory` route. This is not a general
+text model route and cannot initiate a new collective episode, invoke a model,
+submit peer reviews, synthesize, or use Rezon's administrator/worker API.
+It performs only the Rezon V2 observer challenge and authenticated state GET
+to `127.0.0.1` on an operator-selected TCP port (default `8765`). Both the
+challenge and exact response bytes must pass HMAC verification; redirects,
+network proxies, changed snapshots, missing/currently ambiguous syntheses and
+incomplete rounds fail closed. An uncredentialed `/healthz` response does not
+qualify the route.
+
+The operator must set all of these **in the resident host's private process
+environment before launch**:
+
+- `PORTAL_REZON_EPISODE_ID=collective-<32 lowercase hexadecimal digits>` — one pre-existing episode, not an arbitrary user prompt.
+- `REZON_COLLECTIVE_STATE_READ_TOKEN` — the separate 64-character lowercase
+  hexadecimal observer secret configured on the running Rezon server. Do not
+  copy it into the repository, installer spec, CLI argument, logs, or IPC.
+- `PORTAL_REZON_ADMIT_EPISODE_ID` — exactly the same episode ID; this is a
+  second, explicit host admission switch.
+- `PORTAL_REZON_PORT` — optional numeric port (`8765` by default), on local
+  IPv4 loopback only.
+
+Because the socket and HMAC audience are both bound to `127.0.0.1`, the
+resident PORTAL process and Rezon gateway **must run on the same host**. For
+VN2's observed Rezon port, an operator can use the explicit, read-only
+preflight on VN2 after privately configuring the observer environment:
+
+```bash
+python -m scripts.qualify_rezon_colocation \
+  --episode "$PORTAL_REZON_EPISODE_ID" --port 18765
+```
+
+Exit `0` means one existing complete episode passed the source client's
+authenticated observer read; exit `2` means `HOLD`. Output never contains the
+observer token or synthesis content. **Even a PASS does not certify** an
+installed PORTAL service, permanent observer enrollment, cross-host network
+access, model identity, or protected-effect authority. An incomplete or absent
+episode is an expected HOLD, not a reason to relax the gate. Co-location is a
+deliberate security constraint: do not expose this adapter on the LAN merely
+to connect PORTAL on Lappy or VN1 to VN2.
+
+A caller must *also* send `desktop_cognize` with
+`required_capabilities: ["rezon_collective_advisory"]`, `task` equal to that
+exact episode ID, and no conversation-session context. Only one current
+synthesis is accepted. The resulting JSON explicitly identifies
+`unverified_model_synthesis`, `independent_hosts_verified: false`, and
+`protected_effect_authority: false`. It is an advisory observation, not a
+claim of factual accuracy, a quorum of independently attested machines, or
+permission to act. The response is retained in the resident host's plaintext
+cognition ledger and the bridge response JSON. On POSIX, the host now seals
+its `state` and `bridge` directories to mode `0700`, the cognition SQLite
+database and its existing WAL/SHM sidecars to `0600`, and newly generated
+bridge responses to `0600`; preexisting bridge JSON files are tightened at
+startup and symlinked sensitive leaves are refused. The stored material is
+still **plaintext**, not encrypted. The POSIX custody checks assume a trusted
+runtime-root and ancestor directory chain; they do not authenticate arbitrary
+ancestor symlinks or protect against another process running as the same user.
+Do not use a shared installation root. On Windows, Python mode bits are not an
+NTFS ACL guarantee: verify a dedicated owner-only runtime-root ACL before
+installing or starting the host, as instructed below. This source route is
+**not** installed or automatically tested
+on Lappy/VN1 by a repository merge, nor does the default staged installer
+certify an operational Rezon service.
+
 The resident host's opt-in numeric-loopback HTTP discovery and inference
 adapters use one monotonic deadline per connection across request, response
 headers, and body.
