@@ -69,7 +69,7 @@ prompt/response; the security and ACL cautions below continue to apply.
 
 `portal-desktop` alone does **not** install or start a resident Vera host. The staged
 installer requires Windows, Python 3.12+ with Tkinter, Git, network access to
-the four source repositories, and an **already running local text model**
+the four source repositories (five for the explicit MESO V2 stage), and an **already running local text model**
 (normally Ollama on `127.0.0.1:11434`, or a compatible qualified local provider
 on `127.0.0.1:18081`). Model availability and response compatibility must be
 checked on the actual machine; no model download or service installation is
@@ -135,6 +135,37 @@ interrupted install that has cloned a component is **not resumable** by this
 installer: inspect its evidence and choose a new leaf. It never resets, cleans,
 or overwrites an existing source checkout. Every fresh checkout must be clean
 (including untracked and ignored files) before editable installation.
+
+### Optional five-source MESO staged qualification (V2)
+
+The default four-source install remains V1. To explicitly test the MESO →
+Volition → Pre-Active source bridge, inspect and resolve the canonical
+`thebrazenbeard/meso-crct@main` SHA just like the four sources above, then
+use a **different empty runtime leaf** and add `--meso-sha` to the installer:
+
+```powershell
+$line = git ls-remote 'https://github.com/thebrazenbeard/meso-crct.git' 'refs/heads/main'
+if ($LASTEXITCODE -ne 0 -or -not ($line -match '^([0-9a-f]{40})\s+refs/heads/main$')) {
+    throw 'Cannot resolve exact MESO main revision'
+}
+$sourceHeads['meso-crct'] = $Matches[1]
+# Add this argument to the installer invocation shown above:
+# --meso-sha $sourceHeads['meso-crct']
+```
+
+V2 pins and installs five exact source commits and fails staged qualification
+unless the MESO library imports and an internally generated, non-executable
+MESO `IntentProposal` passes through Pre-Active's durable Volition signal
+receipt. It must retain `model_generated` provenance and **zero effect
+authority**. Import paths must resolve inside their exact staged component
+checkout; the host's reported source manifest must match the frozen staged
+source identities, so an older host cannot suppress the V2 check. A failed
+qualification terminates the installer-owned staged host and preserves the
+failed leaf for inspection. This does **not** verify third-party observations, mutate MESO
+needs, complete Volition goals, or establish an autonomous feedback loop.
+Historical V1 install specifications and existing runtime leaves remain valid
+and are never migrated in place; any failure leaves an unactivated staging
+leaf to inspect rather than erasing evidence.
 
 **Security boundary:** the file IPC bridge currently depends on filesystem
 permissions, not authenticated requests; someone able to write its request

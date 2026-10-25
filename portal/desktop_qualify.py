@@ -7,6 +7,7 @@ import time
 import uuid
 
 from .desktop_ipc import FileBridgeClient
+from .desktop_install import InstallSpec
 
 
 def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1):
@@ -18,6 +19,102 @@ def _wait_until(predicate, *, timeout_seconds: float, poll_seconds: float = 0.1)
             return last
         time.sleep(poll_seconds)
     raise TimeoutError(f"qualification condition timed out; last={last!r}")
+
+
+def _validated_staged_source_identity(
+    runtime_root: Path, host_source_manifest: object,
+) -> dict[str, object]:
+    """Never let a stale host downgrade the source-specific qualification gate."""
+    installed = InstallSpec.read(runtime_root / "RUNTIME_INSTALL_SPEC.json")
+    if not isinstance(host_source_manifest, dict):
+        raise RuntimeError("runtime source manifest is missing")
+    expected = installed.to_mapping()
+    keys = ("schema", "install_id", "sources")
+    expected_identity = {key: expected[key] for key in keys}
+    actual_identity = {key: host_source_manifest.get(key) for key in keys}
+    if expected_identity != actual_identity:
+        raise RuntimeError("runtime host source identity differs from staged install")
+    return expected_identity
+
+
+def _add_optional_meso_receipt(
+    result: dict[str, object], meso_receipt: dict[str, object] | None,
+) -> None:
+    """Keep historical V1 qualification receipts structurally unchanged."""
+    if meso_receipt is not None:
+        result["meso_ingress"] = meso_receipt
+
+
+def qualify_meso_ingress(
+    runtime_root: Path, *, timeout_seconds: float = 120.0,
+) -> dict[str, object]:
+    """Prove V2 MESO ingress reaches Pre-Active's durable Volition bridge.
+
+    This is a bounded internal test stimulus and validates no outcome, need
+    update, goal satisfaction, or protected effect authority.
+    """
+    from meso_crct import (
+        CircuitState, SalienceState, TargetState, derive_action_tendency,
+        propose_action_intent, select_target,
+    )
+    from pre_active import Store
+    from pre_active.volition_bridge import VolitionBridge
+
+    state_path = runtime_root / "state" / "pre-active" / "runtime.sqlite3"
+    event_id = "portal-meso-qualification-" + uuid.uuid4().hex
+    target = "portal-qualification-" + uuid.uuid4().hex
+    selected = select_target([TargetState(
+        target, CircuitState(salience=SalienceState(incentive_salience=0.9)),
+    )])
+    proposal = propose_action_intent(derive_action_tendency(selected))
+    if proposal.can_execute is not False or proposal.effect_authorized is not False:
+        raise RuntimeError("MESO qualification proposal claims effect authority")
+
+    store = Store(state_path)
+    try:
+        (signal_id,) = VolitionBridge(store).enqueue_meso_intent(
+            proposal=proposal, source_event_id=event_id, now=time.time(),
+        )
+        ingress = store.get_meso_intent_ingress(event_id)
+        signals = [
+            row for row in store.list_events(kind="volition.signal")
+            if row.get("id") == signal_id
+        ]
+        if (
+            ingress is None or ingress.get("signal_event_id") != signal_id
+            or len(signals) != 1
+        ):
+            raise RuntimeError("MESO ingress lacks unique durable Volition signal")
+        payload = signals[0].get("payload")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("meso_source_event_id") != event_id
+            or payload.get("provenance") != "model_generated"
+            or payload.get("effect_authority") is not False
+            or "capabilities" in payload
+        ):
+            raise RuntimeError("MESO ingress elevated provenance or effect authority")
+    finally:
+        store.close()
+
+    def processed():
+        check = Store(state_path)
+        try:
+            return check.get_volition_signal_receipt(signal_id)
+        finally:
+            check.close()
+
+    receipt = _wait_until(processed, timeout_seconds=timeout_seconds)
+    if not isinstance(receipt, dict) or not receipt.get("state_revision"):
+        raise RuntimeError("MESO signal lacks a durable Volition processing receipt")
+    return {
+        "source_event_id": event_id,
+        "signal_event_id": signal_id,
+        "state_revision": receipt["state_revision"],
+        "signal_provenance": "model_generated",
+        "effect_authority": False,
+        "claim_ceiling": "MESO_INTENT_INGRESS_ONLY_NOT_OUTCOME_OR_GOAL_CREDIT",
+    }
 
 
 def qualify_runtime(
@@ -36,6 +133,9 @@ def qualify_runtime(
             else None
         ),
         timeout_seconds=timeout_seconds,
+    )
+    staged_identity = _validated_staged_source_identity(
+        runtime_root, status.get("source_manifest"),
     )
     components = status.get("components")
     if not isinstance(components, dict):
@@ -264,12 +364,26 @@ def qualify_runtime(
         )
 
     final_status = client.request("desktop_status")
+    source_manifest = final_status.get("source_manifest")
+    if _validated_staged_source_identity(runtime_root, source_manifest) != staged_identity:
+        raise RuntimeError("runtime staged source identity changed during qualification")
+    install_schema = staged_identity["schema"]
+    meso_receipt = (
+        qualify_meso_ingress(runtime_root, timeout_seconds=timeout_seconds)
+        if install_schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2" else None
+    )
+    if install_schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2" and not isinstance(meso_receipt, dict):
+        raise RuntimeError("V2 MESO ingress qualification lacks a receipt")
     result = {
-        "schema": "VERA_DESKTOP_RUNTIME_QUALIFICATION_V1",
+        "schema": (
+            "VERA_DESKTOP_RUNTIME_QUALIFICATION_V2"
+            if install_schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+            else "VERA_DESKTOP_RUNTIME_QUALIFICATION_V1"
+        ),
         "qualified": True,
         "runtime_root": str(runtime_root),
         "runtime_id": final_status.get("runtime_id"),
-        "source_manifest": final_status.get("source_manifest"),
+        "source_manifest": source_manifest,
         "components_loaded": True,
         "local_route_count": len(local_routes),
         "human_cognition": {
@@ -304,6 +418,7 @@ def qualify_runtime(
         ),
         "qualified_at": time.time(),
     }
+    _add_optional_meso_receipt(result, meso_receipt)
     output = runtime_root / "QUALIFICATION.json"
     output.write_text(
         json.dumps(result, sort_keys=True, indent=2) + "\n",
