@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 import portal.desktop_runtime as desktop_runtime
 
-from portal.desktop_cognition import CognitionRoute
+from portal.desktop_cognition import CognitionRoute, discover_cognition_routes
 from portal.desktop_runtime import (
     CognitionLedger,
     CognitionRequestEnvelope,
@@ -151,6 +151,61 @@ def test_no_admissible_route_is_unresolved_and_retryable(tmp_path: Path) -> None
         stored = ledger.get("autonomous-event-8")
         assert stored["state"] == "UNRESOLVED"
         assert stored["retryable"] == 1
+    finally:
+        ledger.close()
+
+
+def test_local_text_discovery_does_not_authorize_gateway_learning_or_rezon_collective(
+    tmp_path: Path,
+) -> None:
+    """A raw model endpoint is not an attested learner or collective adapter."""
+    routes = discover_cognition_routes(
+        command_probe=lambda _name, _args: None,
+        ollama_tags=lambda: {"models": [{"name": "vera-local:latest"}]},
+        pre_active_models=lambda: {
+            "data": [{"id": "qwen-local", "adapter_active": False,
+                      "effect_authority": False}],
+        },
+    )
+    assert {route.provider for route in routes} == {"ollama", "pre_active_local"}
+    called: list[str] = []
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger,
+            discover_routes=lambda: routes,
+            invoke_route=lambda _route, task: called.append(task) or "raw text",
+        )
+        for index, capability in enumerate((
+            "gateway_authorized_inference", "rezon_collective_advisory",
+        )):
+            request = CognitionRequestEnvelope(
+                request_id=f"protected-{index}",
+                source="PRE_ACTIVE_AUTONOMOUS_TURN",
+                reason="requires a governed source",
+                task=f"protected task {index}",
+                created_at=100.0,
+                required_capabilities=(capability,),
+            )
+            result = engine.process(request, now=101.0)
+            assert result.state == "UNRESOLVED"
+            assert result.route_id is None
+            assert result.retryable is True
+            stored = ledger.get(request.request_id)
+            assert stored is not None
+            assert stored["state"] == "UNRESOLVED"
+            assert stored["protected_effect_authority"] == 0
+        assert called == []  # Neither protected request reached raw Ollama.
+
+        # Ordinary local, tool-free cognition continues to work.
+        ordinary = engine.process(
+            CognitionRequestEnvelope("human-text", "HUMAN", "chat", "hello", 100.0),
+            now=102.0,
+        )
+        assert ordinary.state == "COMPLETED"
+        assert ordinary.response_text == "raw text"
+        assert called == ["hello"]
+        assert ledger.get("human-text")["protected_effect_authority"] == 0
     finally:
         ledger.close()
 
