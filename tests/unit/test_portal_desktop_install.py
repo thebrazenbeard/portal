@@ -18,6 +18,7 @@ SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40
 SHA_D = "d" * 40
+SHA_E = "e" * 40
 
 
 def test_freeze_install_spec_binds_exact_four_sources() -> None:
@@ -43,6 +44,49 @@ def test_freeze_install_spec_binds_exact_four_sources() -> None:
     ]
     assert all(len(source.sha) == 40 for source in spec.sources)
     assert spec.source_map()["portal"].sha == SHA_D
+
+
+def test_explicit_meso_stage_creates_versioned_five_source_spec() -> None:
+    values = {
+        ("thebrazenbeard/vera-mono", "main"): SHA_A,
+        ("thebrazenbeard/pre-active", "main"): SHA_B,
+        ("thebrazenbeard/volition", "main"): SHA_C,
+        ("thebrazenbeard/meso-crct", "main"): SHA_E,
+    }
+    spec = freeze_install_spec(
+        install_id="desktop-meso-v2",
+        portal_ref="main",
+        portal_sha=SHA_D,
+        include_meso=True,
+        resolve_remote=lambda repository, ref: values[(repository, ref)],
+    )
+
+    assert spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+    assert tuple(source.component for source in spec.sources) == (
+        "vera-mono", "portal", "pre-active", "volition", "meso-crct",
+    )
+    assert spec.source_map()["meso-crct"].sha == SHA_E
+
+
+def test_meso_v2_requires_canonical_fifth_source_and_preserves_v1() -> None:
+    sources = (
+        RuntimeSource("vera-mono", "thebrazenbeard/vera-mono", "main", SHA_A),
+        RuntimeSource("portal", "thebrazenbeard/portal", "main", SHA_B),
+        RuntimeSource("pre-active", "thebrazenbeard/pre-active", "main", SHA_C),
+        RuntimeSource("volition", "thebrazenbeard/volition", "main", SHA_D),
+    )
+    with pytest.raises(ValueError, match="exactly five"):
+        InstallSpec("VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2", "bad", sources).validate()
+    with pytest.raises(ValueError, match="exactly four"):
+        InstallSpec(
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1", "bad",
+            sources + (RuntimeSource("meso-crct", "thebrazenbeard/meso-crct", "main", SHA_E),),
+        ).validate()
+    with pytest.raises(ValueError, match="not canonical"):
+        InstallSpec(
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2", "bad",
+            sources + (RuntimeSource("meso-crct", "attacker/meso-crct", "main", SHA_E),),
+        ).validate()
 
 
 def test_install_spec_roundtrips_canonical_json(tmp_path: Path) -> None:

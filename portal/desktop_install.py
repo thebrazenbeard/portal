@@ -9,7 +9,12 @@ from typing import Callable
 
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_COMPONENTS = ("vera-mono", "portal", "pre-active", "volition")
+_COMPONENTS_V1 = ("vera-mono", "portal", "pre-active", "volition")
+_COMPONENTS_V2 = (*_COMPONENTS_V1, "meso-crct")
+_COMPONENTS_BY_SCHEMA = {
+    "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1": _COMPONENTS_V1,
+    "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2": _COMPONENTS_V2,
+}
 
 
 class StageRootConflict(RuntimeError):
@@ -24,7 +29,7 @@ class RuntimeSource:
     sha: str
 
     def validate(self) -> None:
-        if self.component not in _COMPONENTS:
+        if self.component not in _COMPONENTS_V2:
             raise ValueError(f"unsupported runtime component: {self.component}")
         if self.repository != f"thebrazenbeard/{self.component}":
             raise ValueError(
@@ -52,18 +57,20 @@ class InstallSpec:
     sources: tuple[RuntimeSource, ...]
 
     def validate(self) -> None:
-        if self.schema != "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1":
+        required = _COMPONENTS_BY_SCHEMA.get(self.schema)
+        if required is None:
             raise ValueError("unsupported install spec schema")
         if not self.install_id.strip():
             raise ValueError("install_id is required")
-        if len(self.sources) != 4:
-            raise ValueError("install spec requires exactly four sources")
+        if len(self.sources) != len(required):
+            quantity = "four" if len(required) == 4 else "five"
+            raise ValueError(f"install spec requires exactly {quantity} sources")
         names = [source.component for source in self.sources]
         if len(set(names)) != len(names):
             raise ValueError("duplicate runtime component")
-        if tuple(names) != _COMPONENTS:
+        if tuple(names) != required:
             raise ValueError(
-                "runtime sources must be ordered vera-mono, portal, pre-active, volition"
+                "runtime sources must match versioned canonical component order"
             )
         for source in self.sources:
             source.validate()
@@ -163,9 +170,10 @@ def freeze_install_spec(
     install_id: str,
     portal_ref: str,
     portal_sha: str,
+    include_meso: bool = False,
     resolve_remote: RemoteResolver = resolve_remote_head,
 ) -> InstallSpec:
-    sources = (
+    sources: tuple[RuntimeSource, ...] = (
         RuntimeSource(
             "vera-mono",
             "thebrazenbeard/vera-mono",
@@ -191,8 +199,18 @@ def freeze_install_spec(
             resolve_remote("thebrazenbeard/volition", "main"),
         ),
     )
+    if include_meso:
+        sources += (RuntimeSource(
+            "meso-crct",
+            "thebrazenbeard/meso-crct",
+            "main",
+            resolve_remote("thebrazenbeard/meso-crct", "main"),
+        ),)
     spec = InstallSpec(
-        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        schema=(
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+            if include_meso else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1"
+        ),
         install_id=install_id,
         sources=sources,
     )

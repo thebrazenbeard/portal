@@ -217,28 +217,32 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
             "pip",
             "install",
             "--disable-pip-version-check",
-            "-e",
-            str(sources / "vera-mono"),
-            "-e",
-            str(sources / "portal"),
-            "-e",
-            str(sources / "pre-active"),
-            "-e",
-            str(sources / "volition"),
+        ] + [
+            arg
+            for source in spec.sources
+            for arg in ("-e", str(sources / source.component))
         ]
     )
     return python
 
 
 def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
+    installed = InstallSpec.read(runtime_root / "RUNTIME_INSTALL_SPEC.json")
+    module_sources = {
+        "portal": "portal",
+        "pre_active": "pre-active",
+        "volition": "volition",
+        "vera_core": "vera-mono",
+    }
+    if installed.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2":
+        module_sources["meso_crct"] = "meso-crct"
+    modules = list(module_sources)
     code = (
-        "import json,portal,pre_active,volition,vera_core;"
-        "print(json.dumps({"
-        "'portal':portal.__file__,"
-        "'pre_active':pre_active.__file__,"
-        "'volition':volition.__file__,"
-        "'vera_core':vera_core.__file__"
-        "}))"
+        "import json;"
+        + "".join(f"import {name};" for name in modules)
+        + "print(json.dumps({"
+        + ",".join(f"'{name}':{name}.__file__" for name in modules)
+        + "}))"
     )
     completed = _run(
         [str(python), "-c", code],
@@ -246,9 +250,24 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
         capture=True,
     )
     value = json.loads(completed.stdout)
-    if not isinstance(value, dict):
-        raise RuntimeError("import verification did not return an object")
-    return {str(key): str(path) for key, path in value.items()}
+    if not isinstance(value, dict) or set(value) != set(module_sources):
+        raise RuntimeError("import verification returned missing or unexpected modules")
+    verified: dict[str, str] = {}
+    for module, component in module_sources.items():
+        declared = value[module]
+        if not isinstance(declared, str) or not Path(declared).is_absolute():
+            raise RuntimeError(f"import path is not absolute: {module}")
+        try:
+            staged_source = runtime_root / "sources" / component
+            _reject_reparse_ancestors(staged_source)
+            source_root = staged_source.resolve(strict=True)
+            module_path = Path(declared).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeError(f"import path cannot be verified: {module}") from exc
+        if not module_path.is_file() or not module_path.is_relative_to(source_root):
+            raise RuntimeError(f"import escaped exact staged source: {module}")
+        verified[module] = str(module_path)
+    return verified
 
 
 def _pid_alive(pid: int) -> bool:
@@ -307,6 +326,18 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
     finally:
         stdout.close()
         stderr.close()
+
+
+def _terminate_unqualified_host(process: subprocess.Popen[bytes]) -> None:
+    """Stop only the child this installer launched, preserving staged evidence."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5.0)
 
 
 def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
@@ -382,8 +413,14 @@ def install(
 
     python = _install_sources(runtime_root, spec)
     imports = _verify_imports(python, runtime_root)
-    _start_host(runtime_root, python)
-    qualification = _qualify(runtime_root, python)
+    staged_host = _start_host(runtime_root, python)
+    if staged_host is None:
+        raise RuntimeError("staged host was not started by this installer")
+    try:
+        qualification = _qualify(runtime_root, python)
+    except BaseException:
+        _terminate_unqualified_host(staged_host)
+        raise
 
     host_launcher = runtime_root / "StartVeraRuntime.cmd"
     host_launcher.write_text(
@@ -432,7 +469,11 @@ def install(
     )
 
     result = {
-        "schema": "PORTAL_DESKTOP_INSTALLATION_RESULT_V1",
+        "schema": (
+            "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
+            if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+            else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
+        ),
         "runtime_root": str(runtime_root),
         "install_id": spec.install_id,
         "source_map": {
@@ -462,35 +503,32 @@ def install(
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
-    spec = InstallSpec(
-        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
-        install_id=args.install_id,
-        sources=(
-            RuntimeSource(
-                "vera-mono",
-                "thebrazenbeard/vera-mono",
-                "main",
-                args.vera_mono_sha,
-            ),
-            RuntimeSource(
-                "portal",
-                "thebrazenbeard/portal",
-                args.portal_ref,
-                args.portal_sha,
-            ),
-            RuntimeSource(
-                "pre-active",
-                "thebrazenbeard/pre-active",
-                "main",
-                args.pre_active_sha,
-            ),
-            RuntimeSource(
-                "volition",
-                "thebrazenbeard/volition",
-                "main",
-                args.volition_sha,
-            ),
+    meso_sha = getattr(args, "meso_sha", None)
+    sources = (
+        RuntimeSource(
+            "vera-mono", "thebrazenbeard/vera-mono", "main", args.vera_mono_sha,
         ),
+        RuntimeSource(
+            "portal", "thebrazenbeard/portal", args.portal_ref, args.portal_sha,
+        ),
+        RuntimeSource(
+            "pre-active", "thebrazenbeard/pre-active", "main", args.pre_active_sha,
+        ),
+        RuntimeSource(
+            "volition", "thebrazenbeard/volition", "main", args.volition_sha,
+        ),
+    )
+    if meso_sha is not None:
+        sources += (RuntimeSource(
+            "meso-crct", "thebrazenbeard/meso-crct", "main", meso_sha,
+        ),)
+    spec = InstallSpec(
+        schema=(
+            "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+            if meso_sha is not None else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1"
+        ),
+        install_id=args.install_id,
+        sources=sources,
     )
     spec.validate()
     return spec
@@ -508,6 +546,10 @@ def main() -> None:
     parser.add_argument("--vera-mono-sha", required=True)
     parser.add_argument("--pre-active-sha", required=True)
     parser.add_argument("--volition-sha", required=True)
+    parser.add_argument(
+        "--meso-sha",
+        help="Opt into V2 staged install with a fifth exact MESO-CRCT source SHA",
+    )
     parser.add_argument("--activate", action="store_true")
     args = parser.parse_args()
     result = install(
