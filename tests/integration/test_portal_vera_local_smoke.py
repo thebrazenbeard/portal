@@ -143,8 +143,20 @@ def test_portal_local_ollama_claim_enters_real_vera_context_and_reopens_durably(
     VeraStateDirectory, QualifiedVeraRuntime, verify_source_closure = _qualified_vera_classes(monkeypatch)
 
     received: list[dict[str, object]] = []
+    registry_digest = "a" * 64
 
     class SyntheticOllama(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            assert self.path == "/api/tags"
+            result = json.dumps({"models": [{
+                "name": "vera-local:latest", "digest": registry_digest,
+            }]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(result)))
+            self.end_headers()
+            self.wfile.write(result)
+
         def do_POST(self) -> None:
             assert self.path == "/api/generate"
             length = int(self.headers["Content-Length"])
@@ -167,6 +179,7 @@ def test_portal_local_ollama_claim_enters_real_vera_context_and_reopens_durably(
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
+        import portal.desktop_cognition as desktop_cognition
         import portal.desktop_runtime as desktop_runtime
 
         original_connection = desktop_runtime._DeadlineHTTPConnection
@@ -176,9 +189,10 @@ def test_portal_local_ollama_claim_enters_real_vera_context_and_reopens_durably(
             return original_connection(host, server.server_port, timeout=timeout)
 
         monkeypatch.setattr(desktop_runtime, "_DeadlineHTTPConnection", local_test_connection)
+        monkeypatch.setattr(desktop_cognition, "_DeadlineHTTPConnection", local_test_connection)
         routes = discover_cognition_routes(
             command_probe=lambda *_: None,
-            ollama_tags=lambda: {"models": [{"name": "vera-local:latest"}]},
+            ollama_tags=lambda: {"models": [{"name": "vera-local:latest", "digest": registry_digest}]},
             pre_active_models=lambda: None,
         )
         assert len(routes) == 1

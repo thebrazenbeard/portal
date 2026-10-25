@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import http.client
 import json
+import re
 import shutil
 import subprocess
 from typing import Callable, Mapping
@@ -29,6 +30,27 @@ class CognitionRoute:
     effect_authority_ceiling: str
     preference: int = 100
     observed_version: str | None = None
+    # Ollama's self-reported registry digest, not an attestation of loaded weights.
+    observed_registry_digest: str | None = None
+
+
+_OLLAMA_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def ollama_registry_digest(tags: Mapping[str, object] | None, model: str) -> str | None:
+    """Require exactly one selected tag and one valid self-reported SHA-256 digest."""
+    if (not isinstance(tags, Mapping) or type(model) is not str
+            or not model or model != model.strip()):
+        return None
+    models = tags.get("models")
+    if type(models) is not list or len(models) > 1000:
+        return None
+    matches = [entry for entry in models if isinstance(entry, Mapping)
+               and entry.get("name") == model]
+    if len(matches) != 1:
+        return None
+    digest = matches[0].get("digest")
+    return digest if type(digest) is str and _OLLAMA_DIGEST_RE.fullmatch(digest) else None
 
 
 CommandProbe = Callable[[str, tuple[str, ...]], str | None]
@@ -61,6 +83,15 @@ _MAX_LOCAL_DISCOVERY_BYTES = 128 * 1024
 _DISCOVERY_TOTAL_TIMEOUT_SECONDS = 2.0
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate local discovery JSON key")
+        result[key] = value
+    return result
+
+
 def _local_discovery_json(port: int, path: str) -> Mapping[str, object] | None:
     """Probe only a fixed numeric-loopback endpoint, without proxies or redirects."""
     connection = _DeadlineHTTPConnection("127.0.0.1", port, timeout=_DISCOVERY_TOTAL_TIMEOUT_SECONDS)
@@ -82,7 +113,7 @@ def _local_discovery_json(port: int, path: str) -> Mapping[str, object] | None:
         finally:
             connection.close()
     try:
-        value = json.loads(raw.decode("utf-8"))
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_object)
     except (UnicodeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -108,14 +139,20 @@ def discover_cognition_routes(
     tags = ollama_tags()
     if isinstance(tags, Mapping):
         models = tags.get("models")
-        if isinstance(models, list):
+        if type(models) is list and len(models) <= 1000:
             for item in models:
                 if not isinstance(item, Mapping):
                     continue
                 raw_name = item.get("name")
-                if not isinstance(raw_name, str) or not raw_name.strip():
+                if (type(raw_name) is not str or not raw_name
+                        or raw_name != raw_name.strip()):
                     continue
-                name = raw_name.strip()
+                name = raw_name
+                # Do not advertise an ambiguous tag, even when one candidate
+                # carries an otherwise plausible digest.
+                digest = ollama_registry_digest(tags, name)
+                if digest is None:
+                    continue
                 preference = 10 if name == "vera-local:latest" else 20
                 routes.append(
                     CognitionRoute(
@@ -137,6 +174,7 @@ def discover_cognition_routes(
                             if item.get("modified_at")
                             else None
                         ),
+                        observed_registry_digest=digest,
                     )
                 )
 

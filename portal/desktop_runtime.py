@@ -5,6 +5,7 @@ from collections import OrderedDict
 import hashlib
 import json
 from pathlib import Path
+import re
 import secrets
 import sqlite3
 import time
@@ -15,7 +16,9 @@ from .desktop_rezon import invoke_rezon_observer
 from .desktop_cognition import (
     CognitionRequest,
     CognitionRoute,
+    _default_ollama_tags,
     discover_cognition_routes,
+    ollama_registry_digest,
     select_cognition_route,
 )
 from .private_storage import (
@@ -447,6 +450,21 @@ def _local_answer_text(value: object) -> str:
     return text
 
 
+def _check_ollama_registry(route: CognitionRoute) -> None:
+    """Fail closed when the selected tag's registry digest has drifted.
+
+    This self-reported Ollama metadata does not attest loaded model weights.
+    """
+    digest = route.observed_registry_digest
+    if (route.route_id != f"ollama:{route.model_or_agent}"
+            or type(digest) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise RuntimeError("exact Ollama route and registry digest required")
+    observed = ollama_registry_digest(_default_ollama_tags(), route.model_or_agent)
+    if observed is None or observed != digest:
+        raise RuntimeError("Ollama registry identity changed or unavailable")
+
+
 def invoke_local_text(route: CognitionRoute, task: str) -> str:
     if route.provider == "rezon_collective_observer":
         if route.route_id != f"rezon:{route.model_or_agent}":
@@ -454,6 +472,7 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
         return invoke_rezon_observer(route.model_or_agent, route.observed_version, task)
 
     if route.provider == "ollama":
+        _check_ollama_registry(route)
         body = _post_loopback_json(
             port=11434,
             path="/api/generate",
@@ -464,7 +483,9 @@ def invoke_local_text(route: CognitionRoute, task: str) -> str:
         )
         if body.get("done") is not True:
             raise RuntimeError("Ollama response did not complete")
-        return _local_answer_text(body.get("response"))
+        answer = _local_answer_text(body.get("response"))
+        _check_ollama_registry(route)
+        return answer
 
     if route.provider == "pre_active_local":
         body = _post_loopback_json(
@@ -511,6 +532,7 @@ def invoke_local_messages(route: CognitionRoute, messages: list[dict[str, str]])
         raise ValueError("local conversation contains an invalid role or content")
     task = messages[-1]["content"]
     if route.provider == "ollama":
+        _check_ollama_registry(route)
         body = _post_loopback_json(
             port=11434, path="/api/chat", model=route.model_or_agent,
             task=task, timeout_seconds=120.0,
@@ -523,7 +545,9 @@ def invoke_local_messages(route: CognitionRoute, messages: list[dict[str, str]])
             raise RuntimeError("Ollama chat did not return an assistant message")
         if "tool_calls" in message or "function_call" in message:
             raise RuntimeError("local model attempted a tool call")
-        return _local_answer_text(message.get("content"))
+        answer = _local_answer_text(message.get("content"))
+        _check_ollama_registry(route)
+        return answer
     if route.provider == "pre_active_local":
         body = _post_loopback_json(
             port=18081, path="/v1/chat/completions", model=route.model_or_agent,
