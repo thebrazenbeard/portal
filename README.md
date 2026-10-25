@@ -69,6 +69,14 @@ Lappy install, provider credentials, training, canonical-memory writes or
 protected effects. Reopening objects in one test process is not a qualification
 of a physical process restart or of the complete four-component host.
 
+The read-only `vera-mono-crossrepo-smoke` GitHub Actions job runs these tests
+against public Vera Mono source pinned to exact commit
+`cc17139afd4bf5d0d8889c1cc38b21de51e6a4a1`. Both checkouts discard
+persisted credentials; the job verifies the external HEAD before installation
+and runs only the bounded synthetic smoke. A future Vera Mono source update
+requires an explicit new pin, test and review. This is GitHub-hosted source
+qualification, not evidence that the local Lappy deployment is installed.
+
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
 Run the desktop shell from an installed/source environment with:

@@ -45,6 +45,42 @@ jobs:
           PROJECT_RUNNER_GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/m6_hc_transcendence_live_proof.py
 
+  vera-mono-crossrepo-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PORTAL test subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out immutable Vera Mono source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: thebrazenbeard/vera-mono
+          ref: cc17139afd4bf5d0d8889c1cc38b21de51e6a4a1
+          path: .ci-sources/vera-mono
+          persist-credentials: false
+      - name: Verify external source commit
+        shell: bash
+        env:
+          VERA_MONO_SOURCE_ROOT: ${{ github.workspace }}/.ci-sources/vera-mono
+        run: |
+          expected='cc17139afd4bf5d0d8889c1cc38b21de51e6a4a1'
+          actual="$(git -C "$VERA_MONO_SOURCE_ROOT" rev-parse --verify HEAD)"
+          test "$actual" = "$expected"
+          test -f "$VERA_MONO_SOURCE_ROOT/packages/vera_core/src/vera_core/__init__.py"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install exact-source smoke dependencies
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pip install -e './.ci-sources/vera-mono'
+      - name: Qualify PORTAL to Vera Mono source smoke
+        env:
+          VERA_MONO_SOURCE_ROOT: ${{ github.workspace }}/.ci-sources/vera-mono
+        run: python -m pytest -q tests/integration/test_portal_vera_local_smoke.py
+
   task-monitor-windows:
     runs-on: windows-latest
     steps:
