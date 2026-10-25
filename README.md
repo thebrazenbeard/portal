@@ -52,6 +52,23 @@ Receiving intermittent bytes does not extend that limit. HTTP/1.0 and
 body is consumed. This is a source/test contract; it does not qualify a
 continuous host, model availability, or autonomous execution on a device.
 
+An opt-in cross-repository smoke test exercises the actual PORTAL cognition
+route and numeric-loopback HTTP adapter against an ephemeral synthetic Ollama
+server, binds its result to a real `QualifiedVeraRuntime` resume-context
+receipt, then reopens separate temporary Vera and PORTAL SQLite state to prove
+the completed request replays without invoking the model twice:
+
+```powershell
+$env:VERA_MONO_SOURCE_ROOT = '<independently verified Vera Mono checkout>'
+python -m pytest -q tests/integration/test_portal_vera_local_smoke.py
+```
+
+The test skips when the source root is unspecified and fails if it imports a
+different Vera Mono checkout. It uses temporary state and no real Ollama,
+Lappy install, provider credentials, training, canonical-memory writes or
+protected effects. Reopening objects in one test process is not a qualification
+of a physical process restart or of the complete four-component host.
+
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
 Run the desktop shell from an installed/source environment with:
