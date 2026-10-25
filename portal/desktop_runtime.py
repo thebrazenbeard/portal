@@ -5,6 +5,7 @@ from collections import OrderedDict
 import hashlib
 import json
 from pathlib import Path
+import secrets
 import sqlite3
 import time
 from typing import Callable
@@ -58,7 +59,11 @@ CREATE TABLE IF NOT EXISTS desktop_cognition_runs (
     completed_at REAL,
     updated_at REAL NOT NULL,
     evidence_id TEXT NOT NULL,
-    conversation_binding_digest TEXT
+    conversation_binding_digest TEXT,
+    acceptance_json TEXT,
+    required_capabilities_json TEXT,
+    attempt_token TEXT,
+    acceptance_claimed INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -75,11 +80,30 @@ class CognitionLedger:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(_SCHEMA)
-        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(desktop_cognition_runs)")}
-        if "acceptance_json" not in columns:
-            self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN acceptance_json TEXT")
-        if "conversation_binding_digest" not in columns:
-            self.connection.execute("ALTER TABLE desktop_cognition_runs ADD COLUMN conversation_binding_digest TEXT")
+        # Serialize additive upgrades for two hosts starting on the same
+        # preexisting SQLite file. Reinspect *under* the write lock so a
+        # second opener cannot duplicate an ALTER run by the first.
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {
+                row[1] for row in self.connection.execute("PRAGMA table_info(desktop_cognition_runs)")
+            }
+            upgrades = {
+                "acceptance_json": "TEXT",
+                "conversation_binding_digest": "TEXT",
+                "required_capabilities_json": "TEXT",
+                "attempt_token": "TEXT",
+                "acceptance_claimed": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for name, declaration in upgrades.items():
+                if name not in columns:
+                    self.connection.execute(
+                        f"ALTER TABLE desktop_cognition_runs ADD COLUMN {name} {declaration}"
+                    )
+            self.connection.execute("COMMIT")
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
 
     def close(self) -> None:
         self.connection.close()
@@ -105,24 +129,35 @@ class CognitionLedger:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def store(
-        self,
-        request: CognitionRequestEnvelope,
-        *,
-        state: str,
-        retryable: bool,
-        now: float,
-        route: CognitionRoute | None = None,
-        response_text: str | None = None,
-        error: str | None = None,
-        started_at: float | None = None,
-        completed_at: float | None = None,
-        conversation_binding_digest: str | None = None,
+    @staticmethod
+    def _capabilities_json(request: CognitionRequestEnvelope) -> str:
+        capabilities = request.required_capabilities
+        if not isinstance(capabilities, tuple) or not capabilities or any(
+            not isinstance(value, str) or not value.strip() or value != value.strip()
+            for value in capabilities
+        ):
+            raise ValueError("invalid cognition capability requirements")
+        try:
+            for value in capabilities:
+                value.encode("utf-8")
+            return json.dumps(sorted(set(capabilities)), ensure_ascii=False)
+        except (UnicodeEncodeError, TypeError) as exc:
+            raise ValueError("invalid cognition capability requirements") from exc
+
+    @staticmethod
+    def _evidence(
+        request: CognitionRequestEnvelope, *, state: str,
+        route: CognitionRoute | None, response_text: str | None,
+        error: str | None, conversation_binding_digest: str | None,
     ) -> str:
         evidence_payload = {
-            "schema": "PORTAL_DESKTOP_COGNITION_EVIDENCE_V1",
+            "schema": "PORTAL_DESKTOP_COGNITION_EVIDENCE_V2",
             "request_id": request.request_id,
             "source": request.source,
+            "reason": request.reason,
+            "task": request.task,
+            "created_at": request.created_at,
+            "required_capabilities": json.loads(CognitionLedger._capabilities_json(request)),
             "state": state,
             "route_id": route.route_id if route else None,
             "provider": route.provider if route else None,
@@ -132,7 +167,7 @@ class CognitionLedger:
             "protected_effect_authority": False,
             "conversation_binding_digest": conversation_binding_digest,
         }
-        evidence_id = "cognition:" + hashlib.sha256(
+        return "cognition:" + hashlib.sha256(
             json.dumps(
                 evidence_payload,
                 sort_keys=True,
@@ -140,58 +175,165 @@ class CognitionLedger:
                 ensure_ascii=False,
             ).encode("utf-8")
         ).hexdigest()
+
+    def claim(
+        self, request: CognitionRequestEnvelope, *, now: float,
+        conversation_binding_digest: str | None,
+    ) -> tuple[str | None, dict[str, object] | None]:
+        """Atomically assign one attempt across separate SQLite connections.
+
+        A legacy row lacking a capability identity is never silently upgraded.
+        RUNNING rows need explicit reconciliation after owner failure; no wall-clock
+        expiry can steal an attempt while model/acceptance work may still run.
+        """
+        capabilities_json = self._capabilities_json(request)
+        token = secrets.token_hex(16)
+        evidence_id = self._evidence(
+            request, state="RUNNING", route=None, response_text=None,
+            error=None, conversation_binding_digest=conversation_binding_digest,
+        )
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.get(request.request_id)
+            if row is not None:
+                if row["conversation_binding_digest"] != conversation_binding_digest:
+                    raise ValueError("request_id already binds a different conversation session")
+                if (
+                    row["required_capabilities_json"] != capabilities_json
+                    or any(row[key] != getattr(request, key) for key in (
+                        "source", "reason", "task", "created_at"
+                    ))
+                ):
+                    raise ValueError("request_id already binds a different cognition request")
+                if row["state"] in ("COMPLETED", "RUNNING") or not row["retryable"]:
+                    self.connection.execute("COMMIT")
+                    return None, row
+                cursor = self.connection.execute(
+                    """UPDATE desktop_cognition_runs SET state='RUNNING', retryable=1,
+                        route_id=NULL, provider=NULL, model_or_agent=NULL,
+                        response_text=NULL, error=NULL, started_at=?, completed_at=NULL,
+                        updated_at=?, evidence_id=?, attempt_token=?, acceptance_claimed=0,
+                        acceptance_json=NULL
+                       WHERE request_id=? AND state IN ('FAILED','UNRESOLVED') AND retryable=1""",
+                    (now, now, evidence_id, token, request.request_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("request claim changed unexpectedly")
+            else:
+                self.connection.execute(
+                    """INSERT INTO desktop_cognition_runs(
+                        request_id, source, reason, task, created_at,
+                        required_capabilities_json, state, retryable,
+                        protected_effect_authority, started_at, updated_at,
+                        evidence_id, conversation_binding_digest, attempt_token
+                    ) VALUES(?,?,?,?,?,?,'RUNNING',1,0,?,?,?,?,?)""",
+                    (request.request_id, request.source, request.reason, request.task,
+                     request.created_at, capabilities_json, now, now, evidence_id,
+                     conversation_binding_digest, token),
+                )
+            self.connection.execute("COMMIT")
+            return token, None
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
+
+    def begin_acceptance(self, request_id: str, token: str) -> None:
+        """Reserve the sole acceptance callback before invoking user code.
+
+        Ambiguous acceptance outcome remains nonretryable across restart.
+        """
         cursor = self.connection.execute(
-            """
-            INSERT INTO desktop_cognition_runs(
-                request_id, source, reason, task, created_at,
-                state, retryable, route_id, provider, model_or_agent,
-                response_text, error, protected_effect_authority,
-                started_at, completed_at, updated_at, evidence_id,
-                conversation_binding_digest
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)
-            ON CONFLICT(request_id) DO UPDATE SET
-                source=excluded.source,
-                reason=excluded.reason,
-                task=excluded.task,
-                created_at=excluded.created_at,
-                state=excluded.state,
-                retryable=excluded.retryable,
-                route_id=excluded.route_id,
-                provider=excluded.provider,
-                model_or_agent=excluded.model_or_agent,
-                response_text=excluded.response_text,
-                error=excluded.error,
-                protected_effect_authority=0,
-                started_at=excluded.started_at,
-                completed_at=excluded.completed_at,
-                updated_at=excluded.updated_at,
-                evidence_id=excluded.evidence_id,
-                conversation_binding_digest=excluded.conversation_binding_digest
-            WHERE desktop_cognition_runs.conversation_binding_digest
-                  IS excluded.conversation_binding_digest
-            """,
-            (
-                request.request_id,
-                request.source,
-                request.reason,
-                request.task,
-                request.created_at,
-                state,
-                int(retryable),
-                route.route_id if route else None,
-                route.provider if route else None,
-                route.model_or_agent if route else None,
-                response_text,
-                error,
-                started_at,
-                completed_at,
-                now,
-                evidence_id,
-                conversation_binding_digest,
-            ),
+            """UPDATE desktop_cognition_runs SET acceptance_claimed=1, retryable=0
+               WHERE request_id=? AND attempt_token=? AND state='RUNNING'
+                 AND acceptance_claimed=0""",
+            (request_id, token),
         )
         if cursor.rowcount != 1:
-            raise ValueError("request_id already binds a different conversation session")
+            raise RuntimeError("cognition attempt is no longer current")
+
+    def reconcile_abandoned(
+        self, request_id: str, expected_attempt_token: str, *,
+        confirmed_owner_stopped: bool,
+    ) -> bool:
+        """Explicitly release an unaccepted orphan after external owner-stop proof.
+
+        No timer expires live model work; the caller must verify that the old
+        host cannot still claim acceptance. The token fences a late owner even
+        if that external confirmation was mistaken. Once acceptance began,
+        the outcome is ambiguous and this API refuses a retry.
+        """
+        if not confirmed_owner_stopped:
+            raise ValueError("explicit owner confirmation is required")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.get(request_id)
+            if row is None or row["state"] != "RUNNING" or row["attempt_token"] != expected_attempt_token:
+                self.connection.execute("COMMIT")
+                return False
+            if row["acceptance_claimed"]:
+                raise ValueError("acceptance outcome unknown; external reconciliation required")
+            if row["required_capabilities_json"] is None:
+                raise ValueError("legacy request identity is not qualified for reconciliation")
+            request = CognitionRequestEnvelope(
+                request_id=str(row["request_id"]), source=str(row["source"]),
+                reason=str(row["reason"]), task=str(row["task"]),
+                created_at=float(row["created_at"]),
+                required_capabilities=tuple(json.loads(str(row["required_capabilities_json"]))),
+            )
+            error = "operator_reconciled_unaccepted_attempt"
+            evidence_id = self._evidence(
+                request, state="FAILED", route=None, response_text=None,
+                error=error, conversation_binding_digest=row["conversation_binding_digest"],
+            )
+            observed_now = time.time()
+            cursor = self.connection.execute(
+                """UPDATE desktop_cognition_runs SET state='FAILED', retryable=1,
+                    error=?, completed_at=?, updated_at=?, evidence_id=?, attempt_token=NULL
+                   WHERE request_id=? AND attempt_token=? AND state='RUNNING' AND acceptance_claimed=0""",
+                (error, observed_now, observed_now, evidence_id, request_id, expected_attempt_token),
+            )
+            self.connection.execute("COMMIT")
+            return cursor.rowcount == 1
+        except Exception:
+            self.connection.execute("ROLLBACK")
+            raise
+
+    def finish(
+        self, request: CognitionRequestEnvelope, *, attempt_token: str,
+        state: str, retryable: bool, now: float,
+        route: CognitionRoute | None = None, response_text: str | None = None,
+        error: str | None = None,
+        completed_at: float | None = None,
+        conversation_binding_digest: str | None = None,
+        acceptance: dict[str, object] | None = None,
+        acceptance_claimed: bool = False,
+    ) -> str:
+        if state not in ("COMPLETED", "UNRESOLVED", "FAILED"):
+            raise ValueError("invalid terminal cognition state")
+        if state == "COMPLETED" and not acceptance_claimed:
+            raise ValueError("completion requires a reserved acceptance")
+        if acceptance_claimed and (retryable or state == "UNRESOLVED"):
+            raise ValueError("reserved acceptance cannot be retryable or unresolved")
+        if state == "COMPLETED" and retryable:
+            raise ValueError("completed cognition cannot be retryable")
+        evidence_id = self._evidence(
+            request, state=state, route=route, response_text=response_text,
+            error=error, conversation_binding_digest=conversation_binding_digest,
+        )
+        cursor = self.connection.execute(
+            """UPDATE desktop_cognition_runs SET state=?, retryable=?, route_id=?,
+                provider=?, model_or_agent=?, response_text=?, error=?,
+                completed_at=?, updated_at=?, evidence_id=?, acceptance_json=?
+               WHERE request_id=? AND attempt_token=? AND state='RUNNING'
+                 AND acceptance_claimed=?""",
+            (state, int(retryable), route.route_id if route else None,
+             route.provider if route else None, route.model_or_agent if route else None,
+             response_text, error, completed_at, now, evidence_id,
+             json.dumps(acceptance, sort_keys=True) if acceptance is not None else None,
+             request.request_id, attempt_token, int(acceptance_claimed)),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("cognition attempt is no longer current")
         return evidence_id
 
 
@@ -450,25 +592,47 @@ class ResidentCognitionEngine:
             if conversation_session_id is not None else None
         )
         observed_now = float(time.time() if now is None else now)
-        stored = self.ledger.get(request.request_id)
-        if stored is not None and stored["conversation_binding_digest"] != session_binding:
-            raise ValueError("request_id already binds a different conversation session")
-        if stored is not None and any(stored[key] != getattr(request, key) for key in ("source", "reason", "task")):
-            raise ValueError("request_id already binds a different cognition request")
-        if stored is not None and stored["state"] == "COMPLETED":
-            return self._result_from_stored(stored)
-
-        routes = self.discover_routes()
-        route = select_cognition_route(
-            CognitionRequest(
-                required_capabilities=request.required_capabilities,
-            ),
-            routes,
-            authorized_route_ids=self.authorized_route_ids,
+        attempt_token, stored = self.ledger.claim(
+            request, now=observed_now, conversation_binding_digest=session_binding,
         )
+        if stored is not None:
+            if stored["state"] == "RUNNING":
+                return CognitionResult(
+                    request_id=request.request_id, state="RUNNING",
+                    route_id=str(stored["route_id"]) if stored["route_id"] is not None else None,
+                    response_text=None, retryable=bool(stored["retryable"]),
+                    evidence_id=str(stored["evidence_id"]),
+                    error=("acceptance_outcome_unknown" if stored["acceptance_claimed"]
+                           else "request_already_running"),
+                )
+            return self._result_from_stored(stored)
+        assert attempt_token is not None
+
+        try:
+            routes = self.discover_routes()
+            route = select_cognition_route(
+                CognitionRequest(
+                    required_capabilities=request.required_capabilities,
+                ),
+                routes,
+                authorized_route_ids=self.authorized_route_ids,
+            )
+        except Exception as exc:
+            observed_now = float(time.time() if now is None else now)
+            error = f"{type(exc).__name__}: {exc}"
+            evidence_id = self.ledger.finish(
+                request, attempt_token=attempt_token, state="FAILED",
+                retryable=True, now=observed_now, error=error,
+                completed_at=observed_now, conversation_binding_digest=session_binding,
+            )
+            return CognitionResult(
+                request_id=request.request_id, state="FAILED", route_id=None,
+                response_text=None, retryable=True, evidence_id=evidence_id, error=error,
+            )
         if route is None:
-            evidence_id = self.ledger.store(
+            evidence_id = self.ledger.finish(
                 request,
+                attempt_token=attempt_token,
                 state="UNRESOLVED",
                 retryable=True,
                 now=observed_now,
@@ -486,16 +650,6 @@ class ResidentCognitionEngine:
                 error="no_admissible_cognition_route",
             )
 
-        started_at = observed_now
-        self.ledger.store(
-            request,
-            state="RUNNING",
-            retryable=True,
-            now=observed_now,
-            route=route,
-            started_at=started_at,
-            conversation_binding_digest=session_binding,
-        )
         try:
             response_text = (
                 self.invoke_chat(route, self._chat_messages(conversation_session_id, route, request.task))
@@ -503,25 +657,21 @@ class ResidentCognitionEngine:
             )
             if not isinstance(response_text, str) or not response_text.strip():
                 raise ValueError("cognition response must be nonempty text")
-            acceptance = (
-                self.accept_result(request, route, response_text)
-                if self.accept_result else {"status": "UNQUALIFIED_LEDGER_ONLY"}
-            )
-            self.ledger.connection.execute(
-                "UPDATE desktop_cognition_runs SET acceptance_json=? WHERE request_id=?",
-                (json.dumps(acceptance, sort_keys=True), request.request_id),
-            )
+            try:
+                response_text.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValueError("cognition response must be UTF-8 text") from exc
         except Exception as exc:
             observed_now = float(time.time() if now is None else now)
             error = f"{type(exc).__name__}: {exc}"
-            evidence_id = self.ledger.store(
+            evidence_id = self.ledger.finish(
                 request,
+                attempt_token=attempt_token,
                 state="FAILED",
                 retryable=True,
                 now=observed_now,
                 route=route,
                 error=error,
-                started_at=started_at,
                 completed_at=observed_now,
                 conversation_binding_digest=session_binding,
             )
@@ -535,17 +685,46 @@ class ResidentCognitionEngine:
                 error=error,
             )
 
+        # Atomically reserve the one external acceptance callback. If a former
+        # owner was explicitly reconciled while its model was still executing,
+        # this CAS fails *before* the callback is run.
+        self.ledger.begin_acceptance(request.request_id, attempt_token)
+        try:
+            acceptance = (
+                self.accept_result(request, route, response_text)
+                if self.accept_result else {"status": "UNQUALIFIED_LEDGER_ONLY"}
+            )
+            if not isinstance(acceptance, dict):
+                raise ValueError("cognition acceptance must be a JSON object")
+            json.dumps(acceptance, sort_keys=True, allow_nan=False, ensure_ascii=False).encode("utf-8")
+        except Exception as exc:
+            observed_now = float(time.time() if now is None else now)
+            error = f"{type(exc).__name__}: {exc}"
+            evidence_id = self.ledger.finish(
+                request, attempt_token=attempt_token, state="FAILED",
+                retryable=False, now=observed_now, route=route, error=error,
+                completed_at=observed_now,
+                conversation_binding_digest=session_binding,
+                acceptance_claimed=True,
+            )
+            return CognitionResult(
+                request_id=request.request_id, state="FAILED", route_id=route.route_id,
+                response_text=None, retryable=False, evidence_id=evidence_id, error=error,
+            )
+
         observed_now = float(time.time() if now is None else now)
-        evidence_id = self.ledger.store(
+        evidence_id = self.ledger.finish(
             request,
+            attempt_token=attempt_token,
             state="COMPLETED",
             retryable=False,
             now=observed_now,
             route=route,
             response_text=response_text,
-            started_at=started_at,
             completed_at=observed_now,
             conversation_binding_digest=session_binding,
+            acceptance=acceptance,
+            acceptance_claimed=True,
         )
         if conversation_session_id is not None:
             self._remember(conversation_session_id, route, request.task, response_text)

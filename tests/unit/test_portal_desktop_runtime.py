@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+import sqlite3
 import pytest
 
 from portal.desktop_cognition import CognitionRoute
@@ -43,18 +46,22 @@ def test_acceptance_precedes_completion_and_persists_receipt(tmp_path):
         ledger.close()
 
 
-def test_rejected_intake_keeps_request_retryable(tmp_path):
+def test_rejected_intake_does_not_automatically_repeat_ambiguous_acceptance(tmp_path):
     ledger = CognitionLedger(tmp_path / "ledger.db")
+    calls = []
     try:
         engine = ResidentCognitionEngine(
             ledger=ledger, discover_routes=lambda: (LOCAL,),
             invoke_route=lambda route, task: "answer",
-            accept_result=lambda *args: (_ for _ in ()).throw(ValueError("intake rejected")),
+            accept_result=lambda *args: calls.append("accept") or (_ for _ in ()).throw(ValueError("intake rejected")),
         )
-        result = engine.process(CognitionRequestEnvelope("rejected", "HUMAN", "test", "hi", 100))
+        request = CognitionRequestEnvelope("rejected", "HUMAN", "test", "hi", 100)
+        result = engine.process(request)
         assert result.state == "FAILED"
-        assert result.retryable
+        assert not result.retryable
         assert "intake rejected" in result.error
+        assert engine.process(request).state == "FAILED"
+        assert calls == ["accept"]
     finally:
         ledger.close()
 
@@ -171,6 +178,327 @@ def test_completed_request_is_idempotent_and_not_reinvoked(tmp_path: Path) -> No
         assert calls == ["one"]
     finally:
         ledger.close()
+
+
+def test_completed_request_replay_requires_identical_capability_identity(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    calls = []
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda _route, task: calls.append(task) or "first",
+        )
+        request = CognitionRequestEnvelope("cap-replay", "HUMAN", "test", "one", 100.0)
+        assert engine.process(request).state == "COMPLETED"
+        with pytest.raises(ValueError, match="different cognition request"):
+            engine.process(CognitionRequestEnvelope(
+                "cap-replay", "HUMAN", "test", "one", 100.0,
+                required_capabilities=("text", "tools"),
+            ))
+        with pytest.raises(ValueError, match="different cognition request"):
+            engine.process(CognitionRequestEnvelope(
+                "cap-replay", "HUMAN", "test", "one", 101.0,
+            ))
+        assert calls == ["one"]
+    finally:
+        ledger.close()
+
+
+def test_concurrent_connections_claim_one_cognition_request(tmp_path: Path) -> None:
+    path = tmp_path / "cognition.sqlite3"
+    entering = Barrier(2)
+    release = Barrier(2)
+    invocations = []
+    accepted = []
+
+    def invoke(_route, _task):
+        invocations.append("invoke")
+        entering.wait(timeout=5)
+        release.wait(timeout=5)
+        return "answer"
+
+    def run_first():
+        ledger = CognitionLedger(path)
+        try:
+            engine = ResidentCognitionEngine(
+                ledger=ledger, discover_routes=lambda: (LOCAL,),
+                invoke_route=invoke,
+                accept_result=lambda *_: accepted.append("accept") or {"status": "ACCEPTED"},
+            )
+            return engine.process(CognitionRequestEnvelope("shared", "HUMAN", "test", "ask", 100.0))
+        finally:
+            ledger.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(run_first)
+        entering.wait(timeout=5)
+        competing_ledger = CognitionLedger(path)
+        try:
+            competing_engine = ResidentCognitionEngine(
+                ledger=competing_ledger, discover_routes=lambda: (LOCAL,),
+                invoke_route=lambda *_: (_ for _ in ()).throw(AssertionError("duplicate invocation")),
+                accept_result=lambda *_: (_ for _ in ()).throw(AssertionError("duplicate acceptance")),
+            )
+            other = competing_engine.process(CognitionRequestEnvelope("shared", "HUMAN", "test", "ask", 100.0))
+            assert other.state == "RUNNING"
+            assert other.retryable
+            assert other.response_text is None
+            assert invocations == ["invoke"]
+        finally:
+            competing_ledger.close()
+            release.wait(timeout=5)
+        assert first.result(timeout=5).state == "COMPLETED"
+    assert accepted == ["accept"]
+
+
+def test_unaccepted_crash_requires_explicit_reconciliation_before_retry(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.db"
+    request = CognitionRequestEnvelope("crash", "HUMAN", "test", "ask", 100.0)
+    ledger = CognitionLedger(path)
+    try:
+        original = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: (_ for _ in ()).throw(KeyboardInterrupt("host died")),
+        )
+        with pytest.raises(KeyboardInterrupt):
+            original.process(request)
+        row = ledger.get("crash")
+        assert row["state"] == "RUNNING" and row["attempt_token"]
+    finally:
+        ledger.close()
+    reopened = CognitionLedger(path)
+    try:
+        calls = []
+        engine = ResidentCognitionEngine(
+            ledger=reopened, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: calls.append("invoke") or "good",
+        )
+        assert engine.process(request).state == "RUNNING"
+        assert calls == []
+        with pytest.raises(ValueError, match="explicit owner confirmation"):
+            reopened.reconcile_abandoned("crash", row["attempt_token"], confirmed_owner_stopped=False)
+        assert reopened.reconcile_abandoned(
+            "crash", row["attempt_token"], confirmed_owner_stopped=True,
+        )
+        assert engine.process(request).state == "COMPLETED"
+        assert calls == ["invoke"]
+    finally:
+        reopened.close()
+
+
+def test_stale_owner_cannot_accept_after_explicit_reconciliation(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.db"
+    first_invoke = Barrier(2)
+    release_first = Barrier(2)
+    accepted = []
+    request = CognitionRequestEnvelope("stale", "HUMAN", "test", "ask", 100.0)
+
+    def run_stale():
+        ledger = CognitionLedger(path)
+        try:
+            def invoke(*_):
+                first_invoke.wait(timeout=5)
+                release_first.wait(timeout=5)
+                return "stale reply"
+            return ResidentCognitionEngine(
+                ledger=ledger, discover_routes=lambda: (LOCAL,),
+                invoke_route=invoke,
+                accept_result=lambda *_: accepted.append("stale") or {},
+            ).process(request)
+        finally:
+            ledger.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        previous = pool.submit(run_stale)
+        first_invoke.wait(timeout=5)
+        new_ledger = CognitionLedger(path)
+        try:
+            token = new_ledger.get("stale")["attempt_token"]
+            # This is an explicit operator override, not automatic time expiry.
+            assert new_ledger.reconcile_abandoned(
+                "stale", token, confirmed_owner_stopped=True,
+            )
+            replacement = ResidentCognitionEngine(
+                ledger=new_ledger, discover_routes=lambda: (LOCAL,),
+                invoke_route=lambda *_: "new reply",
+                accept_result=lambda *_: accepted.append("new") or {},
+            )
+            assert replacement.process(request).state == "COMPLETED"
+        finally:
+            release_first.wait(timeout=5)
+            new_ledger.close()
+        with pytest.raises(RuntimeError, match="no longer current"):
+            previous.result(timeout=5)
+    assert accepted == ["new"]
+
+
+def test_legacy_row_without_capability_identity_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.db"
+    ledger = CognitionLedger(path)
+    request = CognitionRequestEnvelope("legacy", "HUMAN", "test", "ask", 100.0)
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,), invoke_route=lambda *_: "first",
+        )
+        assert engine.process(request).state == "COMPLETED"
+        ledger.connection.execute(
+            "UPDATE desktop_cognition_runs SET required_capabilities_json=NULL WHERE request_id='legacy'"
+        )
+        with pytest.raises(ValueError, match="different cognition request"):
+            engine.process(request)
+    finally:
+        ledger.close()
+
+
+def test_discovery_exception_is_terminal_retryable_not_stuck_running(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    request = CognitionRequestEnvelope("discovery", "HUMAN", "test", "ask", 100.0)
+    try:
+        broken = ResidentCognitionEngine(
+            ledger=ledger,
+            discover_routes=lambda: (_ for _ in ()).throw(RuntimeError("discovery offline")),
+        )
+        result = broken.process(request)
+        assert result.state == "FAILED" and result.retryable
+        assert "discovery offline" in result.error
+        recovered = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,), invoke_route=lambda *_: "ok",
+        )
+        assert recovered.process(request).state == "COMPLETED"
+    finally:
+        ledger.close()
+
+
+def test_unknown_acceptance_outcome_cannot_be_reset_for_automatic_replay(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.db"
+    ledger = CognitionLedger(path)
+    calls = []
+    request = CognitionRequestEnvelope("unknown", "HUMAN", "test", "ask", 100.0)
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: "answer",
+            accept_result=lambda *_: calls.append("accept") or (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+        with pytest.raises(KeyboardInterrupt):
+            engine.process(request)
+        row = ledger.get("unknown")
+        assert row["state"] == "RUNNING" and row["acceptance_claimed"] == 1
+        assert row["retryable"] == 0
+        assert engine.process(request).error == "acceptance_outcome_unknown"
+        with pytest.raises(ValueError, match="acceptance outcome unknown"):
+            ledger.reconcile_abandoned(
+                "unknown", row["attempt_token"], confirmed_owner_stopped=True,
+            )
+        assert calls == ["accept"]
+    finally:
+        ledger.close()
+
+
+def test_capability_identity_is_set_order_invariant_but_rejects_invalid_unicode(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    broad = CognitionRoute(
+        route_id="broad", provider="ollama", model_or_agent="vera-local:latest",
+        local=True, available=True, current=True,
+        capabilities=("text", "summary"), incremental_paid_compute=False,
+        auto_admissible=True, effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
+        preference=10,
+    )
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (broad,), invoke_route=lambda *_: "answer",
+        )
+        first = CognitionRequestEnvelope("ordered", "HUMAN", "test", "ask", 100.0, ("summary", "text"))
+        replay = CognitionRequestEnvelope("ordered", "HUMAN", "test", "ask", 100.0, ("text", "summary"))
+        assert engine.process(first).state == "COMPLETED"
+        assert engine.process(replay).state == "COMPLETED"
+        with pytest.raises(ValueError, match="invalid cognition capability"):
+            engine.process(CognitionRequestEnvelope(
+                "invalid", "HUMAN", "test", "ask", 100.0, ("text", "\ud800"),
+            ))
+        assert ledger.get("invalid") is None
+    finally:
+        ledger.close()
+
+
+def test_invalid_utf8_model_reply_is_failed_before_acceptance_callback(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    accepted = []
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: "claim\ud800",
+            accept_result=lambda *_: accepted.append("accepted") or {},
+        )
+        result = engine.process(CognitionRequestEnvelope("invalid-reply", "HUMAN", "test", "ask", 100.0))
+        assert result.state == "FAILED" and result.retryable
+        assert accepted == []
+        assert ledger.get("invalid-reply")["acceptance_claimed"] == 0
+    finally:
+        ledger.close()
+
+
+def test_nonserializable_acceptance_receipt_is_terminal_and_not_reinvoked(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    accepted = []
+    request = CognitionRequestEnvelope("bad-receipt", "HUMAN", "test", "ask", 100.0)
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: "reply",
+            accept_result=lambda *_: accepted.append("accepted") or {"receipt": object()},
+        )
+        result = engine.process(request)
+        assert result.state == "FAILED" and not result.retryable
+        assert engine.process(request).state == "FAILED"
+        assert accepted == ["accepted"]
+    finally:
+        ledger.close()
+
+
+def test_direct_ledger_finish_cannot_make_reserved_acceptance_retryable(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    request = CognitionRequestEnvelope("guard", "HUMAN", "test", "ask", 100.0)
+    try:
+        token, old = ledger.claim(request, now=101.0, conversation_binding_digest=None)
+        assert token is not None and old is None
+        ledger.begin_acceptance(request.request_id, token)
+        with pytest.raises(ValueError, match="reserved acceptance cannot be retryable"):
+            ledger.finish(
+                request, attempt_token=token, state="FAILED", retryable=True,
+                now=102.0, route=LOCAL, error="claimed callback failed",
+                conversation_binding_digest=None, acceptance_claimed=True,
+            )
+        row = ledger.get(request.request_id)
+        assert row["state"] == "RUNNING" and row["retryable"] == 0
+        same_attempt, held = ledger.claim(request, now=103.0, conversation_binding_digest=None)
+        assert same_attempt is None and held["acceptance_claimed"] == 1
+    finally:
+        ledger.close()
+
+
+def test_multiple_cold_hosts_migrate_legacy_ledger_without_duplicate_alter(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.db"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE desktop_cognition_runs(request_id TEXT PRIMARY KEY, state TEXT)")
+
+    opening = Barrier(6)
+
+    def open_and_check_columns(_index):
+        opening.wait(timeout=5)
+        ledger = CognitionLedger(path)
+        try:
+            return {row[1] for row in ledger.connection.execute(
+                "PRAGMA table_info(desktop_cognition_runs)"
+            )}
+        finally:
+            ledger.close()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(open_and_check_columns, range(6)))
+    for columns in results:
+        assert {"acceptance_json", "conversation_binding_digest", "required_capabilities_json",
+                "attempt_token", "acceptance_claimed"}.issubset(columns)
 
 
 def test_route_failure_is_retryable_and_does_not_gain_effect_authority(tmp_path: Path) -> None:

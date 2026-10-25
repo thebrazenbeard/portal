@@ -73,6 +73,28 @@ is conversational convenience, not learning or persistent memory. The
 existing per-request SQLite ledger still retains the **current** plaintext
 prompt/response; the security and ACL cautions below continue to apply.
 
+The cognition ledger binds each request ID to source, reason, task, creation
+time, canonical required capabilities and (when present) an opaque conversation
+session digest. A SQLite-atomic attempt claim prevents competing resident
+processes from invoking or accepting the same active request. Completed receipts
+cannot be overwritten by replay. An active request reports `RUNNING` to another
+claimant; it does not launch a second model invocation. Before a host-provided
+acceptance callback, the current attempt reserves the only acceptance slot.
+If that callback fails or the process dies during it, its outcome is unknown:
+automatic retry is forbidden, even if the callback raised an exception.
+
+After a host crash **before acceptance**, `RUNNING` remains held across restart
+until an operator has independently confirmed the old host/attempt has stopped.
+Only then may an operator use the exact recorded attempt token with
+`CognitionLedger.reconcile_abandoned(..., confirmed_owner_stopped=True)` to
+mark that unaccepted attempt retryable. The token fences late completion; a
+request whose acceptance was already reserved is not eligible for this reset.
+There is deliberately no time-based lease stealing. Existing ledgers migrate
+additively, but legacy rows without stored capability identity are held for
+manual disposition rather than treated as verified replay matches. This is
+source-level concurrency protection, not a distributed exactly-once guarantee
+for arbitrary host callbacks or an authorization to perform protected effects.
+
 ### Windows operator-owned staged launch
 
 `portal-desktop` alone does **not** install or start a resident Vera host. The staged
