@@ -100,6 +100,33 @@ def test_view_model_send_message_uses_ipc_runtime_not_direct_model() -> None:
     assert payload["source"] == "HUMAN"
     assert payload["reason"] == "desktop conversation message"
     assert payload["task"] == "hello"
+    assert "conversation_session_id" not in payload
+
+
+def test_opt_in_context_sends_only_an_opaque_window_session_id() -> None:
+    client = FakeClient([])
+    vm = DesktopViewModel(client)
+    vm.send_message("one", remember_context=True)
+    _, one = client.calls[-1]
+    vm.send_message("two", remember_context=True)
+    _, two = client.calls[-1]
+    assert one["conversation_session_id"] == two["conversation_session_id"]
+    assert len(one["conversation_session_id"]) == 32
+    assert two["task"] == "two"
+    assert "one" not in str(two)
+    other = DesktopViewModel(client)
+    other.send_message("other", remember_context=True)
+    assert client.calls[-1][1]["conversation_session_id"] != one["conversation_session_id"]
+
+
+def test_turning_off_context_retires_the_previous_session_handle() -> None:
+    vm = DesktopViewModel(FakeClient([]))
+    old = vm.conversation_session_id
+    app = object.__new__(PortalDesktopApp)
+    app.view_model = vm
+    app.context_enabled = type("Toggle", (), {"get": lambda self: False})()
+    app._context_toggle()
+    assert vm.conversation_session_id != old
 
 
 def test_view_model_rejects_empty_message_without_ipc_call() -> None:
@@ -189,3 +216,51 @@ def test_offline_refresh_is_single_flight_and_releases_on_error(monkeypatch) -> 
 
     app.refresh_async()
     assert len(starts) == 2
+
+
+def test_send_snapshots_context_on_ui_thread_before_toggle(monkeypatch) -> None:
+    queued_workers = []
+    ui_callbacks = []
+    class DeferredThread:
+        def __init__(self, *, target, daemon):
+            assert daemon
+            self.target = target
+        def start(self):
+            queued_workers.append(self.target)
+    class Value:
+        def __init__(self, value):
+            self.value = value
+            self.get_calls = 0
+        def get(self):
+            self.get_calls += 1
+            return self.value
+        def set(self, value):
+            self.value = value
+    class FakeButton:
+        def configure(self, **kwargs):
+            pass
+    class FakeRoot:
+        def after(self, _delay, callback):
+            ui_callbacks.append(callback)
+    client = FakeClient([])
+    app = PortalDesktopApp.__new__(PortalDesktopApp)
+    app.message_var = Value("hello")
+    app.context_enabled = Value(True)
+    app.view_model = DesktopViewModel(client)
+    first_id = app.view_model.conversation_session_id
+    app._append_conversation = lambda *args: None
+    app.status_var = Value("")
+    app.send_button = FakeButton()
+    app.root = FakeRoot()
+    app.refresh_async = lambda: None
+    monkeypatch.setattr(desktop_app.threading, "Thread", DeferredThread)
+
+    app.send_message()
+    assert app.context_enabled.get_calls == 1
+    app.context_enabled.value = False
+    app._context_toggle()
+    assert app.view_model.conversation_session_id != first_id
+    queued_workers[0]()
+    assert app.context_enabled.get_calls == 2  # toggle only, never worker
+    assert client.calls[-1][1]["conversation_session_id"] == first_id
+    ui_callbacks[0]()

@@ -16,6 +16,42 @@ from .desktop_runtime import (
 
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+_SESSION_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+
+
+def _public_acceptance(raw: object) -> dict[str, object] | None:
+    """Telemetry is not a second disclosure route for acceptance task text."""
+    if not isinstance(raw, str) or len(raw) > 8192:
+        return None
+    try:
+        acceptance = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(acceptance, dict):
+        return None
+    output: dict[str, object] = {}
+    for field in ("schema", "status", "acceptance_digest", "context_digest", "response_sha256"):
+        value = acceptance.get(field)
+        if not isinstance(value, str):
+            continue
+        if field in ("schema", "status") and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", value):
+            output[field] = value
+        elif field.endswith("digest") or field.endswith("sha256"):
+            if re.fullmatch(r"[0-9a-f]{64}", value):
+                output[field] = value
+    return output or None
+
+
+def _public_failure_code(raw: object) -> str | None:
+    if not raw:
+        return None
+    if raw == "no_admissible_cognition_route":
+        return "NO_ADMISSIBLE_ROUTE"
+    if isinstance(raw, str):
+        kind = raw.split(":", 1)[0]
+        if re.fullmatch(r"[A-Z][A-Za-z0-9_]{0,60}(Error|Exception)", kind):
+            return kind
+    return "COGNITION_FAILED"
 
 
 class BridgeTimeoutError(TimeoutError):
@@ -70,19 +106,24 @@ class DesktopRuntimeCommandHandler:
                     {
                         "request_id": row["request_id"],
                         "source": row["source"],
-                        "reason": row["reason"],
+                        # The ledger intentionally retains request details;
+                        # shared telemetry must not become a second prompt
+                        # disclosure channel via reason/exception messages.
+                        "reason": (
+                            "desktop conversation" if row["source"] == "HUMAN"
+                            else "autonomous cognition" if row["source"] == "PRE_ACTIVE_AUTONOMOUS_TURN"
+                            else "cognition request"
+                        ),
                         "state": row["state"],
                         "route_id": row["route_id"],
                         "provider": row["provider"],
                         "model_or_agent": row["model_or_agent"],
                         "retryable": bool(row["retryable"]),
-                        "error": row["error"],
+                        "error": _public_failure_code(row["error"]),
                         "updated_at": row["updated_at"],
                         "evidence_id": row["evidence_id"],
                         "acceptance": (
-                            json.loads(str(row["acceptance_json"]))
-                            if row.get("acceptance_json")
-                            else None
+                            _public_acceptance(row.get("acceptance_json"))
                         ),
                         "protected_effect_authority": False,
                     }
@@ -104,6 +145,11 @@ class DesktopRuntimeCommandHandler:
                 for item in raw_capabilities
             ):
                 raise ValueError("required_capabilities must be a list of strings")
+            session_id = payload.get("conversation_session_id")
+            if session_id is not None and (
+                not isinstance(session_id, str) or not _SESSION_ID_RE.fullmatch(session_id)
+            ):
+                raise ValueError("invalid conversation session identifier")
             result = self.engine.process(
                 CognitionRequestEnvelope(
                     request_id=request_id,
@@ -114,7 +160,8 @@ class DesktopRuntimeCommandHandler:
                     required_capabilities=tuple(
                         item.strip() for item in raw_capabilities
                     ),
-                )
+                ),
+                conversation_session_id=session_id,
             )
             rendered = asdict(result)
             rendered["protected_effect_authority"] = False
