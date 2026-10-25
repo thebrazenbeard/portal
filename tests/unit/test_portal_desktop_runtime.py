@@ -161,7 +161,7 @@ def test_local_text_discovery_does_not_authorize_gateway_learning_or_rezon_colle
     """A raw model endpoint is not an attested learner or collective adapter."""
     routes = discover_cognition_routes(
         command_probe=lambda _name, _args: None,
-        ollama_tags=lambda: {"models": [{"name": "vera-local:latest"}]},
+        ollama_tags=lambda: {"models": [{"name": "vera-local:latest", "digest": "a" * 64}]},
         pre_active_models=lambda: {
             "data": [{"id": "qwen-local", "adapter_active": False,
                       "effect_authority": False}],
