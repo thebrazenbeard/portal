@@ -1,11 +1,79 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
+from portal import desktop_cognition
 from portal.desktop_cognition import (
     CognitionRequest,
     CognitionRoute,
     discover_cognition_routes,
     select_cognition_route,
 )
+
+
+def _stub_discovery(monkeypatch, body, status=200):
+    encoded = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+    seen = {"connections": [], "requests": []}
+
+    class Response:
+        def __init__(self):
+            self.status = status
+
+        def read(self, limit):
+            seen["read_limit"] = limit
+            return encoded[:limit]
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            seen["connections"].append((host, port, timeout))
+
+        def request(self, method, path, headers):
+            seen["requests"].append((method, path, headers))
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr(desktop_cognition.http.client, "HTTPConnection", Connection)
+    return seen
+
+
+@pytest.mark.parametrize("provider,port,path,method", [
+    ("ollama", 11434, "/api/tags", desktop_cognition._default_ollama_tags),
+    ("pre_active", 18081, "/v1/models", desktop_cognition._default_pre_active_models),
+])
+def test_local_discovery_is_direct_loopback_and_proxy_independent(
+    monkeypatch, provider, port, path, method,
+):
+    monkeypatch.setenv("HTTP_PROXY", "http://untrusted.example:8080")
+    payload = {"models": [], "data": []}
+    seen = _stub_discovery(monkeypatch, payload)
+    assert method() == payload
+    assert seen["connections"] == [("127.0.0.1", port, 2.0)]
+    assert seen["requests"] == [("GET", path, {"Accept": "application/json"})]
+    assert seen["closed"] is True
+
+
+@pytest.mark.parametrize("status", [302, 307, 401, 503])
+def test_local_discovery_does_not_follow_redirects(monkeypatch, status):
+    seen = _stub_discovery(monkeypatch, {}, status=status)
+    assert desktop_cognition._default_ollama_tags() is None
+    assert len(seen["connections"]) == 1
+
+
+@pytest.mark.parametrize("body", [
+    b"\xff",
+    b"x" * (desktop_cognition._MAX_LOCAL_DISCOVERY_BYTES + 1),
+    b"[]",
+])
+def test_local_discovery_rejects_invalid_or_oversized_body(monkeypatch, body):
+    seen = _stub_discovery(monkeypatch, body)
+    assert desktop_cognition._default_pre_active_models() is None
+    assert seen["read_limit"] == desktop_cognition._MAX_LOCAL_DISCOVERY_BYTES + 1
 
 
 def test_ollama_models_are_discovered_as_local_no_incremental_paid_text_routes() -> None:
