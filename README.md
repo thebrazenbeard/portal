@@ -96,8 +96,18 @@ synthesis is accepted. The resulting JSON explicitly identifies
 `protected_effect_authority: false`. It is an advisory observation, not a
 claim of factual accuracy, a quorum of independently attested machines, or
 permission to act. The response is retained in the resident host's plaintext
-cognition ledger under the existing local ACL boundary; keep the runtime
-leaf private. This source route is **not** installed or automatically tested
+cognition ledger and the bridge response JSON. On POSIX, the host now seals
+its `state` and `bridge` directories to mode `0700`, the cognition SQLite
+database and its existing WAL/SHM sidecars to `0600`, and newly generated
+bridge responses to `0600`; preexisting bridge JSON files are tightened at
+startup and symlinked sensitive leaves are refused. The stored material is
+still **plaintext**, not encrypted. The POSIX custody checks assume a trusted
+runtime-root and ancestor directory chain; they do not authenticate arbitrary
+ancestor symlinks or protect against another process running as the same user.
+Do not use a shared installation root. On Windows, Python mode bits are not an
+NTFS ACL guarantee: verify a dedicated owner-only runtime-root ACL before
+installing or starting the host, as instructed below. This source route is
+**not** installed or automatically tested
 on Lappy/VN1 by a repository merge, nor does the default staged installer
 certify an operational Rezon service.
 

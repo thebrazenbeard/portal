@@ -18,6 +18,11 @@ from .desktop_cognition import (
     discover_cognition_routes,
     select_cognition_route,
 )
+from .private_storage import (
+    ensure_private_directory,
+    ensure_private_file,
+    secure_sqlite_sidecars,
+)
 from .desktop_rezon import authorized_rezon_route_ids, discover_rezon_observer
 
 
@@ -100,7 +105,11 @@ class CognitionLedger:
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.path.parent)
+        ensure_private_file(self.path, create=True)
+        # SQLite may unlink or open a preexisting WAL/SHM path during connect.
+        # Reject symlinks and seal legacy files *before* the SQLite VFS sees it.
+        secure_sqlite_sidecars(self.path)
         self.connection = sqlite3.connect(
             str(self.path),
             timeout=5.0,
@@ -137,6 +146,7 @@ class CognitionLedger:
         except Exception:
             self.connection.execute("ROLLBACK")
             raise
+        secure_sqlite_sidecars(self.path)
 
     def close(self) -> None:
         self.connection.close()

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import traceback
 from typing import Any
@@ -18,6 +19,7 @@ from .desktop_pre_active import (
 from .desktop_runtime import CognitionLedger, ResidentCognitionEngine
 from .desktop_rezon import authorized_rezon_route_ids
 from .desktop_vera_acceptance import VeraRuntimeAcceptance
+from .private_storage import ensure_private_directory, secure_existing_bridge_json
 
 
 _MAX_BRIDGE_REQUEST_BYTES = 64 * 1024
@@ -36,20 +38,26 @@ def _read_claimed_payload(path: Path) -> dict[str, object]:
 
 
 def _atomic_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(
-        json.dumps(payload, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    for attempt in range(20):
-        try:
-            temp.replace(path)
-            return
-        except PermissionError:
-            if attempt == 19:
-                raise
-            time.sleep(0.05)
+    ensure_private_directory(path.parent)
+    if path.is_symlink():
+        raise ValueError("bridge response target must not be a symlink")
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        for attempt in range(20):
+            try:
+                temp.replace(path)
+                return
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def _runtime_id(source_manifest: dict[str, object]) -> str:
@@ -146,11 +154,14 @@ def prepare_runtime_layout(runtime_root: Path) -> dict[str, Path]:
         state_root / "portal",
         state_root / "pre-active",
         state_root / "cognition",
+        bridge_root,
         requests,
         claimed,
         responses,
     ):
-        path.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(path)
+    for directory in (requests, claimed, responses):
+        secure_existing_bridge_json(directory)
     return {
         "runtime_root": runtime_root,
         "state_root": state_root,
