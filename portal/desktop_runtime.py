@@ -69,6 +69,33 @@ CREATE TABLE IF NOT EXISTS desktop_cognition_runs (
 
 
 class CognitionLedger:
+    @staticmethod
+    def _enable_wal(connection: sqlite3.Connection) -> None:
+        """Tolerate only transient WAL switch contention during concurrent boot.
+
+        Windows SQLite may report SQLITE_BUSY immediately on the mode-changing
+        PRAGMA even with a connection busy timeout. The retry is scoped to
+        this PRAGMA, bounded by monotonic time, and never masks other I/O errors.
+        """
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                row = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+                if row is None or str(row[0]).lower() != "wal":
+                    raise RuntimeError("SQLite WAL journal mode unavailable")
+                return
+            except sqlite3.OperationalError as exc:
+                code = getattr(exc, "sqlite_errorcode", None)
+                busy = (isinstance(code, int) and (code & 0xFF) in (
+                    sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED
+                )) or (
+                    code is None and str(exc).lower() == "database is locked"
+                )
+                remaining = deadline - time.monotonic()
+                if not busy or remaining <= 0:
+                    raise
+                time.sleep(min(0.02, remaining))
+
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +105,11 @@ class CognitionLedger:
             isolation_level=None,
         )
         self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA journal_mode=WAL")
+        try:
+            self._enable_wal(self.connection)
+        except Exception:
+            self.connection.close()
+            raise
         self.connection.executescript(_SCHEMA)
         # Serialize additive upgrades for two hosts starting on the same
         # preexisting SQLite file. Reinspect *under* the write lock so a

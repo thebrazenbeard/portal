@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import sqlite3
 import pytest
+import portal.desktop_runtime as desktop_runtime
 
 from portal.desktop_cognition import CognitionRoute
 from portal.desktop_runtime import (
@@ -499,6 +500,78 @@ def test_multiple_cold_hosts_migrate_legacy_ledger_without_duplicate_alter(tmp_p
     for columns in results:
         assert {"acceptance_json", "conversation_binding_digest", "required_capabilities_json",
                 "attempt_token", "acceptance_claimed"}.issubset(columns)
+
+
+def test_cold_start_retries_only_transient_wal_journal_lock(tmp_path: Path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+    attempts = []
+
+    class TransientLockConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == "PRAGMA journal_mode=WAL":
+                attempts.append(sql)
+                if len(attempts) < 3:
+                    raise sqlite3.OperationalError("database is locked")
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(
+        desktop_runtime.sqlite3, "connect",
+        lambda *args, **kwargs: original_connect(*args, factory=TransientLockConnection, **kwargs),
+    )
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    try:
+        assert len(attempts) == 3
+        assert ledger.connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    finally:
+        ledger.close()
+
+
+def test_cold_start_does_not_mask_nonlock_wal_failure(tmp_path: Path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+    attempts = []
+
+    class FailedWalConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == "PRAGMA journal_mode=WAL":
+                attempts.append(sql)
+                raise sqlite3.OperationalError("disk I/O error")
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(
+        desktop_runtime.sqlite3, "connect",
+        lambda *args, **kwargs: original_connect(*args, factory=FailedWalConnection, **kwargs),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        CognitionLedger(tmp_path / "ledger.db")
+    assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("extended_busy_code", [517, 262])
+def test_cold_start_retries_extended_sqlite_busy_lock_codes(
+    tmp_path: Path, monkeypatch, extended_busy_code: int,
+) -> None:
+    original_connect = sqlite3.connect
+    attempts = []
+
+    class ExtendedBusyConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == "PRAGMA journal_mode=WAL":
+                attempts.append(sql)
+                if len(attempts) < 3:
+                    exc = sqlite3.OperationalError("database is locked")
+                    exc.sqlite_errorcode = extended_busy_code
+                    raise exc
+            return super().execute(sql, *args, **kwargs)
+
+    monkeypatch.setattr(
+        desktop_runtime.sqlite3, "connect",
+        lambda *args, **kwargs: original_connect(*args, factory=ExtendedBusyConnection, **kwargs),
+    )
+    ledger = CognitionLedger(tmp_path / "ledger.db")
+    try:
+        assert len(attempts) == 3
+    finally:
+        ledger.close()
 
 
 def test_route_failure_is_retryable_and_does_not_gain_effect_authority(tmp_path: Path) -> None:
