@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
 from portal.desktop_host import (
+    _read_claimed_payload,
     claim_bridge_request,
     prepare_runtime_layout,
 )
@@ -32,3 +36,17 @@ def test_claim_bridge_request_moves_request_before_processing(tmp_path: Path) ->
     assert claimed_path == layout["claimed"] / "r1.json"
     assert claimed_path.is_file()
     assert not request_path.exists()
+
+
+def test_claimed_bridge_payload_is_bounded_before_json_parsing(tmp_path: Path) -> None:
+    path = tmp_path / "huge.json"
+    path.write_bytes(b"{" + b" " * (64 * 1024) + b"}")
+    with pytest.raises(ValueError, match="maximum size"):
+        _read_claimed_payload(path)
+
+
+def test_claimed_bridge_payload_accepts_normal_utf8_and_bom(tmp_path: Path) -> None:
+    path = tmp_path / "valid.json"
+    body = {"request_id": "r1", "command": "desktop_cognize", "task": "Hello \U0001f642"}
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(body, ensure_ascii=False).encode("utf-8"))
+    assert _read_claimed_payload(path) == body

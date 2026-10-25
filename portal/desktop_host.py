@@ -19,6 +19,21 @@ from .desktop_runtime import CognitionLedger, ResidentCognitionEngine
 from .desktop_vera_acceptance import VeraRuntimeAcceptance
 
 
+_MAX_BRIDGE_REQUEST_BYTES = 64 * 1024
+
+
+def _read_claimed_payload(path: Path) -> dict[str, object]:
+    """Bound untrusted file-IPC input before decoding or JSON allocation."""
+    with path.open("rb") as source:
+        raw = source.read(_MAX_BRIDGE_REQUEST_BYTES + 1)
+    if len(raw) > _MAX_BRIDGE_REQUEST_BYTES:
+        raise ValueError("bridge request exceeds maximum size")
+    payload = json.loads(raw.decode("utf-8-sig").lstrip("\ufeff"))
+    if not isinstance(payload, dict):
+        raise ValueError("request payload must be an object")
+    return payload
+
+
 def _atomic_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -344,13 +359,7 @@ def run_host(runtime_root: Path) -> int:
             for claimed_path in claimed_paths:
                 request_id = claimed_path.stem
                 try:
-                    payload = json.loads(
-                        claimed_path.read_text(
-                            encoding="utf-8-sig"
-                        ).lstrip("\ufeff")
-                    )
-                    if not isinstance(payload, dict):
-                        raise ValueError("request payload must be an object")
+                    payload = _read_claimed_payload(claimed_path)
                     payload_request_id = str(payload["request_id"])
                     if payload_request_id != request_id:
                         raise ValueError(
