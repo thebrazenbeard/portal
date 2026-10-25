@@ -39,6 +39,13 @@ def _public_acceptance(raw: object) -> dict[str, object] | None:
         elif field.endswith("digest") or field.endswith("sha256"):
             if re.fullmatch(r"[0-9a-f]{64}", value):
                 output[field] = value
+    # These effect-ceiling flags contain no prompt or response text. The
+    # staged installer requires their exact false values when qualifying a
+    # Vera host; omitting them silently made successful runs unqualifiable.
+    for field in ("canonical_memory_write", "protected_effect_authority"):
+        value = acceptance.get(field)
+        if type(value) is bool:
+            output[field] = value
     return output or None
 
 

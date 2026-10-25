@@ -13,6 +13,7 @@ from portal.desktop_ipc import (
     BridgeTimeoutError,
     DesktopRuntimeCommandHandler,
     FileBridgeClient,
+    _public_acceptance,
 )
 from portal.desktop_runtime import CognitionLedger, CognitionRequestEnvelope, ResidentCognitionEngine
 
@@ -30,6 +31,24 @@ LOCAL = CognitionRoute(
     effect_authority_ceiling="COGNITION_ONLY_NO_PROTECTED_EFFECT",
     preference=10,
 )
+
+
+def test_public_acceptance_preserves_boolean_effect_ceiling_without_task_text() -> None:
+    projection = _public_acceptance(json.dumps({
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "response_sha256": "a" * 64,
+        "canonical_memory_write": False,
+        "protected_effect_authority": False,
+        "task": "private prompt",
+        "nested": {"task": "private response"},
+    }))
+    assert projection == {
+        "status": "ACCEPTED_HOST_OBSERVATION",
+        "response_sha256": "a" * 64,
+        "canonical_memory_write": False,
+        "protected_effect_authority": False,
+    }
+    assert "private" not in json.dumps(projection)
 
 
 def test_handler_discovers_routes_and_cognizes_through_resident_engine(tmp_path: Path) -> None:
