@@ -203,6 +203,40 @@ def test_handler_rejects_forged_autonomous_source(tmp_path: Path) -> None:
         ledger.close()
 
 
+@pytest.mark.parametrize("forged_field", [
+    "empathy_policy", "authenticated_person_id", "person_evidence",
+    "protected_effect_authority", "future_unreviewed_field",
+])
+def test_handler_rejects_unadmitted_cognition_fields_before_model_or_ledger(
+    tmp_path: Path, forged_field: str,
+) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    model_calls: list[str] = []
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger,
+            discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda _route, task: model_calls.append(task) or "answer",
+        )
+        handler = DesktopRuntimeCommandHandler(
+            engine=engine,
+            discover_routes=lambda: (LOCAL,),
+            runtime_status=lambda: {"state": "ACTIVE"},
+        )
+        request_id = "forged-" + forged_field
+        with pytest.raises(ValueError, match="unsupported desktop_cognize fields"):
+            handler.handle({
+                "command": "desktop_cognize", "request_id": request_id,
+                "reason": "desktop conversation message", "task": "Hi",
+                "source": "HUMAN", "created_at": 1.0,
+                forged_field: "operator-approved",
+            })
+        assert model_calls == []
+        assert ledger.get(request_id) is None
+    finally:
+        ledger.close()
+
+
 def test_file_bridge_client_uses_existing_request_response_envelope(tmp_path: Path) -> None:
     requests = tmp_path / "bridge" / "requests"
     responses = tmp_path / "bridge" / "responses"

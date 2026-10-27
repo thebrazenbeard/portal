@@ -17,6 +17,10 @@ from .desktop_runtime import (
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _SESSION_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+_COGNITION_REQUEST_FIELDS = frozenset({
+    "command", "request_id", "source", "reason", "task", "created_at",
+    "required_capabilities", "conversation_session_id",
+})
 
 
 def _public_acceptance(raw: object) -> dict[str, object] | None:
@@ -138,6 +142,13 @@ class DesktopRuntimeCommandHandler:
                 ],
             }
         if command == "desktop_cognize":
+            # The file bridge is a transport, not an authority issuer. In
+            # particular it cannot authenticate a person or admit an Empathy
+            # policy for the current turn. Fail closed on new fields until a
+            # trusted host-side admission contract explicitly owns them.
+            extra_fields = set(payload) - _COGNITION_REQUEST_FIELDS
+            if extra_fields:
+                raise ValueError("unsupported desktop_cognize fields")
             request_id = self._required_text(payload, "request_id")
             supplied_source = payload.get("source")
             if supplied_source not in (None, "HUMAN"):

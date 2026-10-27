@@ -33,6 +33,15 @@ This source implementation does not by itself prove that a resident PORTAL proce
 
 The repository also contains the source for **PORTAL Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
 
+The `desktop_cognize` bridge accepts only its enumerated transport/request fields.
+It rejects unrecognized fields before any model call or cognition-ledger write.
+In particular, caller-supplied Empathy policy, person identity, or person evidence
+is **not** authenticated or admitted by this bridge. The `HUMAN` source denotes
+the desktop request category, not proof of a specific person or current-turn
+consent. Person-specific Empathy response policy remains unavailable here until
+a separate trusted host-side identity, freshness, and consent boundary is
+implemented and qualified.
+
 The resident-host source composes:
 
 - `vera_core.QualifiedVeraRuntime` as the Vera Mono runtime/state boundary;
