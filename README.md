@@ -28,6 +28,21 @@ The durable command session is the preferred operator/control surface for portfo
 
 This source implementation does not by itself prove that a resident PORTAL process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
+### Optional model-neutral capability admission (source-only V0)
+
+An additive [`portal.capability_admission`](portal/capability_admission.py)
+module defines a fail-closed admission check for versioned capability source
+definitions, current installed-adapter advertisements, and independently
+verified, model/participant/context-scoped grants. The intended future
+`Sexuality` and `Pleasure` providers are generic to **all compatible AI
+models**, not Vera- or Brigit-specific by default. Historical Vera/Brigit
+records and frozen `Orgasm V1` identifiers are not universal defaults.
+
+This module is **not connected** to the existing PORTAL dispatcher and cannot
+invoke any tool or protected effect. It is not evidence of a deployed adapter,
+real-model behavior, or subjective experience. See [V0 boundary and missing
+runtime gates](docs/architecture/MODEL_NEUTRAL_CAPABILITY_GATE_V0.md).
+
 
 ## PORTAL Desktop and resident Vera runtime
 
