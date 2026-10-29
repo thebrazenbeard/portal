@@ -18,9 +18,9 @@ authorization to execute. There is no sexual/pleasure tool driver in this PR.
 ## Three distinct objects
 
 1. `CapabilityDefinition`: named source operation, version, schema IDs, exact
-   reviewed Git commit, effect class, privacy class, and context policy.
+   reviewed repository **and** Git commit, effect class, privacy class, and context policy.
    Reading this declaration never creates runtime availability.
-2. `RuntimeAdvertisement`: host-observed, digest-bound adapter identity,
+2. `RuntimeAdvertisement`: host-observed, repository/commit and digest-bound adapter identity,
    observation time, expiry, and available/attached status. The trusted host
    still has to authenticate and substantiate the observation; constructing a
    Python object is not proof an adapter runs.
@@ -42,7 +42,8 @@ minimal `SOURCE_GATE_DECISION` receipt. That receipt always says
 `NOT_EXECUTED`; it is **not** an effect receipt or automatically suitable for a
 public Bus. Receipts contain **only a capability digest**, never an arbitrary
 capability identifier, and the request digest binds the complete model,
-participant, context, adapter and request scope (plus the exact source commit)
+participant, context, adapter and request scope **and all ten fields of the
+reviewed source definition** (including repository, commit, policy and schemas)
 to avoid collisions when callers reuse request IDs. The hashes are internal
 correlation keys, **not anonymization** or consent evidence. A production host
 would have to add a separate authenticated
@@ -54,6 +55,9 @@ advertisement and grant appear aligned. This module cannot cause an effect.
 
 - Attach a trustworthy authenticated advertisement and grant/consent provider
   to a real host; never expose verifier injection to model-provided requests.
+- Treat `privacy_class` and `context_policy` as reviewed registry metadata,
+  not trusted assertions from a model. V0 binds both to receipt identity, but
+  does not validate a deployer's substantive privacy policy itself.
 - Preserve old repository-target dispatch semantics; a distinct capability
   target path needs its own durable attempt/reconciliation implementation.
 - Verify two unrelated model identities can discover the same definition

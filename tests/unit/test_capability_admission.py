@@ -43,6 +43,7 @@ def _advertisement() -> RuntimeAdvertisement:
     return RuntimeAdvertisement(
         capability_id="sexuality.evidence.lookup",
         version="0.1.0",
+        source_repository="thebrazenbeard/sexuality",
         source_commit=COMMIT,
         adapter_id="synthetic-readonly",
         adapter_digest=DIGEST,
@@ -124,6 +125,7 @@ def test_two_models_share_definition_not_identity_or_permission() -> None:
         (replace(_advertisement(), available=False), "NO_CURRENT_RUNTIME"),
         (replace(_advertisement(), attached=False), "NO_CURRENT_RUNTIME"),
         (replace(_advertisement(), source_commit="c" * 40), "RUNTIME_IDENTITY_MISMATCH"),
+        (replace(_advertisement(), source_repository="untrusted/lookalike"), "RUNTIME_IDENTITY_MISMATCH"),
         (replace(_advertisement(), host_id="other-host"), "RUNTIME_IDENTITY_MISMATCH"),
     ],
 )
@@ -239,6 +241,41 @@ def test_receipt_request_digest_binds_full_model_participant_context_scope() -> 
     }
     assert len(digests) == 6
     assert all(len(digest) == 64 for digest in digests)
+
+
+def test_source_repository_is_bound_to_advertisement_and_receipt_identity() -> None:
+    trusted = _admit()
+    swapped = _admit(definition=replace(_definition(), source_repository="untrusted/lookalike"))
+    assert trusted.allowed
+    assert not swapped.allowed and swapped.reason == "RUNTIME_IDENTITY_MISMATCH"
+    assert trusted.receipt.capability_digest != swapped.receipt.capability_digest
+    assert trusted.receipt.request_digest != swapped.receipt.request_digest
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"context_policy": "GENERAL_READ"},
+        {"privacy_class": "PUBLIC"},
+        {"input_schema_id": "alternate.input/v0"},
+        {"output_schema_id": "alternate.output/v0"},
+        {"effect_class": "PROTECTED_EFFECT"},
+    ],
+)
+def test_receipts_distinguish_distinct_reviewed_definitions(changed) -> None:
+    baseline = _admit()
+    alternate = _admit(definition=replace(_definition(), **changed))
+    assert baseline.receipt.capability_digest != alternate.receipt.capability_digest
+    assert baseline.receipt.request_digest != alternate.receipt.request_digest
+
+
+def test_context_policy_can_change_decision_but_never_alias_receipt_identity() -> None:
+    adult = _admit(context_verifier=None)
+    general = _admit(definition=replace(_definition(), context_policy="GENERAL_READ"), context_verifier=None)
+    assert not adult.allowed and adult.reason == "NO_TRUSTED_CONTEXT_VERIFIER"
+    assert general.allowed
+    assert adult.receipt.capability_digest != general.receipt.capability_digest
+    assert adult.receipt.request_digest != general.receipt.request_digest
 
 
 def test_invalid_nonfinite_or_boolean_clock_fails_closed() -> None:

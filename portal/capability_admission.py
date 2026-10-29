@@ -80,6 +80,7 @@ class RuntimeAdvertisement:
 
     capability_id: str
     version: str
+    source_repository: str
     source_commit: str
     adapter_id: str
     adapter_digest: str
@@ -91,7 +92,7 @@ class RuntimeAdvertisement:
     evidence_ref: str
 
     def __post_init__(self) -> None:
-        for field in ("capability_id", "version", "adapter_id", "host_id", "evidence_ref"):
+        for field in ("capability_id", "version", "source_repository", "adapter_id", "host_id", "evidence_ref"):
             object.__setattr__(self, field, _required(getattr(self, field), field))
         if not _SOURCE_SHA.fullmatch(self.source_commit):
             raise ValueError("source_commit must be exact 40-character Git SHA")
@@ -199,6 +200,24 @@ def _digest_fields(namespace: str, *fields: str) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _definition_digest(definition: CapabilityDefinition) -> str:
+    """Bind a receipt to the *complete* reviewed source/policy declaration."""
+
+    return _digest_fields(
+        "portal-capability-definition/v0",
+        definition.capability_id,
+        definition.version,
+        definition.operation,
+        definition.effect_class,
+        definition.input_schema_id,
+        definition.output_schema_id,
+        definition.source_repository,
+        definition.source_commit,
+        definition.privacy_class,
+        definition.context_policy,
+    )
+
+
 def _request_digest(request: CapabilityInvocation, definition: CapabilityDefinition) -> str:
     # The request ID by itself can be reused across models, participants or
     # contexts. Bind the entire requested authority scope and reviewed source.
@@ -215,7 +234,7 @@ def _request_digest(request: CapabilityInvocation, definition: CapabilityDefinit
         request.adapter_id,
         request.host_id,
         request.idempotency_key,
-        definition.source_commit,
+        _definition_digest(definition),
     )
 
 
@@ -241,10 +260,7 @@ def admit_capability(
     def decision(allowed: bool, reason: str) -> CapabilityAdmission:
         receipt = CapabilityGateReceipt(
             request_digest=_request_digest(request, definition),
-            capability_digest=_digest_fields(
-                "portal-capability-definition/v0", definition.capability_id,
-                definition.version, definition.source_commit,
-            ),
+            capability_digest=_definition_digest(definition),
             reason=reason,
             authorization="ALLOWED" if allowed else "DENIED",
         )
@@ -267,6 +283,7 @@ def admit_capability(
     if (
         advertisement.capability_id != definition.capability_id
         or advertisement.version != definition.version
+        or advertisement.source_repository != definition.source_repository
         or advertisement.source_commit != definition.source_commit
         or advertisement.adapter_id != request.adapter_id
         or advertisement.host_id != request.host_id
