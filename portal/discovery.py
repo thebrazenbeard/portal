@@ -236,9 +236,9 @@ def build_live_project_registry(
             )
         key = repo.full_name.casefold()
         if key in by_repo:
-            raise ValueError(
-                f"duplicate discovered repository: {repo.full_name}"
-            )
+            # Authenticated inventory may include private identities. This
+            # exception can be forwarded to CLI/public diagnostics.
+            raise ValueError("duplicate discovered repository (redacted)")
         by_repo[key] = repo
 
     curated_by_repo: dict[str, list[ProjectDefinition]] = {}
@@ -258,9 +258,7 @@ def build_live_project_registry(
     ):
         matches = curated_by_repo.get(key, [])
         if len(matches) > 1:
-            raise ValueError(
-                f"curated repository binding is ambiguous: {repo.full_name}"
-            )
+            raise ValueError("curated repository binding is ambiguous (redacted)")
 
         visibility = "private" if repo.private else "public"
         live_state = (
@@ -306,9 +304,7 @@ def build_live_project_registry(
 
         project_key = project.id.casefold()
         if project_key in seen_ids:
-            raise ValueError(
-                f"duplicate live project id: {project.id}"
-            )
+            raise ValueError("duplicate live project id (redacted)")
         seen_ids.add(project_key)
         projects.append(project)
 
