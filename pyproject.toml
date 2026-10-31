@@ -18,7 +18,8 @@ portal = "portal.cli:entrypoint"
 portal-desktop = "portal.desktop_app:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "cryptography>=43,<47"]
+host-anchor = ["cryptography>=43,<47"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
