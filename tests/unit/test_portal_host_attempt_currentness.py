@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import closing
+import shutil
+import sqlite3
 
 import pytest
 
@@ -9,6 +12,139 @@ from portal.host_bridge import PortalHostBridgeStore
 from portal.route_resolver import PortalRouteAdvertisement
 from portal.session import PortalSessionResult
 from portal.wave_runtime import PortalWavePacket
+
+
+class _FakeMonotonicHost:
+    """Cloneable source-test oracle; NOT durable host authority."""
+
+    def __init__(self) -> None:
+        self.state: dict[str, tuple[int, str]] = {}
+
+    def current(self, scope: str) -> tuple[int, str] | None:
+        return self.state.get(scope)
+
+    def compare_advance(self, scope: str, epoch: int,
+                        prior_root: str, next_root: str) -> bool:
+        if self.state.get(scope) != (epoch, prior_root):
+            return False
+        self.state[scope] = (epoch + 1, next_root)
+        return True
+
+
+def _anchored_existing_dispatch(tmp_path: Path):
+    db_path = tmp_path / "host-bridge.sqlite"
+    store = PortalHostBridgeStore(db_path)
+    _advertise(store, subject_id="portal", route_id="github:portal",
+               observed_at=100.0, ttl_seconds=300.0)
+    dispatch_id = _queue(store, run_id="portfolio::g1", subject_id="portal",
+                         route_id="github:portal", queued_at=110.0)
+    root = store._state_root()  # independently provisioned by fake host fixture
+    store.close()
+    host = _FakeMonotonicHost()
+    host.state["host:portal"] = (0, root)
+    store = PortalHostBridgeStore(db_path, monotonic_anchor=host,
+                                  monotonic_scope="host:portal")
+    store.provision_host_checkpoint()
+    return store, host, dispatch_id
+
+
+def _sqlite_backup(src_path: Path, dest_path: Path) -> None:
+    with closing(sqlite3.connect(src_path)) as src, closing(sqlite3.connect(dest_path)) as dst:
+        src.backup(dst)
+
+
+def test_host_anchor_blocks_snapshot_restore_replayed_attempt(tmp_path: Path) -> None:
+    store, host, dispatch_id = _anchored_existing_dispatch(tmp_path)
+    snapshot = tmp_path / "before-attempt.sqlite"
+    _sqlite_backup(store.path, snapshot)
+    attempted = store.mark_attempted(
+        dispatch_id=dispatch_id, attempt_id="attempt-1", evidence_id="receipt-1",
+        attempted_at=121.0)
+    assert attempted["state"] == "ATTEMPTED"
+    assert host.current("host:portal")[0] == 1
+    store.close()
+    shutil.copyfile(snapshot, tmp_path / "host-bridge.sqlite")
+    restored = PortalHostBridgeStore(tmp_path / "host-bridge.sqlite",
+                                     monotonic_anchor=host,
+                                     monotonic_scope="host:portal")
+    with pytest.raises(PermissionError, match="checkpoint mismatch"):
+        restored.mark_attempted(
+            dispatch_id=dispatch_id, attempt_id="attempt-2", evidence_id="receipt-2",
+            attempted_at=121.0)
+    assert restored.load_dispatch(dispatch_id)["state"] == "QUEUED"
+    restored.close()
+
+
+def test_host_anchor_rejects_tampered_authorized_route_without_cas(tmp_path: Path) -> None:
+    store, host, dispatch_id = _anchored_existing_dispatch(tmp_path)
+    with closing(sqlite3.connect(store.path)) as attacker:
+        attacker.execute(
+            "UPDATE portal_host_routes SET authorized_effects_json=?",
+            ('["SOURCE_ONLY","SOURCE_WRITE"]',))
+        attacker.commit()
+    with pytest.raises(PermissionError, match="checkpoint mismatch"):
+        store.take_pending_dispatch(adapter_ids=("github",),
+                                    attempt_id="bad", evidence_id="receipt:bad",
+                                    attempted_at=121.0)
+    assert host.current("host:portal")[0] == 0
+    assert store.load_dispatch(dispatch_id)["state"] == "QUEUED"
+    store.close()
+
+
+def test_host_anchor_advances_on_legitimate_route_and_queue_updates(tmp_path: Path) -> None:
+    store, host, dispatch_id = _anchored_existing_dispatch(tmp_path)
+    _advertise(store, subject_id="portal", route_id="github:portal",
+               observed_at=130.0, ttl_seconds=300.0)
+    assert host.current("host:portal")[0] == 1
+    taken = store.take_pending_dispatch(adapter_ids=("github",),
+                                        attempt_id="attempt-1", evidence_id="receipt-1",
+                                        attempted_at=131.0)
+    assert taken is not None and taken["dispatch_id"] == dispatch_id
+    assert taken["state"] == "ATTEMPTED"
+    assert host.current("host:portal")[0] == 2
+    store.close()
+
+
+def test_host_anchor_missing_provisioning_denies_attempt(tmp_path: Path) -> None:
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite",
+                                  monotonic_anchor=_FakeMonotonicHost(),
+                                  monotonic_scope="host:portal")
+    with pytest.raises(PermissionError, match="checkpoint mismatch"):
+        store.take_pending_dispatch(adapter_ids=("github",),
+                                    attempt_id="unprovisioned", evidence_id="none")
+    store.close()
+
+
+def test_enrolled_database_rejects_unanchored_reader_downgrade(tmp_path: Path) -> None:
+    store, host, dispatch_id = _anchored_existing_dispatch(tmp_path)
+    snapshot = tmp_path / "before-attempt.sqlite"
+    _sqlite_backup(store.path, snapshot)
+    store.mark_attempted(dispatch_id=dispatch_id, attempt_id="first",
+                         evidence_id="receipt-1", attempted_at=121.0)
+    store.close()
+    shutil.copyfile(snapshot, tmp_path / "host-bridge.sqlite")
+    with pytest.raises(PermissionError, match="requires an anchor"):
+        PortalHostBridgeStore(tmp_path / "host-bridge.sqlite")
+    assert host.current("host:portal")[0] == 1
+
+
+def test_enrolled_database_rejects_reprovisioned_scope_alias(tmp_path: Path) -> None:
+    store, host, dispatch_id = _anchored_existing_dispatch(tmp_path)
+    snapshot = tmp_path / "before-attempt.sqlite"
+    _sqlite_backup(store.path, snapshot)
+    initial_state = host.current("host:portal")
+    store.mark_attempted(dispatch_id=dispatch_id, attempt_id="first",
+                         evidence_id="receipt-1", attempted_at=121.0)
+    store.close()
+    shutil.copyfile(snapshot, tmp_path / "host-bridge.sqlite")
+    host.state["host:alias"] = initial_state
+    aliased = PortalHostBridgeStore(tmp_path / "host-bridge.sqlite",
+                                    monotonic_anchor=host,
+                                    monotonic_scope="host:alias")
+    with pytest.raises(PermissionError, match="checkpoint mismatch"):
+        aliased.mark_attempted(dispatch_id=dispatch_id, attempt_id="second",
+                               evidence_id="receipt-2", attempted_at=121.0)
+    aliased.close()
 
 
 def _queue(
