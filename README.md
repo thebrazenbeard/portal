@@ -12,7 +12,7 @@ The original single-chat design remains a supported interaction pattern and hist
 
 ## Architecture
 
-- `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
+- `portal/_runner/` is the privately namespaced inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
 - `portal/` is the PORTAL portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
 - Vera owns cross-project coordination and collision/ownership arbitration.
 - Durable state lives outside any one UI or chat context so CLI, Desktop, chat, or another qualified host can reconstruct and resume the portfolio.
@@ -383,6 +383,16 @@ entry point, not the standalone `project-runner` CLI. Install
 [`project-runner`](https://github.com/thebrazenbeard/project-runner)
 separately if you need that product's commands; the two distributions have
 distinct Python package ownership.
+
+**Migration boundary:** Older Portal builds were also distributed as
+`project-runner==0.1.0` and owned both `portal/` and `runner/`. Installing the
+new `portal-coordinator` wheel over that distribution can leave overlapping
+files; subsequently uninstalling the old wheel can delete the new Portal CLI.
+For now, qualify the new Portal in a **fresh virtual environment**, install the
+standalone Project Runner separately if needed, and cut over only after the
+new environment passes its smoke tests. Do not treat an in-place `pip install
+--upgrade` or uninstall of the historical distribution as a qualified
+migration or rollback procedure.
 
 Create a node manifest and save it as `nodes.example.yaml`:
 

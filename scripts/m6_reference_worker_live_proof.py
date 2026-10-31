@@ -120,6 +120,11 @@ def main() -> None:
     if reconstructed is None:
         raise RuntimeError("reference worker reconstruction file is missing")
     local_worker_path = ROOT / reconstruction_path
+    # Keep the immutable upstream reconstruction witness unchanged. The
+    # formerly top-level runner package is now privately owned by Portal;
+    # compare the historical bytes with that relocated implementation.
+    if reconstruction_path == "runner/reference_worker.py":
+        local_worker_path = ROOT / "portal" / "_runner" / "reference_worker.py"
     if not local_worker_path.is_file():
         raise RuntimeError("reference worker local implementation is missing")
     local_worker_content = local_worker_path.read_text(encoding="utf-8")
