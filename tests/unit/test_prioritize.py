@@ -1,5 +1,5 @@
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
-from runner.prioritize import rank_frontiers
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.prioritize import rank_frontiers
 
 
 def _frontier(id, *, status=FrontierStatus.READY, priority_inputs=None):

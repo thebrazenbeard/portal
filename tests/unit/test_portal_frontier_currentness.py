@@ -10,7 +10,7 @@ from portal.frontier_currentness import (
     PortalHostFrontierStore,
     frontier_policy_sha256,
 )
-from runner.portfolio_advancement import AdvancementItem, AdvancementWave
+from portal._runner.portfolio_advancement import AdvancementItem, AdvancementWave
 
 
 def _item(

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from portal.models import ExecutionNode
 from portal.runtime import PortalRunStore, run_portal_once
-from runner.models import DependencyEdge, ProjectDefinition
-from runner.portfolio import collect_and_schedule_portfolio
+from portal._runner.models import DependencyEdge, ProjectDefinition
+from portal._runner.portfolio import collect_and_schedule_portfolio
 
 
 class FakeTransport:

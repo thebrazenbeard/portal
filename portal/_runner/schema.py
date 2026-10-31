@@ -7,7 +7,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 _SCHEMA_FILES = {
     "project": _ROOT / "schemas" / "project.schema.json",
     "worker": _ROOT / "schemas" / "worker.schema.json",

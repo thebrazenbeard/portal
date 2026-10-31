@@ -6,30 +6,30 @@ import os
 from pathlib import Path
 import tempfile
 
-from runner.budgets import BudgetEnvelope
-from runner.durable_dispatch import (
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.durable_dispatch import (
     SqliteDispatchAdmissionStore,
     execute_admitted,
     verify_observed_attempt,
 )
-from runner.frontier import derive_frontiers
-from runner.github_backend import (
+from portal._runner.frontier import derive_frontiers
+from portal._runner.github_backend import (
     GitHubBackend,
     GitHubOperation,
     GitHubRestTransport,
     TargetAuthorityGrant,
 )
-from runner.m6_github import (
+from portal._runner.m6_github import (
     GitHubCurrentSubjectReader,
     GitHubReadInspectionBackend,
     frontier_to_github_inspection_work,
 )
-from runner.models import ExactSubject, FrontierStatus
-from runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
-from runner.recursive_state import SqliteRecursiveWorkStore
-from runner.propagate import derive_invalidations
-from runner.registry import load_dependencies, load_observations, load_project_snapshot
-from runner.work_units import WorkUnitStatus, work_unit_fingerprint
+from portal._runner.models import ExactSubject, FrontierStatus
+from portal._runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
+from portal._runner.recursive_state import SqliteRecursiveWorkStore
+from portal._runner.propagate import derive_invalidations
+from portal._runner.registry import load_dependencies, load_observations, load_project_snapshot
+from portal._runner.work_units import WorkUnitStatus, work_unit_fingerprint
 
 
 ROOT = Path(__file__).resolve().parents[1]

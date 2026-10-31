@@ -14,9 +14,9 @@ from portal.ecosystem_runtime import (
 )
 from portal.models import ExecutionNode
 from portal.worker_backend import ProcessWorkerSpec
-from runner.models import ProjectDefinition
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.models import ProjectDefinition
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 ROOT = Path(__file__).resolve().parents[2]

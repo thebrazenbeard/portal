@@ -6,17 +6,17 @@ import os
 from pathlib import Path
 import tempfile
 
-from runner.dedup import frontier_fingerprint
-from runner.github_backend import GitHubRestTransport
-from runner.models import Frontier, Observation, ProjectDefinition
-from runner.portfolio import SqlitePortfolioStore
-from runner.reference_worker import (
+from portal._runner.dedup import frontier_fingerprint
+from portal._runner.github_backend import GitHubRestTransport
+from portal._runner.models import Frontier, Observation, ProjectDefinition
+from portal._runner.portfolio import SqlitePortfolioStore
+from portal._runner.reference_worker import (
     REFERENCE_WORKER_ID,
     REFERENCE_WORKER_ROUTE,
     run_reference_read_worker_once,
 )
-from runner.registry import load_worker_snapshot
-from runner.worker_routing import (
+from portal._runner.registry import load_worker_snapshot
+from portal._runner.worker_routing import (
     SqliteWorkerRouteStore,
     resolve_read_only_worker_route,
 )

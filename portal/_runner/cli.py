@@ -87,7 +87,7 @@ from .verify import verify_attempt
 from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _project_registry_path() -> Path:

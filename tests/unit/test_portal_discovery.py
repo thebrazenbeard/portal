@@ -10,8 +10,8 @@ from portal.discovery import (
     build_live_project_registry,
     write_project_registry,
 )
-from runner.models import ProjectDefinition
-from runner.registry import load_project_snapshot
+from portal._runner.models import ProjectDefinition
+from portal._runner.registry import load_project_snapshot
 
 
 def _repo(

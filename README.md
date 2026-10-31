@@ -105,12 +105,12 @@ environment before launch**:
 
 Because the socket and HMAC audience are both bound to `127.0.0.1`, the
 resident PORTAL process and Rezon gateway **must run on the same host**. For
-VN2's observed Rezon port, an operator can use the explicit, read-only
-preflight on VN2 after privately configuring the observer environment:
+a configured same-host Rezon port, an operator can use the explicit,
+read-only preflight after privately configuring the observer environment:
 
 ```bash
 python -m scripts.qualify_rezon_colocation \
-  --episode "$PORTAL_REZON_EPISODE_ID" --port 18765
+  --episode "$PORTAL_REZON_EPISODE_ID" --port "${PORTAL_REZON_PORT:-8765}"
 ```
 
 Exit `0` means one existing complete episode passed the source client's
@@ -120,7 +120,7 @@ installed PORTAL service, permanent observer enrollment, cross-host network
 access, model identity, or protected-effect authority. An incomplete or absent
 episode is an expected HOLD, not a reason to relax the gate. Co-location is a
 deliberate security constraint: do not expose this adapter on the LAN merely
-to connect PORTAL on Lappy or VN1 to VN2.
+to connect separate workstations.
 
 A caller must *also* send `desktop_cognize` with
 `required_capabilities: ["rezon_collective_advisory"]`, `task` equal to that
@@ -142,7 +142,7 @@ Do not use a shared installation root. On Windows, Python mode bits are not an
 NTFS ACL guarantee: verify a dedicated owner-only runtime-root ACL before
 installing or starting the host, as instructed below. This source route is
 **not** installed or automatically tested
-on Lappy/VN1 by a repository merge, nor does the default staged installer
+on any workstation by a repository merge, nor does the default staged installer
 certify an operational Rezon service.
 
 The resident host's opt-in numeric-loopback HTTP discovery and inference
@@ -166,7 +166,7 @@ python -m pytest -q tests/integration/test_portal_vera_local_smoke.py
 
 The test skips when the source root is unspecified and fails if it imports a
 different Vera Mono checkout. It uses temporary state and no real Ollama,
-Lappy install, provider credentials, training, canonical-memory writes or
+workstation installation, provider credentials, training, canonical-memory writes or
 protected effects. Reopening objects in one test process is not a qualification
 of a physical process restart or of the complete four-component host.
 
@@ -176,7 +176,7 @@ against public Vera Mono source pinned to exact commit
 persisted credentials; the job verifies the external HEAD before installation
 and runs only the bounded synthetic smoke. A future Vera Mono source update
 requires an explicit new pin, test and review. This is GitHub-hosted source
-qualification, not evidence that the local Lappy deployment is installed.
+qualification, not evidence that any workstation deployment is installed.
 
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
@@ -362,7 +362,7 @@ The desktop/runtime path preserves the same evidence rules as the portfolio coor
 
 ## Internal-first donor policy
 
-Before implementing new orchestration machinery, Portal mines Patrick-owned repositories for existing qualified mechanisms. External projects are secondary research inputs.
+Before implementing new orchestration machinery, Portal examines its own project repositories for existing qualified mechanisms. External projects are secondary research inputs.
 
 See [Loop Donor Mining V1](docs/research/PORTAL_LOOP_DONOR_MINING_V1.md).
 
@@ -371,18 +371,24 @@ Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB B
 ## Quick start
 
     python -m pip install -e '.[dev]'
-    project-runner validate
+    portal --help
     python -m pytest -q
 
-Create a node manifest:
+Installing Portal provides the `portal` (and optional `portal-desktop`)
+entry point, not the standalone `project-runner` CLI. Install
+[`project-runner`](https://github.com/thebrazenbeard/project-runner)
+separately if you need that product's commands; the two distributions have
+distinct Python package ownership.
+
+Create a node manifest and save it as `nodes.example.yaml`:
 
     schema: PORTAL_EXECUTION_NODES_V1
     nodes:
-      - id: lappy
+      - id: node-a
         max_parallel: 2
         allowed_lanes: []
         enabled: true
-      - id: worklaptop
+      - id: node-b
         max_parallel: 2
         allowed_lanes: []
         enabled: true
@@ -391,10 +397,10 @@ Run a durable portfolio command session (the occupied-node values are a current 
 
     portal run \
       --session-id portfolio \
-      --nodes tests/fixtures/portal-nodes-valid.yaml \
+      --nodes nodes.example.yaml \
       --max-parallel 8 \
-      --occupied-node lappy=54 \
-      --occupied-node worklaptop=0
+      --occupied-node node-a=54 \
+      --occupied-node node-b=0
 
 That form performs durable admission/reconciliation/refill but does not invent an execution route. To enable the built-in advisory process-proposal adapter, supply an explicit worker-backend manifest:
 

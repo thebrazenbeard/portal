@@ -1,5 +1,5 @@
-from runner.collisions import partition_collision_groups
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.collisions import partition_collision_groups
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
 
 
 def _frontier(id, collision_keys):

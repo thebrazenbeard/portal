@@ -10,7 +10,7 @@ from .dedup import frontier_fingerprint
 from .models import Frontier, FrontierStatus
 
 
-_DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[1] / "policy" / "scheduling.yaml"
+_DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[2] / "policy" / "scheduling.yaml"
 
 
 @dataclass(frozen=True)

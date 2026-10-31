@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "project-runner"
-version = "0.1.0"
-description = "PORTAL portfolio coordination built on the governed Project Runner execution kernel"
+name = "portal-coordinator"
+version = "0.2.0"
+description = "PORTAL portfolio coordination with its privately namespaced execution kernel"
 requires-python = ">=3.12"
 dependencies = [
   "PyYAML>=6,<7",
@@ -13,7 +13,6 @@ dependencies = [
 ]
 
 [project.scripts]
-project-runner = "runner.cli:entrypoint"
 portal = "portal.cli:entrypoint"
 portal-desktop = "portal.desktop_app:main"
 
@@ -24,7 +23,7 @@ dev = ["pytest>=8,<10"]
 testpaths = ["tests"]
 
 [tool.setuptools]
-packages = ["runner", "portal"]
+packages = ["portal", "portal._runner"]
 
 [tool.setuptools.package-data]
 portal = ["assets/*.png"]

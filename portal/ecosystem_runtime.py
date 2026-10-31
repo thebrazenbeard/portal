@@ -8,9 +8,9 @@ import sqlite3
 import time
 from typing import Callable, Mapping
 
-from runner.github_backend import GitHubTransport
-from runner.portfolio_advancement import load_advancement_wave
-from runner.portfolio_wave_scheduler import (
+from portal._runner.github_backend import GitHubTransport
+from portal._runner.portfolio_advancement import load_advancement_wave
+from portal._runner.portfolio_wave_scheduler import (
     WaveExecutionBudget,
     collision_keys,
 )

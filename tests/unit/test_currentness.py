@@ -1,5 +1,5 @@
-from runner.currentness import subject_changed
-from runner.models import EvidenceClass, ExactSubject, Observation
+from portal._runner.currentness import subject_changed
+from portal._runner.models import EvidenceClass, ExactSubject, Observation
 
 
 def observation(commit: str) -> Observation:

@@ -4,8 +4,8 @@ import pytest
 
 from portal.coordinator import plan_portal_wave
 from portal.models import ExecutionNode
-from runner.portfolio_advancement import AdvancementItem, AdvancementWave
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.portfolio_advancement import AdvancementItem, AdvancementWave
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 def _item(

@@ -21,7 +21,8 @@ def test_portal_identity_and_bootstrap_provenance_are_explicit() -> None:
     assert "# PORTAL" in readme
     assert EXPANSION in readme
     assert EXPANSION in portal_doc
-    assert "Project Runner remains the governed execution substrate" in portal_doc
+    assert "privately namespaced" in portal_doc
+    assert "portal._runner" in portal_doc
     assert "does not grant execution authority" in portal_doc
 
     assert bootstrap["name"] == "PORTAL"
@@ -82,9 +83,10 @@ def test_whole_portfolio_host_interface_mission_is_architectural() -> None:
     )
 
 
-def test_both_portal_and_project_runner_clis_remain_packaged() -> None:
+def test_portal_owns_only_its_cli_and_does_not_shadow_project_runner() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = config["project"]["scripts"]
 
     assert scripts["portal"] == "portal.cli:entrypoint"
-    assert scripts["project-runner"] == "runner.cli:entrypoint"
+    assert "project-runner" not in scripts
+    assert scripts["portal-desktop"] == "portal.desktop_app:main"

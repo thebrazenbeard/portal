@@ -1,18 +1,18 @@
 import hashlib
 from pathlib import Path
 
-from runner.dispatch import DispatchAttempt
-from runner.github_backend import (
+from portal._runner.dispatch import DispatchAttempt
+from portal._runner.github_backend import (
     GitHubBackend,
     GitHubFileState,
     GitHubOperation,
     TargetAuthorityGrant,
 )
-from runner.leases import Lease
-from runner.m6_github import verify_github_mutation_attempt
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
-from runner.persistent_state import SqliteLeaseStore
-from runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from portal._runner.leases import Lease
+from portal._runner.m6_github import verify_github_mutation_attempt
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.persistent_state import SqliteLeaseStore
+from portal._runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 REPOSITORY = "thebrazenbeard/project-runner"
@@ -473,7 +473,7 @@ def test_mutation_transport_failure_stays_outcome_unknown(tmp_path: Path):
         ttl=60.0,
     )
     assert lease is not None
-    from runner.backends import BackendResult
+    from portal._runner.backends import BackendResult
 
     result = BackendResult(
         work_fingerprint=work_unit_fingerprint(work),
@@ -522,7 +522,7 @@ def test_mutation_precondition_drift_is_superseded(tmp_path: Path):
     )
     assert lease is not None
 
-    from runner.backends import BackendResult
+    from portal._runner.backends import BackendResult
 
     result = BackendResult(
         work_fingerprint=work_unit_fingerprint(work),

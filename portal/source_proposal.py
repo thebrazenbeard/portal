@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-from runner.promoted_github_tree import GitHubSourceTreeFile
+from portal._runner.promoted_github_tree import GitHubSourceTreeFile
 
 
 @dataclass(frozen=True)

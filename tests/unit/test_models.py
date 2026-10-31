@@ -1,4 +1,4 @@
-from runner.models import WorkerDefinition, WorkerLifecycle
+from portal._runner.models import WorkerDefinition, WorkerLifecycle
 
 
 def test_worker_locator_defaults_to_registered_only():

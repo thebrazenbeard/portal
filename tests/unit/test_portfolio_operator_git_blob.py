@@ -1,6 +1,6 @@
 ﻿import subprocess
 
-from runner.portfolio_operator_bridge import _git_blob_sha_for_path
+from portal._runner.portfolio_operator_bridge import _git_blob_sha_for_path
 
 
 def _run(repo, *args):

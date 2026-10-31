@@ -1,11 +1,11 @@
 from dataclasses import replace
 from pathlib import Path
 
-from runner.cli import main
-from runner.portfolio_advancement import load_advancement_wave
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_operator_binding import bind_wave_to_operator_registry
-from runner.registry import ProjectRegistrySnapshot, load_project_snapshot
+from portal._runner.cli import main
+from portal._runner.portfolio_advancement import load_advancement_wave
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_operator_binding import bind_wave_to_operator_registry
+from portal._runner.registry import ProjectRegistrySnapshot, load_project_snapshot
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -1,4 +1,4 @@
-from runner.capabilities import narrow_capabilities
+from portal._runner.capabilities import narrow_capabilities
 
 
 def test_child_capabilities_are_intersection_only():

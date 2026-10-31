@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from runner.backends import BackendResult
-from runner.budgets import BudgetEnvelope
-from runner.durable_dispatch import SqliteDispatchAdmissionStore
-from runner.models import ExactSubject
-from runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
-from runner.recovery import (
+from portal._runner.backends import BackendResult
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+from portal._runner.models import ExactSubject
+from portal._runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
+from portal._runner.recovery import (
     RecoveryAction,
     load_recovery_snapshots,
     reverify_recovery_snapshot,
 )
-from runner.recursive_state import SqliteRecursiveWorkStore
-from runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from portal._runner.recursive_state import SqliteRecursiveWorkStore
+from portal._runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 def _seed_attempt(db: Path):

@@ -1,6 +1,6 @@
 import pytest
 
-from runner.models import EvidenceClass, ExactSubject, Observation
+from portal._runner.models import EvidenceClass, ExactSubject, Observation
 
 
 def test_exact_subject_identity_changes_with_commit():
@@ -40,7 +40,7 @@ def test_observation_parses_authoritative_exact_subject():
 
 
 def test_observation_schema_accepts_exact_subject_document():
-    from runner.schema import validate_document
+    from portal._runner.schema import validate_document
 
     validate_document("observation", {
         "observations": [{

@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
-from runner.leases import InMemoryLeaseStore
+from portal._runner.leases import InMemoryLeaseStore
 
 
 def test_two_simultaneous_claims_yield_one_owner():

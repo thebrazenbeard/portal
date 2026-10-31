@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from runner.portfolio_wave_scheduler import WaveAdmissionPlan
+    from portal._runner.portfolio_wave_scheduler import WaveAdmissionPlan
 
 
 @dataclass(frozen=True)

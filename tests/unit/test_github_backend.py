@@ -1,13 +1,13 @@
 import hashlib
 
-from runner.github_backend import (
+from portal._runner.github_backend import (
     GitHubBackend,
     GitHubFileState,
     GitHubOperation,
     TargetAuthorityGrant,
 )
-from runner.models import ExactSubject
-from runner.work_units import WorkUnit, WorkUnitStatus
+from portal._runner.models import ExactSubject
+from portal._runner.work_units import WorkUnit, WorkUnitStatus
 
 
 class FakeGitHubTransport:

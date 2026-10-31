@@ -1,4 +1,4 @@
-from runner.models import (
+from portal._runner.models import (
     DependencyEdge,
     DependencyReaction,
     DependencySelector,
@@ -6,7 +6,7 @@ from runner.models import (
     ExactSubject,
     Observation,
 )
-from runner.propagate import derive_invalidations
+from portal._runner.propagate import derive_invalidations
 
 
 def obs(target: str, repository: str, commit: str, path: str | None = None) -> Observation:

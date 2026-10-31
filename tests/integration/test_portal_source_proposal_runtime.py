@@ -20,11 +20,11 @@ from portal.wave_runtime import (
 )
 from portal.worker_backend import ProcessWorkerSpec
 from portal.worker_runtime import run_wave_proposal_workers_once
-from runner.models import ProjectDefinition
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
-from runner.execution_promotion import sign_evidence
-from runner.promoted_github_tree import source_tree_write_request_sha256
+from portal._runner.models import ProjectDefinition
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.execution_promotion import sign_evidence
+from portal._runner.promoted_github_tree import source_tree_write_request_sha256
 from portal.wave_runtime import execute_portal_source_proposal, promote_portal_source_proposal
 
 

@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
 
 
 def _budget():

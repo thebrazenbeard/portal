@@ -7,8 +7,8 @@ import sqlite3
 import time
 from typing import Callable, Iterable, Mapping
 
-from runner.github_backend import GitHubTransport
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.github_backend import GitHubTransport
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 from .adapters import (
     PortalDispatchRecord,

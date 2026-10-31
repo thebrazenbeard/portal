@@ -10,17 +10,17 @@ import sys
 import time
 from typing import Mapping, Sequence
 
-from runner.execution_promotion import (
+from portal._runner.execution_promotion import (
     effect_authority_key_from_environment,
     execution_authority_key_from_environment,
     load_json_document,
     review_key_from_environment,
 )
-from runner.github_backend import GitHubRestTransport
-from runner.models import ProjectSchedulingState
-from runner.portfolio_advancement import load_advancement_wave
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
-from runner.registry import (
+from portal._runner.github_backend import GitHubRestTransport
+from portal._runner.models import ProjectSchedulingState
+from portal._runner.portfolio_advancement import load_advancement_wave
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.registry import (
     load_dependency_snapshot,
     load_project_snapshot,
     load_worker_snapshot,
