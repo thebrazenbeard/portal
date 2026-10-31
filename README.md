@@ -261,7 +261,8 @@ if ((git rev-parse HEAD).Trim() -ne $sourceHeads['portal']) {
 ```
 
 After reviewing those hashes and the source, select a **dedicated leaf**, for
-example `D:\VERA\PortalDesktop\desktop-1` (never `D:\VERA` itself). Create
+example `PortalDesktop\desktop-1` under the installing account's local app-data
+directory (never an existing application root or shared parent). Create
 an **empty, real (not symlinked/junction) leaf** and inspect its ACL **before**
 installing; verify the intended account controls it and untrusted users cannot
 read or write it. Check it again after
@@ -274,8 +275,11 @@ exact hashes still need independent inspection because pinning alone does not
 make upstream code trustworthy.
 
 ```powershell
-$runtimeRoot = 'D:\VERA\PortalDesktop\desktop-1'
-New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+$runtimeRoot = Join-Path $env:LOCALAPPDATA 'PortalDesktop\desktop-1'
+if (Test-Path -LiteralPath $runtimeRoot) {
+    throw 'Select a new, empty runtime leaf; do not reuse an existing path'
+}
+New-Item -ItemType Directory -Path $runtimeRoot | Out-Null
 icacls $runtimeRoot
 # Review the ACL output and stop if other users have access.
 py -3.12 -m portal.desktop_installer `
