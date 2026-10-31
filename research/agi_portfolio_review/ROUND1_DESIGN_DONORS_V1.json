@@ -1,0 +1,43 @@
+{
+  "schema": "VERA_AGI_DESIGN_DONOR_MODEL_REVIEW_V1",
+  "scope": "Two narrowly sliced docs, not full repository audit",
+  "donors": [
+    {
+      "repo": "thebrazenbeard/noema",
+      "exact_head": "6886594db65a26f873ba58436f34c3f1d4db7d01",
+      "path": "docs/working-design/ONLINE_LEARNING_STATE_TRANSITION_CONTRACT.md",
+      "git_blob": "a319ab8b58c8591063ecfd882f1c90d35dab9725",
+      "review_scope": "First 3100 characters only",
+      "reviewer": "Qwen3-4B on Lappy",
+      "first_round": {
+        "prompt_sha256": "6ba36bd2f6895d152ef2c1b94a8ce7abc1b51091601a591ec78a53ed761edc0e",
+        "response_sha256": "6e6bf9605826c849633f0eeba7fde73f92c776b510eb4b7172f8713fa115d9c2",
+        "claim": "Said working learner implemented; wrong: doc labels itself working design"
+      },
+      "second_round": {
+        "prompt_sha256": "737cd807f5726033c0ab2ebc53c72c30a29bf70225364cfa1b003e8757b443e5",
+        "response_sha256": "bdd019dd7e687d2d5b319ab132d03fc23efcc18fa480ff058fe156904dba90e2",
+        "result": "Retracted implementation claim; distinguished declared state transition contract from runtime observation"
+      },
+      "triage": "REUSE_PREQUENTIAL_CAUSAL_ORDER_CONTRACT_NOT_IMPL",
+      "claim_ceiling": "PARTIAL_DOCUMENT_ONLY"
+    },
+    {
+      "repo": "thebrazenbeard/driftguard",
+      "exact_head": "4b94e1f86827609a46c1c41178964c6996de7fcb",
+      "path": "docs/EVALUATOR_ATTESTATION_V1.md",
+      "git_blob": "e48919e9b393790355eab434a060feb1d0a4ad82",
+      "review_scope": "First 2350 characters only",
+      "reviewer": "Granite3.3 2B on VN2",
+      "first_round": {
+        "prompt_sha256": "2052ecb34c1b89898f7361c23c7708bd1b579c4a6ba0d722775d29ebcdab979e",
+        "raw_sha256": "49412e8c107b7e50da431286a6ac1d12a6867524eabf80f9ec55d4eb742f0f81",
+        "finding": "Correctly separated HMAC subject integrity from evaluator honesty/independence; further alleged unspecified manipulation of valid tag, not supported without compromised key"
+      },
+      "cross_review_status": "NOT_STARTED",
+      "triage": "ADAPT_ONLY_IF_SEPARATE_EVALUATOR_KEYS_BOUND_AND_AUTHORIZED",
+      "claim_ceiling": "PARTIAL_DESIGN_ONLY"
+    }
+  ],
+  "overall_limit": "No source test or selected QVR model inference established for these design docs; model agreement is not factual proof."
+}

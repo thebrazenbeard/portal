@@ -1,0 +1,99 @@
+{
+  "schema": "VERA_AGI_PORTFOLIO_CROSS_MODEL_REVIEW_V1",
+  "goal": "Measure Vera's causal self-learning and eventual ChatGPT-free operation, reusing exact existing donors rather than duplicating runtime.",
+  "review_target": {
+    "repo": "thebrazenbeard/vera-mono",
+    "head": "64c4a756a8c4d6fc791787de80303f7ee0f64869",
+    "path": "packages/vera_assurance/src/vera_assurance/evaluation_commitment.py",
+    "source_blob": "1f48099149b5e023f382846db03d0b378f100099",
+    "reviewed_scope": "compare_committed_predictions() only, not whole repository"
+  },
+  "round_1": [
+    {
+      "model": "qwen3:4b-instruct",
+      "host": "Lappy",
+      "model_identity": "Ollama manifest digest 0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0",
+      "prompt_sha256": "1310026daef3d43c0eeef80fa62f9b8ad394c4d263acd3943da00",
+      "response_sha256": "9067e91b28147fe1c486560dc15cfc62619301d5cc93291cb9b09f0c81fc9bbf",
+      "status": "COMPLETE",
+      "finding": "Alleged missing SHA-256 commitment validation and acceptance of duplicate candidate IDs",
+      "verification": "REFUTED_BY_SOURCE_AND_EXECUTABLE_TEST"
+    },
+    {
+      "model": "Granite-3.3-2B-Instruct-Q4_K_M",
+      "host": "VN2",
+      "model_identity": "weights sha256 555b91485955bc96eb445b57dd4bbf8809aa7d8cce7c313f4f8bc5b2340896b4",
+      "prompt_sha256": "32cf948a0ca3cf72bd48977dbee901a6bb65c69df74a02c9a741ff2f4edfee14",
+      "raw_sha256": "063650d8b05652243a81a7c17f53f94caaca299ef4a347dbf75b7d62702fbc5c",
+      "status": "COMPLETE",
+      "finding": "Proposed wrong-type comparison should raise TypeError",
+      "verification": "ALREADY_HANDLED_BY_SOURCE_AND_EXECUTABLE_TEST"
+    },
+    {
+      "model": "SmolLM2-1.7B-Instruct-Q4_K_M",
+      "host": "VN2",
+      "model_identity": "weights sha256 fab954d296aa25885960ed771a005343c220ac93ef78a53454e667e334935fe9",
+      "prompt_sha256": "6360ed04e2b8482d6ef4052c7a51f3856da9518b1440f5d087828e093cc9b3a0",
+      "raw_sha256": "2b549cd54a130b9635c91a03b216328932facd37bce98b98ac1548df79c35d1d",
+      "status": "COMPLETE",
+      "finding": "Summarized actual type/step/ID/commitment guards but provided no falsifying weakness",
+      "verification": "SOURCE_CONSISTENT_BUT_NO_SUBSTANTIVE_FALSIFIER"
+    }
+  ],
+  "round_2": [
+    {
+      "model": "qwen3:4b-instruct",
+      "host": "Lappy",
+      "status": "COMPLETE",
+      "prompt_sha256": "c64f11bfb29b8655e388cd09b530478a70f8a913e813afacf0b91bb72069c109",
+      "response_sha256": "a3f166a8b511f0f8852e13d15127971d7d372cbb7251229129987bc557550c3d",
+      "finding": "Explicitly retracted both original allegations after source/host tests. Step coherence still relevant; the function already enforces same-step comparisons."
+    },
+    {
+      "model": "Granite-3.3-2B-Instruct-Q4_K_M",
+      "host": "VN2",
+      "status": "BLOCKED_BY_HOST_SAFETY",
+      "finding": null
+    },
+    {
+      "model": "SmolLM2-1.7B-Instruct-Q4_K_M",
+      "host": "VN2",
+      "status": "NOT_STARTED",
+      "finding": null
+    }
+  ],
+  "host_verification": {
+    "executor": "Lappy physical Windows Python 3.12",
+    "source_blob": "1f48099149b5e023f382846db03d0b378f100099",
+    "tests": {
+      "passed": 5,
+      "total": 5,
+      "negative": [
+        "reject duplicate candidate IDs",
+        "reject tampered commitment digest",
+        "reject mismatched step",
+        "reject wrong object type"
+      ],
+      "positive": [
+        "allow valid distinct comparison with authorization_effect NONE"
+      ]
+    },
+    "limitations": "Same-author source-level tests; do not prove evaluator custody, actual QVR consumption, behavior, AGI or independent review."
+  },
+  "cross_communication": {
+    "channel": "Private Chat Communication Bus #387",
+    "first_round_comment_id": 6353740377,
+    "step": "Model opinions shared only after each first-round receipt existed; follow-up challenges compare to code and real tests, no consensus-to-truth promotion."
+  },
+  "triage": {
+    "decision": "REUSE",
+    "reason": "Pre-outcome commitment/condition matching already exists. It does not score outcomes or perform learning, so build on it rather than duplicate it.",
+    "next_falsifier": "Selected QVR must issue a pre-outcome commitment before evaluator scoring and prove trained vs frozen method transfer with no hidden label access."
+  },
+  "claim_ceiling": "SINGLE_FUNCTION_SOURCE_REVIEW_AND_TEST_ONLY_NOT_WHOLE_REPO_REVIEW",
+  "portfolio_coverage": {
+    "inventoried": 100,
+    "source_read_in_this_record": 1,
+    "all_repos_reviewed": false
+  }
+}

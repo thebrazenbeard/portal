@@ -1,0 +1,90 @@
+{
+  "schema": "VERA_AGI_PORTFOLIO_MODEL_REVIEW_V1",
+  "date_utc": "2026-10-23",
+  "repo": "thebrazenbeard/deepmemorystorage",
+  "exact_head": "efae5c6c522edc48e55c002e20f73733063d435",
+  "source": {
+    "path": "tools/query_deep_memory.py",
+    "git_blob": "55fca5ca32d6fab436dc2a6e9b00dea97f46e5f0",
+    "first_round_cut": "lines 126-174 (partial function-boundary excerpt)",
+    "tested_extract": "_overlay_privacy_scope, _visible_overlay_rows, _visible_effective_canonicity extracted from lines 109-165; helper dependencies stubbed",
+    "tested_extract_sha256": "d8669330b49ba5b530679404cbd14b332069cd78506e1a5e1a3a7fc1a84816c7"
+  },
+  "protocol": "research/agi_portfolio_review/PROTOCOL.md",
+  "round1": {
+    "blind_before_cross_challenge": true,
+    "same_prompt_sha256": "6e69f5e25304ea45275f599740fa6a79609603d8bcaaaf9b74e1456bc53c6a6e",
+    "same_source_cut": true,
+    "reviews": [
+      {
+        "model": "qwen3:4b-instruct",
+        "host": "Lappy",
+        "route": "local Ollama CLI",
+        "live_ollama_list_id_prefix": "0edcdef34593",
+        "prior_manifest_digest": "0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0",
+        "status": "COMPLETE_SCOPED",
+        "exit_code": 0,
+        "raw_stdout_sha256": "481543b5f7dc955ac60918c235522f9d0310afd3c140d6199982bbde668e0818",
+        "raw_stdout": "NO_FINDING\n\n",
+        "finding": "No concrete falsifiable flaw alleged in supplied cut.",
+        "limitations": "No whole-repo source, tests, QVR invocation or evaluator custody in this model response."
+      },
+      {
+        "model": "Granite-3.3-2B-Instruct-Q4_K_M",
+        "host": "VN2",
+        "route": "isolated CPU llama.cpp b11827 llama-cli --single-turn --simple-io",
+        "prior_weights_sha256": "555b91485955bc96eb445b57dd4bbf8809aa7d8cce7c313f4f8bc5b2340896b4",
+        "status": "COMPLETE_SCOPED_OUTPUT_TOKEN_CAPPED",
+        "exit_code": 0,
+        "raw_stdout_sha256": "34cf73acf48c16dc1a5bece13773320b052f34f6b2c22a47a7f2fc1b314c87f9",
+        "model_answer_excerpt": "NO_FINDING. The supplied snippet appears to filter corrections by authorized privacy; no concrete flaw alleged. Generation cut off mid-sentence at 150-token cap.",
+        "raw_stdout_contains": "llama.cpp startup banner, echoed prompt, model answer, timing footer",
+        "limitations": "Source excerpt only; response truncated by token cap; host/model family differs from Qwen, but not an independent truth custodian."
+      }
+    ],
+    "failed_attempts": [
+      {
+        "model": "Granite-3.3-2B",
+        "host": "VN2",
+        "status": "FAILED_TIMEOUT",
+        "attempts": 2,
+        "reason": "llama-cli without --single-turn timed out at 190 seconds each; not counted as reviews; corrected invocation flags for successful retry"
+      },
+      {
+        "model": "Ministral-3:14b",
+        "host": "Lappy",
+        "status": "FAILED_TIMEOUT",
+        "attempts": 1,
+        "reason": "ollama run timed out after 140 seconds; no completed review receipt"
+      }
+    ]
+  },
+  "source_tests": {
+    "kind": "ISOLATED_EXTRACTED_SOURCE_WITH_STUBBED_DEPENDENCIES",
+    "host": "Lappy",
+    "passed": 5,
+    "total": 5,
+    "cases": [
+      "restricted overlay excluded",
+      "restricted correction does not change visible canonicity",
+      "authorized correction changes visible canonicity",
+      "missing scope fails closed",
+      "explicit audit mode includes otherwise restricted overlay"
+    ],
+    "limitations": "Tests directly execute exact extracted functions but stub dependency helpers, do not load full ledger, and do not establish end-to-end privacy or runtime qualification."
+  },
+  "adjudication": {
+    "material_model_allegations": 0,
+    "source_falsifiers_exercised": 5,
+    "cross_challenge": "NOT_STARTED_NO_ALLEGATION",
+    "triage": "UNRESOLVED_FOR_AGI_DONOR",
+    "reason": "Evidence retrieval and privacy filtering are relevant; this cut shows no behavior-changing learner, causal credit assignment or guarded skill update."
+  },
+  "coverage": {
+    "repo_whole_review_complete": false,
+    "all_100_repos_reviewed": false,
+    "portfolio_repos_with_partial_source_evidence_after_record": 4,
+    "whole_repos_qualified": 0
+  },
+  "protected_effects": "NONE; no merge, runtime/provider/credential/trust/canonical memory changes"
+}
