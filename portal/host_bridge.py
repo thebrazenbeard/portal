@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import time
-from typing import Callable, Iterable, Mapping, TYPE_CHECKING
+from typing import Callable, Iterable, Mapping, Protocol, TYPE_CHECKING
 
 from .adapters import (
     PortalDispatchRecord,
@@ -89,6 +89,27 @@ _ALLOWED_RECONCILIATION_STATES = frozenset(
 _FINAL_RECONCILIATION_STATES = frozenset(
     {"VERIFIED_COMPLETE", "VERIFIED_HELD"}
 )
+_HOST_MONOTONIC_SCHEMA = """
+CREATE TABLE IF NOT EXISTS portal_host_monotonic_checkpoint (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    epoch INTEGER NOT NULL CHECK (epoch >= 0),
+    state_root TEXT NOT NULL,
+    scope TEXT NOT NULL
+);
+"""
+
+
+class HostDispatchMonotonicAnchor(Protocol):
+    """Separately authenticated, nonrollbackable host-owned state CAS.
+
+    The in-process protocol cannot itself establish that the implementation
+    actually meets those properties. Tests may inject a cloneable fake.
+    """
+
+    def current(self, scope: str) -> tuple[int, str] | None: ...
+
+    def compare_advance(self, scope: str, epoch: int,
+                        prior_root: str, next_root: str) -> bool: ...
 
 
 def _required(value: str, label: str) -> str:
@@ -110,7 +131,26 @@ class PortalHostBridgeStore:
     silently turn an ambiguous effect into a retry on another route.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *,
+                 monotonic_anchor: HostDispatchMonotonicAnchor | None = None,
+                 monotonic_scope: str | None = None) -> None:
+        if (monotonic_anchor is None) != (monotonic_scope is None):
+            raise ValueError("monotonic anchor and scope must be configured together")
+        if monotonic_scope is not None and (
+            not isinstance(monotonic_scope, str)
+            or not 1 <= len(monotonic_scope) <= 128
+            or any(not (char.isascii() and (char.isalnum() or char in "_.:-"))
+                   for char in monotonic_scope)
+        ):
+            raise ValueError("invalid host monotonic scope")
+        if monotonic_anchor is not None and (
+            not callable(getattr(monotonic_anchor, "current", None))
+            or not callable(getattr(monotonic_anchor, "compare_advance", None))
+        ):
+            raise TypeError("host monotonic CAS protocol required")
+        self._monotonic_anchor = monotonic_anchor
+        self._monotonic_scope = monotonic_scope
+        self._pending_anchor_state: tuple[int, str] | None = None
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(
@@ -120,7 +160,125 @@ class PortalHostBridgeStore:
         )
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA journal_mode=WAL")
+        # Once a database has been enrolled in host-monotonic custody, a
+        # legacy unanchored reader must not silently bypass that checkpoint.
+        # A *pre-enrollment* database snapshot still requires an external
+        # effect gate: SQLite alone cannot detect its own restoration.
+        if self._monotonic_anchor is None and self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='portal_host_monotonic_checkpoint'"
+        ).fetchone() is not None:
+            self.connection.close()
+            raise PermissionError("host-monotonic database requires an anchor")
         self.connection.executescript(_HOST_SCHEMA)
+        if self._monotonic_anchor is not None:
+            self.connection.executescript(_HOST_MONOTONIC_SCHEMA)
+
+    def _state_root(self) -> str:
+        """Canonical commitment to ALL route, occupancy and dispatch rows.
+
+        Root covers complete persisted authority membership, not merely the
+        monotonic counter. Deletion, insertion, or mutation invalidates it.
+        """
+        tables = (
+            ("portal_host_routes", "adapter_id,route_id,node_id,target_kind,target_id"),
+            ("portal_host_node_occupancy", "node_id"),
+            ("portal_host_dispatches", "dispatch_id"),
+        )
+        state = {
+            table: [dict(row) for row in self.connection.execute(
+                f"SELECT * FROM {table} ORDER BY {order}"
+            )]
+            for table, order in tables
+        }
+        return hashlib.sha256(_canonical_json({
+            "schema": "PORTAL_HOST_STATE_V1", "tables": state,
+        }).encode("utf-8")).hexdigest()
+
+    def _external_current(self) -> tuple[int, str] | None:
+        assert self._monotonic_anchor is not None
+        assert self._monotonic_scope is not None
+        try:
+            return self._monotonic_anchor.current(self._monotonic_scope)
+        except Exception:
+            raise PermissionError("host monotonic authority unavailable") from None
+
+    def provision_host_checkpoint(self) -> None:
+        """Host provisioning only; runtime never silently bootstraps authority.
+
+        The host MUST independently provision exactly (0, initial state root)
+        and own the scope/key. A caller-controllable fake cannot prove this.
+        """
+        if self._monotonic_anchor is None:
+            raise PermissionError("host monotonic authority is not configured")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                "SELECT 1 FROM portal_host_monotonic_checkpoint WHERE id=1"
+            ).fetchone()
+            root = self._state_root()
+            if row is not None or self._external_current() != (0, root):
+                raise PermissionError("host checkpoint cannot be provisioned")
+            self.connection.execute(
+                "INSERT INTO portal_host_monotonic_checkpoint (id,epoch,state_root,scope) "
+                "VALUES (1,0,?,?)", (root, self._monotonic_scope)
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def _check_host_checkpoint(self) -> tuple[int, str] | None:
+        if self._monotonic_anchor is None:
+            return None
+        row = self.connection.execute(
+            "SELECT epoch,state_root,scope FROM portal_host_monotonic_checkpoint WHERE id=1"
+        ).fetchone()
+        if (row is None or type(row[0]) is not int or row[0] < 0
+            or not isinstance(row[1], str) or len(row[1]) != 64
+            or row[2] != self._monotonic_scope
+            or self._state_root() != row[1]
+            or self._external_current() != (row[0], row[1])):
+            raise PermissionError("host monotonic checkpoint mismatch")
+        return int(row[0]), str(row[1])
+
+    def _begin_checked(self) -> None:
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._pending_anchor_state = self._check_host_checkpoint()
+        except BaseException:
+            self.connection.rollback()
+            self._pending_anchor_state = None
+            raise
+
+    def _commit_checked(self) -> None:
+        prior = self._pending_anchor_state
+        if prior is not None:
+            epoch, old_root = prior
+            row = self.connection.execute(
+                "SELECT epoch,state_root,scope FROM portal_host_monotonic_checkpoint WHERE id=1"
+            ).fetchone()
+            if (row is None or (row[0], row[1]) != prior
+                or row[2] != self._monotonic_scope
+                or self._external_current() != prior):
+                raise PermissionError("host monotonic checkpoint changed")
+            new_root = self._state_root()
+            if new_root != old_root:
+                assert self._monotonic_anchor is not None
+                assert self._monotonic_scope is not None
+                try:
+                    advanced = self._monotonic_anchor.compare_advance(
+                        self._monotonic_scope, epoch, old_root, new_root)
+                except Exception:
+                    raise PermissionError("host monotonic CAS unavailable") from None
+                if advanced is not True:
+                    raise PermissionError("host monotonic CAS rejected")
+                self.connection.execute(
+                    "UPDATE portal_host_monotonic_checkpoint SET epoch=?,state_root=? "
+                    "WHERE id=1", (epoch + 1, new_root)
+                )
+        self.connection.commit()
+        self._pending_anchor_state = None
 
     def close(self) -> None:
         self.connection.close()
@@ -181,7 +339,7 @@ class PortalHostBridgeStore:
         observed = float(time.time() if observed_at is None else observed_at)
         expires = observed + float(ttl_seconds)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             for route, key in zip(route_tuple, keys, strict=True):
                 row = self.connection.execute(
@@ -249,7 +407,7 @@ class PortalHostBridgeStore:
                         expires,
                     ),
                 )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -325,7 +483,7 @@ class PortalHostBridgeStore:
         observed = float(time.time() if observed_at is None else observed_at)
         expires = observed + float(ttl_seconds)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             row = self.connection.execute(
                 """
@@ -345,7 +503,7 @@ class PortalHostBridgeStore:
                         raise ValueError(
                             "conflicting host occupancy observation"
                         )
-                    self.connection.commit()
+                    self._commit_checked()
                     return {
                         "node_id": node_id,
                         "occupied_slots": existing_slots,
@@ -365,7 +523,7 @@ class PortalHostBridgeStore:
                 """,
                 (node_id, occupied_slots, observed, expires),
             )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -414,7 +572,7 @@ class PortalHostBridgeStore:
         observed = float(time.time() if observed_at is None else observed_at)
         expires = observed + float(ttl_seconds)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             for route, key in zip(route_tuple, keys, strict=True):
                 row = self.connection.execute(
@@ -518,7 +676,7 @@ class PortalHostBridgeStore:
                     """,
                     (node_id, occupied_slots, observed, expires),
                 )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -591,7 +749,7 @@ class PortalHostBridgeStore:
         dispatch_id = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         now = float(time.time() if queued_at is None else queued_at)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             row = self.connection.execute(
                 """
@@ -642,7 +800,7 @@ class PortalHostBridgeStore:
                     raise ValueError(
                         "host dispatch already exists with different payload"
                     )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -885,7 +1043,7 @@ class PortalHostBridgeStore:
         clauses.append(f"adapter_id IN ({placeholders})")
         parameters.extend(normalized)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             rows = self.connection.execute(
                 """
@@ -908,7 +1066,7 @@ class PortalHostBridgeStore:
                 None,
             )
             if row is None:
-                self.connection.commit()
+                self._commit_checked()
                 return None
 
             dispatch_id = str(row["dispatch_id"])
@@ -934,7 +1092,7 @@ class PortalHostBridgeStore:
                 raise ValueError(
                     "host dispatch changed before attempt boundary"
                 )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -1005,7 +1163,7 @@ class PortalHostBridgeStore:
         evidence_id = _required(evidence_id, "dispatch evidence_id")
         now = float(time.time() if attempted_at is None else attempted_at)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             row = self.connection.execute(
                 """
@@ -1027,7 +1185,7 @@ class PortalHostBridgeStore:
                         "host dispatch already crossed effect boundary "
                         "with a different attempt"
                     )
-                self.connection.commit()
+                self._commit_checked()
                 return self.load_dispatch(dispatch_id)
             if state != "QUEUED":
                 raise ValueError("host dispatch cannot be attempted")
@@ -1051,7 +1209,7 @@ class PortalHostBridgeStore:
                 """,
                 (attempt_id, evidence_id, now, now, dispatch_id),
             )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
@@ -1072,7 +1230,7 @@ class PortalHostBridgeStore:
             raise ValueError("unsupported host reconciliation state")
         now = float(time.time() if reconciled_at is None else reconciled_at)
 
-        self.connection.execute("BEGIN IMMEDIATE")
+        self._begin_checked()
         try:
             row = self.connection.execute(
                 """
@@ -1100,7 +1258,7 @@ class PortalHostBridgeStore:
             )
             if existing_state in _FINAL_RECONCILIATION_STATES:
                 if existing_state == state and existing_evidence == evidence_id:
-                    self.connection.commit()
+                    self._commit_checked()
                     return self.load_dispatch(dispatch_id)
                 raise ValueError("host dispatch already has final reconciliation")
 
@@ -1123,7 +1281,7 @@ class PortalHostBridgeStore:
                 """,
                 (state, evidence_id, now, now, dispatch_id),
             )
-            self.connection.commit()
+            self._commit_checked()
         except BaseException:
             self.connection.rollback()
             raise
