@@ -114,7 +114,7 @@ Before any resumed dispatch, Portal must refresh:
 
 A prior plan or chat-local statement is not sufficient currentness evidence. Expiring host observations are usable only inside their own observation window: `observed_at <= now < expires_at`. A future-dated observation is not current yet.
 
-For external ChatGPT/plugin/workstation execution, the operational recovery procedure is [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md). A fresh host reads command-session state and `host unresolved` before new semantic attempts, refreshes occupancy and route advertisements, atomically takes only work whose bound route is still qualified at the effect boundary, verifies through the owning substrate, reconciles the exact dispatch, and only then refills.
+For external ChatGPT/plugin/workstation execution, the operational recovery procedure is [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md). A fresh host reads command-session state and `host unresolved` before new semantic attempts, refreshes occupancy and route advertisements, verifies the bound repository/ref exact head outside the database write lock, atomically takes only work whose bound route remains qualified, verifies through the owning substrate, reconciles the exact dispatch, and only then refills. Generic source-writing adapters must additionally pin or compare-and-swap the bound head at effect time; the pre-attempt read does not provide that atomicity.
 
 ## Donor-mining rule
 

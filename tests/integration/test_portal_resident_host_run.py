@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import portal.cli as portal_cli
 
 import portal.session as portal_session
 from portal.host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
@@ -9,6 +14,14 @@ from portal.models import ExecutionNode
 from portal.route_resolver import PortalRouteAdvertisement
 from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
 from runner.portfolio_wave_scheduler import WaveExecutionBudget
+
+
+@pytest.fixture(autouse=True)
+def _local_head_reader(monkeypatch):
+    monkeypatch.setattr(
+        portal_cli, "GitHubRestTransport",
+        lambda **_kwargs: SimpleNamespace(read_ref=lambda _r, _f: "a" * 40),
+    )
 
 
 def _packet(run_id: str, subject_id: str) -> PortalWavePacket:
@@ -65,7 +78,7 @@ def test_resident_between_cycle_hook_pumps_and_refills_with_zero_poll_delay(
     monkeypatch.setattr(portal_session, "prepare_portal_wave", fake_prepare)
 
     state_db = tmp_path / "portal.sqlite3"
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     for subject_id in ("alpha", "beta"):
         store.advertise_route(
             PortalRouteAdvertisement(
@@ -206,7 +219,7 @@ def test_cli_run_with_host_drivers_pumps_between_refill_generations(
     monkeypatch.setattr(
         portal_cli,
         "load_host_command_drivers",
-        lambda path: {"github": object()},
+        lambda path, **_kwargs: {"github": object()},
     )
     monkeypatch.setattr(portal_cli, "PortalHostPump", FakePump)
 
@@ -337,7 +350,7 @@ def test_cli_resident_run_refreshes_host_probes_before_generation_and_persists_s
     payload = json.loads(capsys.readouterr().out)
     assert payload["mode"] == "PORTAL_COMMAND_SESSION_RUN_V1"
 
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     routes = store.active_routes()
     store.close()
     assert [(item.adapter_id, item.authorized_effects) for item in routes] == [

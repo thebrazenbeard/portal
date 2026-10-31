@@ -4,6 +4,7 @@ from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import time
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
@@ -89,6 +90,11 @@ _ALLOWED_RECONCILIATION_STATES = frozenset(
 _FINAL_RECONCILIATION_STATES = frozenset(
     {"VERIFIED_COMPLETE", "VERIFIED_HELD"}
 )
+_EXACT_HEAD = re.compile(r"^[0-9a-f]{40}$")
+
+
+class PortalHostSourceHeadHeld(ValueError):
+    """A queued dispatch has no verified matching live source head."""
 
 
 def _required(value: str, label: str) -> str:
@@ -110,8 +116,14 @@ class PortalHostBridgeStore:
     silently turn an ambiguous effect into a retry on another route.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        head_reader: Callable[[str, str], str] | None = None,
+    ) -> None:
         self.path = Path(path)
+        self.head_reader = head_reader
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(
             self.path,
@@ -688,6 +700,42 @@ class PortalHostBridgeStore:
         )
         return payload
 
+    def _source_head_is_current(self, row: Mapping[str, object]) -> bool:
+        """Read source outside the write transaction; no reader means HOLD."""
+        repository = row["repository"]
+        ref = row["ref"]
+        expected = row["exact_head"]
+        if (
+            self.head_reader is None
+            or not isinstance(repository, str)
+            or not repository.strip()
+            or not isinstance(ref, str)
+            or not ref.strip()
+            or not isinstance(expected, str)
+            or _EXACT_HEAD.fullmatch(expected) is None
+        ):
+            return False
+        try:
+            observed = self.head_reader(repository, ref)
+        except Exception:
+            return False
+        return (
+            isinstance(observed, str)
+            and _EXACT_HEAD.fullmatch(observed) is not None
+            and observed == expected
+        )
+
+    @staticmethod
+    def _same_bound_dispatch(row: sqlite3.Row, prior: Mapping[str, object]) -> bool:
+        return all(
+            row[field] == prior[field]
+            for field in (
+                "dispatch_id", "session_id", "wave_run_id", "subject_kind",
+                "subject_id", "repository", "ref", "exact_head", "node_id",
+                "adapter_id", "route_id", "payload_json", "created_at",
+            )
+        )
+
     def _dispatch_route_is_currently_qualified(
         self,
         row: sqlite3.Row,
@@ -885,27 +933,49 @@ class PortalHostBridgeStore:
         clauses.append(f"adapter_id IN ({placeholders})")
         parameters.extend(normalized)
 
+        # GitHub reads must never occur while holding the SQLite write lock.
+        candidates = self.connection.execute(
+            "SELECT * FROM portal_host_dispatches WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY created_at, dispatch_id",
+            tuple(parameters),
+        ).fetchall()
+        eligible = tuple(
+            candidate for candidate in candidates
+            if self._dispatch_route_is_currently_qualified(candidate, now=now)
+        )
+        # Stop at the first source-current candidate: a large backlog must not
+        # incur one remote read per pending dispatch before a single take.
+        verified = next(
+            (
+                candidate for candidate in eligible
+                if self._source_head_is_current(candidate)
+            ),
+            None,
+        )
+        if verified is None:
+            if eligible:
+                raise PortalHostSourceHeadHeld(
+                    "host source head is not current or unavailable for take"
+                )
+            return None
+
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            rows = self.connection.execute(
-                """
-                SELECT *
-                FROM portal_host_dispatches
-                WHERE """ + " AND ".join(clauses) + """
-                ORDER BY created_at, dispatch_id
-                """,
-                tuple(parameters),
-            ).fetchall()
-            row = next(
-                (
-                    candidate
-                    for candidate in rows
-                    if self._dispatch_route_is_currently_qualified(
-                        candidate,
-                        now=now,
-                    )
-                ),
-                None,
+            final_now = float(time.time() if attempted_at is None else attempted_at)
+            current = self.connection.execute(
+                "SELECT * FROM portal_host_dispatches "
+                "WHERE dispatch_id = ? AND state = 'QUEUED'",
+                (verified["dispatch_id"],),
+            ).fetchone()
+            row = (
+                current
+                if current is not None
+                and self._same_bound_dispatch(current, verified)
+                and self._dispatch_route_is_currently_qualified(
+                    current, now=final_now,
+                )
+                else None
             )
             if row is None:
                 self.connection.commit()
@@ -925,8 +995,8 @@ class PortalHostBridgeStore:
                 (
                     attempt_id,
                     evidence_id,
-                    now,
-                    now,
+                    final_now,
+                    final_now,
                     dispatch_id,
                 ),
             )
@@ -1003,10 +1073,22 @@ class PortalHostBridgeStore:
         dispatch_id = _required(dispatch_id, "dispatch_id")
         attempt_id = _required(attempt_id, "attempt_id")
         evidence_id = _required(evidence_id, "dispatch evidence_id")
-        now = float(time.time() if attempted_at is None else attempted_at)
+        # An already-ATTEMPTED dispatch is recovered by exact replay below;
+        # rechecking a moved branch must not erase or replay its uncertain effect.
+        prior = self.connection.execute(
+            "SELECT * FROM portal_host_dispatches WHERE dispatch_id = ?",
+            (dispatch_id,),
+        ).fetchone()
+        if prior is None:
+            raise ValueError("host dispatch not found")
+        if str(prior["state"]) == "QUEUED" and not self._source_head_is_current(prior):
+            raise PortalHostSourceHeadHeld(
+                "host source head is not current or unavailable for attempt"
+            )
 
         self.connection.execute("BEGIN IMMEDIATE")
         try:
+            now = float(time.time() if attempted_at is None else attempted_at)
             row = self.connection.execute(
                 """
                 SELECT *
@@ -1031,6 +1113,8 @@ class PortalHostBridgeStore:
                 return self.load_dispatch(dispatch_id)
             if state != "QUEUED":
                 raise ValueError("host dispatch cannot be attempted")
+            if not self._same_bound_dispatch(row, prior):
+                raise ValueError("host dispatch binding changed before attempt")
             if not self._dispatch_route_is_currently_qualified(
                 row,
                 now=now,

@@ -11,7 +11,7 @@ from portal.wave_runtime import PortalWavePacket
 
 
 def _queue_attempted(state_db: Path) -> str:
-    store = PortalHostBridgeStore(state_db)
+    store = PortalHostBridgeStore(state_db, head_reader=lambda _r, _f: "a" * 40)
     store.advertise_route(
         PortalRouteAdvertisement(
             adapter_id="github",
