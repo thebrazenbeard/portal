@@ -2,19 +2,31 @@
 
 # PORTAL
 
-**Portfolio Orchestration & Repository Tracking Access Layer**
+**Reusable portfolio orchestration and host-adapter control plane**
 
-PORTAL is Vera's **whole-portfolio orchestration and host interface layer**. It coordinates bounded work across repositories, exposes a durable CLI/host bridge, and provides PORTAL Desktop as a local human interface to the resident Vera runtime.
+The project's original name expands to **Portfolio Orchestration & Repository Tracking Access Layer**. In its Vera-specific reference deployment, it was described as a **whole-portfolio orchestration and host interface layer**; that deployment is one consumer of the reusable coordinator, not a required workstation topology. ChatGPT can be one interaction surface, but it is not a runtime dependency.
 
-ChatGPT can be one interaction surface, but it is not a runtime dependency and is no longer the architectural center of PORTAL Vera acts as the cross-project coordinator; PORTAL discovers and schedules executable frontiers across active projects; the inherited Project Runner kernel claims, fences, routes, executes, verifies, and reconciles work; independent lanes run in parallel; and every freed lane can be refilled with the next eligible frontier.
+PORTAL is a Python library and CLI for coordinating bounded work across multiple repositories. It combines portfolio membership and scheduling, durable command-session state, currentness-aware host-route records, and an inherited Project Runner execution kernel. An embedding host can attach independently qualified workers, reviewers, or device adapters. A bundled desktop shell demonstrates one particular resident-runtime composition; it is **optional**, not a requirement for using the orchestration package.
 
-The original single-chat design remains a supported interaction pattern and historical architecture input; see [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
+PORTAL is **not** a model, an effect-authority issuer, or a proof that an external action completed. It can be embedded behind chat, CLI, desktop, or other interfaces without making ChatGPT a dependency.
+
+### Product surfaces
+
+| Interface | Source-backed purpose | Important boundary |
+| --- | --- | --- |
+| `portal plan` | Compute bounded, collision-aware waves from a manifest | Planning does not perform protected effects |
+| `portal run` / `continue` / `status` / `hold` / `stop` | Persist and reconcile command-session work | A recorded outcome is not independent proof of an external effect |
+| `portal host ...` | Advertise exact-target routes, atomically claim attempts, inspect unresolved work | Host-provided identity, capability, evidence and authority must be established outside mutable caller inputs |
+| `PortalHostPump` | Connect a host-owned driver to already-bound dispatches | The pump does not independently authenticate a driver's reported success |
+| `portal-desktop` | Optional local UI for the resident Vera example composition | A desktop window is not a model router or identity root |
+
+Independent worker lanes can be refilled after the owning substrate's result is reconciled, but parallelism never enlarges the host's permissions. The original single-chat design remains an optional integration pattern; see [Single-Chat Whole-Portfolio Architecture](docs/architecture/PORTAL_SINGLE_CHAT_WHOLE_PORTFOLIO_V1.md).
 
 ## Architecture
 
 - `runner/` is the inherited Project Runner execution engine: exact-subject identity, portfolio cycles, durable queues, budgets, leases, fencing, worker routing, receipts, reconciliation, supervised tasks, and completion verification.
 - `portal/` is the PORTAL portfolio composition layer: whole-portfolio coordination, durable command-session state, live-occupancy-aware node placement, and bounded continuous refill.
-- Vera owns cross-project coordination and collision/ownership arbitration.
+- The embedding host owns trusted cross-project ownership arbitration and protected-effect admission; PORTAL records scheduling and collision constraints without issuing authority.
 - Durable state lives outside any one UI or chat context so CLI, Desktop, chat, or another qualified host can reconstruct and resume the portfolio.
 - Node placement and schedulability do not create protected-effect authority.
 
@@ -22,9 +34,9 @@ PORTAL was seeded from Project Runner because the required execution loops large
 
 ## Current implementation state
 
-The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, independently reconcile owning-substrate evidence before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
+The current `portal/` package now implements the repository-level coordinator core, not just planning. It can discover live portfolio membership, build collision-safe parallel waves, account for already-active subjects and live occupied node slots, place new work only on remaining capacity, acquire exact-head Project Runner claims, persist `run / continue / hold / complete / status / stop` command-session state, reconcile owning-substrate evidence supplied by the trusted embedding host before freeing lanes, and refill newly available capacity across successive generations. The host bridge adds expiring route/occupancy/frontier currentness, durable bind-before-dispatch state, atomic attempt-boundary claiming, unresolved-effect recovery, and a reusable host pump for embedding external plugin/workstation drivers.
 
-The durable command session is the preferred operator/control surface for portfolio orchestration. PORTAL Desktop is the preferred local human interface to the resident Vera runtime. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
+The durable command session is the preferred operator/control surface for portfolio orchestration. The optional PORTAL Desktop shell is a local human interface for the bundled Vera runtime composition. Existing `wave` and `ecosystem` commands remain lower-level execution/proposal surfaces. Source mutation remains separately governed through Project Runner promotion/execution/reconciliation; scheduling does not manufacture effect authority.
 
 This source implementation does not by itself prove that a resident PORTAL process is installed, selected, or continuously running on any machine. Qualified execution adapters and their concrete host drivers still have to be live, attached, current, target-bound, technically capable and authorized for the exact work they perform. Host observations are active only during their own observation window (`observed_at <= now < expires_at`).
 
@@ -44,7 +56,7 @@ real-model behavior, or subjective experience. See [V0 boundary and missing
 runtime gates](docs/architecture/MODEL_NEUTRAL_CAPABILITY_GATE_V0.md).
 
 
-## PORTAL Desktop and resident Vera runtime
+## Optional PORTAL Desktop and resident Vera runtime integration
 
 The repository also contains the source for **PORTAL Desktop**, a thin human-facing shell for a host-composed Vera runtime. The desktop window is deliberately not the model router or identity root: it sends requests over the existing local IPC bridge to the resident host, which owns cognition routing, provenance, runtime state, and acceptance evidence.
 
@@ -78,7 +90,7 @@ discovery; the existing durable cognition ledger and Vera acceptance receipt
 do **not** persist that digest. Their model tag and evidence hashes must not be
 presented as durable model-weight provenance.
 
-### Optional Rezon Collective observer (source-only)
+### Optional Rezon Collective observer (source-only, co-located integration)
 
 The resident host can also expose one **existing, complete Rezon Collective
 episode** as a separate `rezon_collective_advisory` route. This is not a general
@@ -104,9 +116,8 @@ environment before launch**:
   IPv4 loopback only.
 
 Because the socket and HMAC audience are both bound to `127.0.0.1`, the
-resident PORTAL process and Rezon gateway **must run on the same host**. For
-VN2's observed Rezon port, an operator can use the explicit, read-only
-preflight on VN2 after privately configuring the observer environment:
+resident PORTAL process and Rezon gateway **must run on the same host**. For an independently selected loopback observer port, an operator can use the explicit, read-only
+preflight **on the same host as the observer** after privately configuring its environment:
 
 ```bash
 python -m scripts.qualify_rezon_colocation \
@@ -118,9 +129,7 @@ authenticated observer read; exit `2` means `HOLD`. Output never contains the
 observer token or synthesis content. **Even a PASS does not certify** an
 installed PORTAL service, permanent observer enrollment, cross-host network
 access, model identity, or protected-effect authority. An incomplete or absent
-episode is an expected HOLD, not a reason to relax the gate. Co-location is a
-deliberate security constraint: do not expose this adapter on the LAN merely
-to connect PORTAL on Lappy or VN1 to VN2.
+episode is an expected HOLD, not a reason to relax the gate. Co-location is a deliberate security constraint: do not expose this adapter on a network merely to connect PORTAL and Rezon processes running on separate hosts.
 
 A caller must *also* send `desktop_cognize` with
 `required_capabilities: ["rezon_collective_advisory"]`, `task` equal to that
@@ -140,10 +149,7 @@ runtime-root and ancestor directory chain; they do not authenticate arbitrary
 ancestor symlinks or protect against another process running as the same user.
 Do not use a shared installation root. On Windows, Python mode bits are not an
 NTFS ACL guarantee: verify a dedicated owner-only runtime-root ACL before
-installing or starting the host, as instructed below. This source route is
-**not** installed or automatically tested
-on Lappy/VN1 by a repository merge, nor does the default staged installer
-certify an operational Rezon service.
+installing or starting the host, as instructed below. This source route is **not** installed or tested on any particular host by a repository merge, nor does the default staged installer certify an operational Rezon service.
 
 The resident host's opt-in numeric-loopback HTTP discovery and inference
 adapters use one monotonic deadline per connection across request, response
@@ -166,7 +172,7 @@ python -m pytest -q tests/integration/test_portal_vera_local_smoke.py
 
 The test skips when the source root is unspecified and fails if it imports a
 different Vera Mono checkout. It uses temporary state and no real Ollama,
-Lappy install, provider credentials, training, canonical-memory writes or
+a specific host installation, provider credentials, training, canonical-memory writes or
 protected effects. Reopening objects in one test process is not a qualification
 of a physical process restart or of the complete four-component host.
 
@@ -175,8 +181,7 @@ against public Vera Mono source pinned to exact commit
 `cc17139afd4bf5d0d8889c1cc38b21de51e6a4a1`. Both checkouts discard
 persisted credentials; the job verifies the external HEAD before installation
 and runs only the bounded synthetic smoke. A future Vera Mono source update
-requires an explicit new pin, test and review. This is GitHub-hosted source
-qualification, not evidence that the local Lappy deployment is installed.
+requires an explicit new pin, test and review. This is GitHub-hosted source qualification, not evidence that any particular local deployment is installed.
 
 The Windows staged installer binds exact source SHAs, creates an isolated environment, launches a staged resident host, verifies component loading and cognition, and only registers logon activation after qualification succeeds. Source presence still does **not** prove installation, route selection, runtime consumption, or current behavioral qualification.
 
@@ -260,8 +265,7 @@ if ((git rev-parse HEAD).Trim() -ne $sourceHeads['portal']) {
 }
 ```
 
-After reviewing those hashes and the source, select a **dedicated leaf**, for
-example `D:\VERA\PortalDesktop\desktop-1` (never `D:\VERA` itself). Create
+After reviewing those hashes and the source, select a **dedicated, owner-only runtime leaf** beneath an ordinary Windows user-owned application-data directory. The sample below uses `$env:LOCALAPPDATA` and `desktop-1`; it is an illustration, not a prescribed machine path. Create
 an **empty, real (not symlinked/junction) leaf** and inspect its ACL **before**
 installing; verify the intended account controls it and untrusted users cannot
 read or write it. Check it again after
@@ -274,7 +278,7 @@ exact hashes still need independent inspection because pinning alone does not
 make upstream code trustworthy.
 
 ```powershell
-$runtimeRoot = 'D:\VERA\PortalDesktop\desktop-1'
+$runtimeRoot = Join-Path $env:LOCALAPPDATA 'PortalRuntime\desktop-1'
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 icacls $runtimeRoot
 # Review the ACL output and stop if other users have access.
@@ -362,7 +366,7 @@ The desktop/runtime path preserves the same evidence rules as the portfolio coor
 
 ## Internal-first donor policy
 
-Before implementing new orchestration machinery, Portal mines Patrick-owned repositories for existing qualified mechanisms. External projects are secondary research inputs.
+Before implementing new orchestration machinery, inspect existing qualified components in the chosen portfolio and favor proven internal interfaces. Third-party projects are optional research inputs, not automatic runtime dependencies.
 
 See [Loop Donor Mining V1](docs/research/PORTAL_LOOP_DONOR_MINING_V1.md).
 
@@ -374,15 +378,15 @@ Primary internal donors currently include Project Runner, Pre-Active, WIP, CCB B
     project-runner validate
     python -m pytest -q
 
-Create a node manifest:
+Create a **generic** node manifest named `nodes.yaml` (the repository's test fixture uses historical node IDs; do not copy them into a new deployment):
 
     schema: PORTAL_EXECUTION_NODES_V1
     nodes:
-      - id: lappy
+      - id: node-a
         max_parallel: 2
         allowed_lanes: []
         enabled: true
-      - id: worklaptop
+      - id: node-b
         max_parallel: 2
         allowed_lanes: []
         enabled: true
@@ -391,10 +395,10 @@ Run a durable portfolio command session (the occupied-node values are a current 
 
     portal run \
       --session-id portfolio \
-      --nodes tests/fixtures/portal-nodes-valid.yaml \
-      --max-parallel 8 \
-      --occupied-node lappy=54 \
-      --occupied-node worklaptop=0
+      --nodes nodes.yaml \
+      --max-parallel 4 \
+      --occupied-node node-a=0 \
+      --occupied-node node-b=0
 
 That form performs durable admission/reconciliation/refill but does not invent an execution route. To enable the built-in advisory process-proposal adapter, supply an explicit worker-backend manifest:
 
@@ -406,7 +410,7 @@ That form performs durable admission/reconciliation/refill but does not invent a
 
 The process-proposal adapter is capability-routed and exact-target-bound. It can generate and persist advisory source-tree proposals, but it has only `NO_PROTECTED_EFFECT` authority; source publication still requires the separate review/promotion/effect-authority path.
 
-For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, PORTAL queues bound dispatch envelopes, and the host crosses the durable attempt boundary before the external effect. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host can actually drive, revalidates exact target/currentness/capability/authority at attempt time, and atomically marks the selected dispatch attempted before returning it. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
+For ChatGPT/plugin/workstation-host execution, use the durable host bridge. The host publishes expiring exact-target route advertisements and fresh node-occupancy snapshots, PORTAL queues bound dispatch envelopes, and the host crosses the durable attempt boundary before an external effect. Route advertisements are claims supplied by that host—not cryptographic proof of actor identity, installed provider bindings, or delegated authority. The preferred interactive host operation is `portal host take`: it filters to adapter IDs the host advertises as drivable, checks recorded target/currentness/capability/authority fields at attempt time, and atomically marks the selected dispatch attempted before returning it. This check is only as trustworthy as the separately authenticated, host-owned provider/authorization bindings. Owning-substrate evidence then reconciles the result. Attempted unresolved effects remain visible through `portal host unresolved` and are never silently replayed through another route.
 
 Seed one identical host capability across every exact repository target in a project registry without inventing wildcard authority:
 
@@ -422,7 +426,7 @@ Seed one identical host capability across every exact repository target in a pro
 
 The batch is atomic and still stores one exact target-bound route per repository. The operator must explicitly provide technical effect capability and authorized effect; bulk advertisement never upgrades authority. Use a stronger `--authorized-effect` only when that exact host/target scope is separately authorized.
 
-Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The pump consumes only already-bound work, persists the attempt before calling the driver, leaves ambiguous driver failures unresolved, tolerates competing-host attempt races without replay, and propagates process-control exceptions. Source-level integration coverage closes the full loop: admit -> queue -> durable attempt -> owning-driver verification -> free capacity -> refill -> verified idle.
+Embedded hosts can use `PortalHostPump` instead of shelling through the CLI. The pump consumes only already-bound work, persists the attempt before calling a host-provided driver, leaves ambiguous exceptions unresolved, tolerates competing-host attempt races without replay, and propagates process-control exceptions. **Current limitation:** the source accepts a driver's `PortalHostDriverResult(state="VERIFIED_COMPLETE", evidence_id=...)` and records it without independently authenticating the driver or verifying the underlying effect. A trusted host must verify the exact owning-substrate result and its immutable provider/authority binding before treating that state as completion. Source-level integration tests exercise the state-machine loop; they do not certify independent real-world effect verification.
 
 See [Host Bridge Runbook V1](docs/operations/PORTAL_HOST_BRIDGE_RUNBOOK_V1.md) for the full recovery-safe flow, including `--project-runner-tasks`, `--host-node-occupancy`, `host take`, `host pending`, `host unresolved`, reconciliation, and refill.
 
@@ -441,7 +445,7 @@ Plan a bounded portfolio wave:
 
     portal plan \
       --wave portfolio/advancement_wave.public.json \
-      --nodes tests/fixtures/portal-nodes-valid.yaml \
+      --nodes nodes.yaml \
       --max-parallel 4 \
       --max-per-lane 2 \
       --max-per-identity 2 \
