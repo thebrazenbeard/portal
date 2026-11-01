@@ -179,6 +179,8 @@ jobs:
           "$RUNNER_TEMP/portal-wheel-env/bin/python" -c \
             'from pathlib import Path; import portal; assert Path(portal.__file__).resolve().is_relative_to(Path("portal-wheel-env").resolve())'
           "$RUNNER_TEMP/portal-wheel-env/bin/python" -m portal._runner.cli validate
+          "$RUNNER_TEMP/portal-wheel-env/bin/python" -c \
+            'from portal._runner.prioritize import rank_frontiers; assert rank_frontiers(()) == ()'
           "$RUNNER_TEMP/portal-wheel-env/bin/python" -m portal.cli run \
             --static-projects --once --max-parallel 1 \
             --projects "$GITHUB_WORKSPACE/tests/fixtures/portal_wheel_empty_projects.yaml" \

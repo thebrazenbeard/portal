@@ -11,6 +11,7 @@ def test_bundle_is_byte_exact_copy_of_checkout_runtime_resources() -> None:
     bundle = checkout / "portal" / "_data"
     patterns = {
         "registry": "*.yaml",
+        "policy": "*.yaml",
         "topology": "*.yaml",
         "portfolio": "*.json",
         "schemas": "*.json",

@@ -29,6 +29,7 @@ packages = ["portal", "portal._runner"]
 portal = [
   "assets/*.png",
   "_data/registry/*.yaml",
+  "_data/policy/*.yaml",
   "_data/topology/*.yaml",
   "_data/portfolio/*.json",
   "_data/schemas/*.json",

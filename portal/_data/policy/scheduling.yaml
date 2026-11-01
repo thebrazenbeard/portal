@@ -1,0 +1,9 @@
+weights:
+  fanout: 5
+  blocked_downstream: 4
+  staleness_risk: 5
+  failure_severity: 8
+  declared_priority: 10
+  cost: -2
+  authority_available: 3
+  executable_now: 5
