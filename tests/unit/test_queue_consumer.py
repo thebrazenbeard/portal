@@ -2,26 +2,26 @@ from pathlib import Path
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.durable_dispatch import SqliteDispatchAdmissionStore
-from runner.m6_github import frontier_to_github_inspection_work
-from runner.models import (
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+from portal._runner.m6_github import frontier_to_github_inspection_work
+from portal._runner.models import (
     DependencyEdge,
     ExactSubject,
     InvocationRoute,
     ProjectDefinition,
     WorkerDefinition,
 )
-from runner.portfolio import collect_and_schedule_portfolio
-from runner.queue_consumer import (
+from portal._runner.portfolio import collect_and_schedule_portfolio
+from portal._runner.queue_consumer import (
     SqliteQueueStore,
     consume_next_queued_inspection,
     consume_next_queued_read_only_work,
     reconcile_queue_item,
     summarize_queue_state,
 )
-from runner.work_units import WorkUnitStatus
-from runner.worker_routing import (
+from portal._runner.work_units import WorkUnitStatus
+from portal._runner.worker_routing import (
     SqliteWorkerRouteStore,
     resolve_read_only_worker_route,
 )
@@ -377,7 +377,7 @@ def test_reclaimed_queue_reconciles_terminal_operator_without_reexecution(
     )
     store.close()
 
-    from runner.operator import run_durable_github_read_inspection
+    from portal._runner.operator import run_durable_github_read_inspection
 
     operator_result = run_durable_github_read_inspection(
         frontier=claim.frontier,

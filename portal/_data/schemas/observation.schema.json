@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["observations"],
+  "additionalProperties": false,
+  "properties": {
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "evidence_class", "subject", "observed_value", "observed_at", "observer"],
+        "additionalProperties": false,
+        "properties": {
+          "target": {"type": "string", "minLength": 1},
+          "evidence_class": {"enum": ["AUTHORITATIVE", "DECLARED", "DERIVED", "CACHED"]},
+          "subject": {
+            "type": "object",
+            "required": ["repository", "ref"],
+            "additionalProperties": false,
+            "properties": {
+              "repository": {"type": "string", "minLength": 1},
+              "ref": {"type": "string", "minLength": 1},
+              "commit": {"type": "string", "minLength": 1},
+              "path": {"type": "string", "minLength": 1},
+              "digest": {"type": "string", "minLength": 1}
+            }
+          },
+          "observed_value": {"type": "string"},
+          "observed_at": {"type": "string", "minLength": 1},
+          "observer": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

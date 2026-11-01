@@ -9,7 +9,7 @@ import sqlite3
 import time
 from typing import Callable
 
-from runner.portfolio_advancement import AdvancementItem, AdvancementWave
+from portal._runner.portfolio_advancement import AdvancementItem, AdvancementWave
 
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")

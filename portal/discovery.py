@@ -9,13 +9,13 @@ from urllib import error, parse, request
 
 import yaml
 
-from runner.models import (
+from portal._runner.models import (
     ProjectAssignmentScope,
     ProjectDefinition,
     ProjectReviewScope,
     ProjectSchedulingState,
 )
-from runner.registry import ProjectRegistrySnapshot
+from portal._runner.registry import ProjectRegistrySnapshot
 
 
 @dataclass(frozen=True)

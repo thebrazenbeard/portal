@@ -1,10 +1,10 @@
-from runner.backends import MockBackend
-from runner.budgets import BudgetEnvelope
-from runner.dispatch import dispatch_ready
-from runner.leases import InMemoryLeaseStore
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
-from runner.verify import verify_attempt
-from runner.work_units import WorkUnitStatus
+from portal._runner.backends import MockBackend
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.dispatch import dispatch_ready
+from portal._runner.leases import InMemoryLeaseStore
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.verify import verify_attempt
+from portal._runner.work_units import WorkUnitStatus
 
 
 def _frontier(commit="a" * 40):

@@ -15,6 +15,8 @@ import tempfile
 import time
 from typing import Sequence
 
+from portal._resources import resource_root
+
 from .backends import MockBackend
 from .budgets import BudgetEnvelope
 from .collisions import partition_collision_groups
@@ -87,7 +89,7 @@ from .verify import verify_attempt
 from .work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = resource_root()
 
 
 def _project_registry_path() -> Path:

@@ -9,10 +9,10 @@ import sqlite3
 import time
 from typing import Callable, Iterable
 
-from runner.github_backend import GitHubTransport
-from runner.models import DependencyEdge, ProjectDefinition, WorkerDefinition
-from runner.portfolio import PortfolioCycleResult, collect_and_schedule_portfolio
-from runner.queue_consumer import (
+from portal._runner.github_backend import GitHubTransport
+from portal._runner.models import DependencyEdge, ProjectDefinition, WorkerDefinition
+from portal._runner.portfolio import PortfolioCycleResult, collect_and_schedule_portfolio
+from portal._runner.queue_consumer import (
     QueueConsumptionResult,
     consume_next_queued_read_only_work,
     summarize_queue_state,

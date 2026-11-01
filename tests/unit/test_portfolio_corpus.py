@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_corpus import load_portfolio_corpus
 
 
 def _write(tmp_path: Path, payload: dict) -> Path:

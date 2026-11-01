@@ -3,25 +3,25 @@ from pathlib import Path
 
 import pytest
 
-from runner.backends import MockBackend
-from runner.budgets import BudgetEnvelope
-from runner.collisions import partition_collision_groups
-from runner.dedup import deduplicate_frontiers
-from runner.dispatch import dispatch_ready, frontier_to_work_unit
-from runner.durable_dispatch import (
+from portal._runner.backends import MockBackend
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.collisions import partition_collision_groups
+from portal._runner.dedup import deduplicate_frontiers
+from portal._runner.dispatch import dispatch_ready, frontier_to_work_unit
+from portal._runner.durable_dispatch import (
     SqliteDispatchAdmissionStore,
     execute_admitted,
     verify_observed_attempt,
 )
-from runner.frontier import derive_frontiers
-from runner.leases import InMemoryLeaseStore
-from runner.models import ExactSubject, FrontierStatus
-from runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
-from runner.recursive_state import SqliteRecursiveWorkStore
-from runner.propagate import derive_invalidations
-from runner.registry import load_dependencies, load_observations
-from runner.verify import verify_attempt
-from runner.work_units import WorkUnitStatus, work_unit_fingerprint
+from portal._runner.frontier import derive_frontiers
+from portal._runner.leases import InMemoryLeaseStore
+from portal._runner.models import ExactSubject, FrontierStatus
+from portal._runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
+from portal._runner.recursive_state import SqliteRecursiveWorkStore
+from portal._runner.propagate import derive_invalidations
+from portal._runner.registry import load_dependencies, load_observations
+from portal._runner.verify import verify_attempt
+from portal._runner.work_units import WorkUnitStatus, work_unit_fingerprint
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

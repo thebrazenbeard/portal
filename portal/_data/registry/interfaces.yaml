@@ -1,0 +1,28 @@
+interfaces:
+  - id: vera
+    name: Vera
+    kind: PERSISTENT_HUMAN_INTERFACE
+    durable_state_owner: false
+    coordination_scope: CROSS_PROJECT
+    durable_sources:
+      - github
+      - chat-communication-bus
+    may_require_worker_chat: false
+  - id: vera-control-plane-coordinator
+    name: Vera Control Plane Coordinator
+    kind: PERSISTENT_HUMAN_INTERFACE
+    durable_state_owner: false
+    coordination_scope: VERA_CONTROL_PLANE
+    durable_sources:
+      - github
+      - chat-communication-bus
+    may_require_worker_chat: false
+  - id: bt2-coordinator
+    name: BT2 Coordinator
+    kind: PERSISTENT_HUMAN_INTERFACE
+    durable_state_owner: false
+    coordination_scope: BUILD_TEAM_TWO
+    durable_sources:
+      - github
+      - chat-communication-bus
+    may_require_worker_chat: false

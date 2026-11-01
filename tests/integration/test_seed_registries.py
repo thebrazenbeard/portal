@@ -1,5 +1,5 @@
 from pathlib import Path
-from runner.registry import load_projects, load_workers
+from portal._runner.registry import load_projects, load_workers
 
 ROOT = Path(__file__).resolve().parents[2]
 

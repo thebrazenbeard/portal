@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-import runner.cli as cli_module
-import runner.task_monitor as task_monitor_module
-from runner.cli import main
-from runner.task_supervisor import _windows_command_argv
+import portal._runner.cli as cli_module
+import portal._runner.task_monitor as task_monitor_module
+from portal._runner.cli import main
+from portal._runner.task_supervisor import _windows_command_argv
 
 
 def test_task_register_and_status_round_trip(tmp_path, capsys):
@@ -128,7 +128,7 @@ def test_windows_shell_argv_is_explicit_and_bounded():
 def test_windows_task_launcher_and_read_only_monitor_are_shipped():
     root = Path(__file__).resolve().parents[2]
     launcher_path = root / "scripts" / "Start-ProjectRunnerTask.ps1"
-    supervisor_path = root / "runner" / "task_supervisor.py"
+    supervisor_path = root / "portal" / "_runner" / "task_supervisor.py"
     monitor_path = root / "scripts" / "Watch-ProjectRunnerTasks.ps1"
 
     assert launcher_path.exists()
@@ -139,7 +139,7 @@ def test_windows_task_launcher_and_read_only_monitor_are_shipped():
     supervisor = supervisor_path.read_text(encoding="utf-8")
     monitor = monitor_path.read_text(encoding="utf-8")
     assert "Start-Process" in launcher
-    assert "runner.task_supervisor" in launcher
+    assert "portal._runner.task_supervisor" in launcher
     assert "subprocess.Popen" in supervisor
     assert "finalize_task" in supervisor
     assert "child.wait()" in supervisor

@@ -1,8 +1,8 @@
-from runner.backends import MockBackend
-from runner.budgets import BudgetEnvelope
-from runner.dispatch import dispatch_ready
-from runner.leases import InMemoryLeaseStore
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.backends import MockBackend
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.dispatch import dispatch_ready
+from portal._runner.leases import InMemoryLeaseStore
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
 
 
 def _frontier(

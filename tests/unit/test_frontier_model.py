@@ -1,6 +1,6 @@
 import pytest
 
-from runner.models import Frontier, FrontierStatus
+from portal._runner.models import Frontier, FrontierStatus
 
 
 def _payload():

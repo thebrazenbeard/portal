@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from typing import Callable, Mapping
 
-from runner.github_backend import GitHubTransport
+from portal._runner.github_backend import GitHubTransport
 
 from .models import ExecutionNode
 from .source_proposal import load_source_tree_proposal

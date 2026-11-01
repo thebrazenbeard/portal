@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from runner.models import DependencyEdge, ProjectDefinition, WorkerDefinition
-from runner.portfolio import (
+from portal._runner.models import DependencyEdge, ProjectDefinition, WorkerDefinition
+from portal._runner.portfolio import (
     SqlitePortfolioStore,
     collect_and_schedule_portfolio,
     summarize_portfolio_state,

@@ -1,7 +1,7 @@
 import hashlib
 from pathlib import Path
 import pytest
-from runner.registry import load_project_snapshot, load_workers, load_projects
+from portal._runner.registry import load_project_snapshot, load_workers, load_projects
 
 
 def test_duplicate_worker_ids_are_rejected(tmp_path: Path):

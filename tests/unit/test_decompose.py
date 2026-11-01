@@ -1,9 +1,9 @@
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.decompose import admit_child_work
-from runner.models import ExactSubject
-from runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.decompose import admit_child_work
+from portal._runner.models import ExactSubject
+from portal._runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 def _subject(commit="a" * 40):

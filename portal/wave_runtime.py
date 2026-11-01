@@ -9,9 +9,9 @@ import sqlite3
 import time
 from typing import Callable, Iterable, Mapping
 
-from runner.backends import BackendResult
-from runner.durable_dispatch import SqliteDispatchAdmissionStore
-from runner.execution_promotion import (
+from portal._runner.backends import BackendResult
+from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+from portal._runner.execution_promotion import (
     ExecutionPromotionReceipt,
     NO_PROTECTED_EFFECT,
     SOURCE_WRITE,
@@ -20,27 +20,27 @@ from runner.execution_promotion import (
     parse_execution_grant,
     promote_claimed_to_running,
 )
-from runner.github_backend import GitHubRestTransport, GitHubTransport
-from runner.leases import Lease
-from runner.promoted_github_tree import PromotedGitHubSourceTreeWriteBackend
-from runner.promoted_github_tree_runtime import (
+from portal._runner.github_backend import GitHubRestTransport, GitHubTransport
+from portal._runner.leases import Lease
+from portal._runner.promoted_github_tree import PromotedGitHubSourceTreeWriteBackend
+from portal._runner.promoted_github_tree_runtime import (
     finalize_github_source_tree_write,
     reconcile_github_source_tree_write_outcome_unknown,
 )
-from runner.portfolio_advancement import load_advancement_wave
-from runner.portfolio_corpus import (
+from portal._runner.portfolio_advancement import load_advancement_wave
+from portal._runner.portfolio_corpus import (
     load_portfolio_corpus,
     validate_complete_repository_inventory,
 )
-from runner.portfolio_operator_binding import bind_wave_to_operator_registry
-from runner.portfolio_operator_bridge import claim_bound_plan_subject
-from runner.portfolio_plan_binding import (
+from portal._runner.portfolio_operator_binding import bind_wave_to_operator_registry
+from portal._runner.portfolio_operator_bridge import claim_bound_plan_subject
+from portal._runner.portfolio_plan_binding import (
     build_bound_wave_plan_payload,
     write_bound_wave_plan,
 )
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
-from runner.registry import load_project_snapshot
-from runner.work_units import WorkUnitStatus
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.registry import load_project_snapshot
+from portal._runner.work_units import WorkUnitStatus
 
 from .coordinator import plan_portal_wave
 from .models import ExecutionNode

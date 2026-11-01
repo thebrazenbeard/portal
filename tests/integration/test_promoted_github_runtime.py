@@ -9,17 +9,17 @@ import sqlite3
 
 import pytest
 
-from runner.backends import BackendResult
-from runner.cli import main
-from runner.execution_promotion import (
+from portal._runner.backends import BackendResult
+from portal._runner.cli import main
+from portal._runner.execution_promotion import (
     promote_claimed_to_running,
     sign_evidence,
 )
-from runner.github_backend import GitHubFileState
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_operator_bridge import claim_bound_plan_subject
-from runner.promoted_github import source_write_request_sha256
-from runner.promoted_github_runtime import (
+from portal._runner.github_backend import GitHubFileState
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_operator_bridge import claim_bound_plan_subject
+from portal._runner.promoted_github import source_write_request_sha256
+from portal._runner.promoted_github_runtime import (
     finalize_github_source_write_effect_confirmed,
     qualify_github_source_write_runtime,
     reconcile_github_source_write_outcome_unknown,
@@ -255,7 +255,7 @@ def _claim_and_promote(tmp_path):
             evidence=("github:outcome_unknown",),
             classification="OUTCOME_UNKNOWN",
         )
-    from runner.durable_dispatch import SqliteDispatchAdmissionStore
+    from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
 
     store = SqliteDispatchAdmissionStore(tmp_path / "operator.sqlite3")
     store.record_result(
@@ -499,7 +499,7 @@ def test_reconciliation_refuses_non_unknown_recorded_result(tmp_path):
                 claim.fencing_token,
             ),
         )
-    from runner.durable_dispatch import SqliteDispatchAdmissionStore
+    from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
 
     store = SqliteDispatchAdmissionStore(tmp_path / "operator.sqlite3")
     store.record_result(
@@ -904,8 +904,8 @@ def test_effect_finalization_resumes_idempotently_from_verifying(tmp_path):
         transport,
     )
 
-    from runner.durable_dispatch import SqliteDispatchAdmissionStore
-    from runner.leases import Lease
+    from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+    from portal._runner.leases import Lease
 
     store = SqliteDispatchAdmissionStore(tmp_path / "operator.sqlite3")
     lease_row = store.connection.execute(

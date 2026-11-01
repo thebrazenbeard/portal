@@ -7,17 +7,17 @@ import sqlite3
 
 import pytest
 
-from runner.backends import BackendResult
-from runner.cli import main
-from runner.execution_promotion import (
+from portal._runner.backends import BackendResult
+from portal._runner.cli import main
+from portal._runner.execution_promotion import (
     NO_PROTECTED_EFFECT,
     execute_promoted,
     promote_claimed_to_running,
     sign_evidence,
 )
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_operator_bridge import claim_bound_plan_subject
-from runner.promoted_github import source_write_request_sha256
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_operator_bridge import claim_bound_plan_subject
+from portal._runner.promoted_github import source_write_request_sha256
 
 
 ROOT = Path(__file__).resolve().parents[2]

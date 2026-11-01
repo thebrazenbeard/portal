@@ -1,6 +1,6 @@
 import pytest
 
-from runner.github_backend import (
+from portal._runner.github_backend import (
     GitHubFileState,
     GitHubOutcomeUnknown,
     GitHubPreconditionFailed,

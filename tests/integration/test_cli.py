@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from runner import cli as cli_module
-from runner.cli import main
+from portal._runner import cli as cli_module
+from portal._runner.cli import main
 
 
 def _pin_external_registry(registry, monkeypatch):
@@ -623,7 +623,7 @@ def test_portfolio_cycle_collects_then_schedules_changed_dependency(
     monkeypatch,
     capsys,
 ):
-    from runner import portfolio as portfolio_module
+    from portal._runner import portfolio as portfolio_module
 
     class FakeTransport:
         def __init__(self):
@@ -763,8 +763,8 @@ def test_cli_portfolio_to_queue_consumption_round_trip(
     monkeypatch,
     capsys,
 ):
-    from runner import portfolio as portfolio_module
-    from runner import queue_consumer as queue_module
+    from portal._runner import portfolio as portfolio_module
+    from portal._runner import queue_consumer as queue_module
 
     class FakeTransport:
         def __init__(self):
@@ -918,9 +918,9 @@ def test_worker_route_status_missing_database_is_safe_and_empty(tmp_path, capsys
 
 
 def test_cli_reconcile_queue_releases_safe_read_retry(tmp_path, capsys):
-    from runner.models import DependencyEdge, ProjectDefinition
-    from runner.portfolio import collect_and_schedule_portfolio
-    from runner.queue_consumer import SqliteQueueStore
+    from portal._runner.models import DependencyEdge, ProjectDefinition
+    from portal._runner.portfolio import collect_and_schedule_portfolio
+    from portal._runner.queue_consumer import SqliteQueueStore
 
     class FakeTransport:
         def __init__(self):
@@ -1077,14 +1077,14 @@ def test_cli_worker_route_pull_and_receipt_round_trip(
 ):
     from types import SimpleNamespace
 
-    from runner.models import (
+    from portal._runner.models import (
         Frontier,
         Observation,
         ProjectDefinition,
         WorkerDefinition,
     )
-    from runner.portfolio import SqlitePortfolioStore
-    from runner.worker_routing import (
+    from portal._runner.portfolio import SqlitePortfolioStore
+    from portal._runner.worker_routing import (
         SqliteWorkerRouteStore,
         resolve_read_only_worker_route,
     )
@@ -1369,14 +1369,14 @@ def test_worker_route_pull_inside_checkout_skips_private_and_claims_public(
 ):
     from types import SimpleNamespace
 
-    from runner.models import (
+    from portal._runner.models import (
         Frontier,
         Observation,
         ProjectDefinition,
         WorkerDefinition,
     )
-    from runner.portfolio import SqlitePortfolioStore
-    from runner.worker_routing import (
+    from portal._runner.portfolio import SqlitePortfolioStore
+    from portal._runner.worker_routing import (
         SqliteWorkerRouteStore,
         resolve_read_only_worker_route,
     )

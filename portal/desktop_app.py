@@ -124,7 +124,7 @@ class DesktopViewModel:
 
 
 PORTAL_PALETTE = {
-    # Lappy's structured dark desktop layout, with the supplied Vera artwork's
+    # Structured dark desktop layout, with the supplied Vera artwork's
     # burgundy/rose color language. Branding never changes authority.
     "background": "#140910",
     "surface": "#210F1B",

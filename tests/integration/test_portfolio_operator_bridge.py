@@ -6,15 +6,15 @@ import sqlite3
 
 import pytest
 
-from runner.cli import main
-from runner.durable_dispatch import SqliteDispatchAdmissionStore
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_operator_bridge import (
+from portal._runner.cli import main
+from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_operator_bridge import (
     claim_bound_plan_subject,
     verify_bound_plan_subject,
 )
-from runner.portfolio_plan_binding import build_bound_wave_plan_payload
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.portfolio_plan_binding import build_bound_wave_plan_payload
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 ROOT = Path(__file__).resolve().parents[2]

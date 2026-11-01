@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterable, Mapping
 
-from runner.portfolio_advancement import AdvancementWave
-from runner.portfolio_wave_scheduler import (
+from portal._runner.portfolio_advancement import AdvancementWave
+from portal._runner.portfolio_wave_scheduler import (
     WaveExecutionBudget,
     plan_wave_admission,
 )
