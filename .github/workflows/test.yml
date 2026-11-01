@@ -155,3 +155,33 @@ jobs:
           finally {
             Pop-Location
           }
+
+  wheel-installed-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact wheel subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Build and exercise installed wheel outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/portal-wheels" .
+          python -m venv "$RUNNER_TEMP/portal-wheel-env"
+          "$RUNNER_TEMP/portal-wheel-env/bin/python" -m pip install \
+            "$RUNNER_TEMP"/portal-wheels/portal_coordinator-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/portal-wheel-env/bin/python" -c \
+            'from pathlib import Path; import portal; assert Path(portal.__file__).resolve().is_relative_to(Path("portal-wheel-env").resolve())'
+          "$RUNNER_TEMP/portal-wheel-env/bin/python" -m portal._runner.cli validate
+          "$RUNNER_TEMP/portal-wheel-env/bin/python" -m portal.cli run \
+            --static-projects --once --max-parallel 1 \
+            --projects "$GITHUB_WORKSPACE/tests/fixtures/portal_wheel_empty_projects.yaml" \
+            --dependencies "$GITHUB_WORKSPACE/tests/fixtures/portal_wheel_empty_dependencies.yaml" \
+            --nodes "$GITHUB_WORKSPACE/tests/fixtures/portal_wheel_nodes.yaml" \
+            --state-db "$RUNNER_TEMP/portal-wheel-smoke.sqlite3"

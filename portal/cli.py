@@ -10,6 +10,8 @@ import sys
 import time
 from typing import Mapping, Sequence
 
+from ._resources import resource_root
+
 from portal._runner.execution_promotion import (
     effect_authority_key_from_environment,
     execution_authority_key_from_environment,
@@ -83,7 +85,7 @@ from .wave_runtime import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = resource_root()
 
 
 def _github_token() -> str | None:

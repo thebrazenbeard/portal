@@ -6,8 +6,10 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from portal._resources import resource_root
 
-_ROOT = Path(__file__).resolve().parents[2]
+
+_ROOT = resource_root()
 _SCHEMA_FILES = {
     "project": _ROOT / "schemas" / "project.schema.json",
     "worker": _ROOT / "schemas" / "worker.schema.json",

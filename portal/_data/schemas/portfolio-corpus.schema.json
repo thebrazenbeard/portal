@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thebrazenbeard/project-runner/schemas/portfolio-corpus.schema.json",
+  "type": "object",
+  "required": ["corpus_id","observed_at","owner","counts","private_inventory","workstream_counts","private_workstream_inventory","workstreams","records"],
+  "additionalProperties": false,
+  "properties": {
+    "corpus_id": {"const":"PROJECT_RUNNER_PORTFOLIO_CORPUS_V1"},
+    "observed_at": {"type":"string","minLength":1},
+    "owner": {"type":"string","minLength":1},
+    "status_basis": {"type":"string","minLength":1},
+    "freshness_rule": {"type":"string","minLength":1},
+    "counts": {
+      "type":"object","required":["total","public","private","archived","public_archived","private_archived"],"additionalProperties":false,
+      "properties":{
+        "total":{"type":"integer","minimum":0},"public":{"type":"integer","minimum":0},"private":{"type":"integer","minimum":0},
+        "archived":{"type":"integer","minimum":0},"public_archived":{"type":"integer","minimum":0},"private_archived":{"type":"integer","minimum":0}
+      }
+    },
+    "private_inventory": {
+      "type":"object","required":["count","public_commitment_scheme","exact_membership_publicly_committed"],"additionalProperties":false,
+      "properties":{
+        "count":{"type":"integer","minimum":0},
+        "public_commitment_scheme":{"const":"COUNT_ONLY_PUBLIC_V1"},
+        "exact_membership_publicly_committed":{"const":false}
+      }
+    },
+    "workstream_counts": {
+      "type":"object","required":["total","public","private"],"additionalProperties":false,
+      "properties":{"total":{"type":"integer","minimum":0},"public":{"type":"integer","minimum":0},"private":{"type":"integer","minimum":0}}
+    },
+    "private_workstream_inventory": {
+      "type":"object","required":["count","public_commitment_scheme","exact_membership_publicly_committed"],"additionalProperties":false,
+      "properties":{
+        "count":{"type":"integer","minimum":0},
+        "public_commitment_scheme":{"const":"COUNT_ONLY_PUBLIC_V1"},
+        "exact_membership_publicly_committed":{"const":false}
+      }
+    },
+    "records": {
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["id","repository","name","visibility","archived","default_branch","priority","family_id","activity_state","purpose","status"],
+        "properties":{
+          "id":{"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+          "repository":{"type":"string","pattern":"^[^/\\s]+/[^/\\s]+$"},
+          "name":{"type":"string","minLength":1},
+          "visibility":{"enum":["public","private"]},
+          "archived":{"type":"boolean"},
+          "default_branch":{"type":"string","minLength":1},
+          "priority":{"enum":["P0","P1","P2","P3","P4"]},
+          "family_id":{"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+          "activity_state":{"enum":["ACTIVE_HEAVY","ACTIVE","STABLE","INCUBATOR","QUIET","PAUSED","UNKNOWN","SUPERSEDED","ARCHIVED"]},
+          "purpose":{"type":"string","minLength":1},
+          "status":{"type":"string","minLength":1},
+          "current_frontier":{"type":["string","null"],"minLength":1}
+        }
+      }
+    },
+    "workstreams": {
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["id","name","visibility","priority","family_id","activity_state","durable_surfaces","purpose","status"],
+        "properties":{
+          "id":{"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+          "name":{"type":"string","minLength":1},
+          "visibility":{"enum":["public","private"]},
+          "priority":{"enum":["P0","P1","P2","P3","P4"]},
+          "family_id":{"type":"string","minLength":1,"pattern":"^[a-z0-9][a-z0-9._-]*$"},
+          "activity_state":{"enum":["ACTIVE_HEAVY","ACTIVE","STABLE","INCUBATOR","QUIET","PAUSED","UNKNOWN","SUPERSEDED","ARCHIVED"]},
+          "durable_surfaces":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+          "purpose":{"type":"string","minLength":1},
+          "status":{"type":"string","minLength":1},
+          "current_frontier":{"type":["string","null"],"minLength":1}
+        }
+      }
+    }
+  }
+}

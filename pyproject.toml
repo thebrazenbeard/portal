@@ -26,4 +26,10 @@ testpaths = ["tests"]
 packages = ["portal", "portal._runner"]
 
 [tool.setuptools.package-data]
-portal = ["assets/*.png"]
+portal = [
+  "assets/*.png",
+  "_data/registry/*.yaml",
+  "_data/topology/*.yaml",
+  "_data/portfolio/*.json",
+  "_data/schemas/*.json",
+]

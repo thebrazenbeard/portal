@@ -149,7 +149,7 @@ workers:
   lifecycle: EXECUTABLE
   locators:
     workflow: .github/workflows/test.yml
-    command: project-runner run-reference-worker
+    command: python -m portal._runner.cli run-reference-worker
   roles:
   - reference-read-worker
   routes:
