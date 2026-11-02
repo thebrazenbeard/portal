@@ -42,6 +42,18 @@ _MAX_TTL_SECONDS = 120
 _MAC_DOMAIN = b"PORTAL_EXECUTOR_READONLY_ENVELOPE_V1\x00"
 
 
+_RESERVATION_DDL = (
+    "CREATE TABLE IF NOT EXISTS readonly_envelope_reservations ("
+    "issuer_id TEXT NOT NULL, nonce TEXT NOT NULL,"
+    "dispatch_id TEXT NOT NULL,"
+    "attempt_id TEXT NOT NULL,"
+    "payload_sha256 TEXT NOT NULL,"
+    "PRIMARY KEY (issuer_id, nonce),"
+    "UNIQUE (issuer_id, dispatch_id),"
+    "UNIQUE (issuer_id, attempt_id))"
+)
+
+
 class ReservationStorageError(RuntimeError):
     """Reservation state unavailable or malformed; never means replay."""
 
@@ -93,6 +105,23 @@ class ReservedReadonlyEnvelope:
     execution_authorized: bool = field(default=False, init=False)
     host_authenticated: bool = field(default=False, init=False)
 
+    def __bool__(self) -> bool:
+        raise TypeError("reservation evidence is not execution authorization")
+
+
+@dataclass(frozen=True)
+class ConsumedReservationObservation:
+    """Terminal row observation, never authorization or proof of remote work."""
+
+    status: str = field(
+        default="CONSUMED_EXACT_DO_NOT_REDISPATCH", init=False
+    )
+    execution_authorized: bool = field(default=False, init=False)
+    host_authenticated: bool = field(default=False, init=False)
+
+    def __bool__(self) -> bool:
+        raise TypeError("reconciliation observation is not execution authorization")
+
 
 def _unique_pairs(pairs):
     result = {}
@@ -130,29 +159,75 @@ def verify_and_reserve_readonly_envelope(
     )
 
 
-def _verify_and_reserve_with_clock(
-    payload: bytes,
-    signature_hex: str,
-    *,
-    trust: ReadonlyEnvelopeTrust,
-    expected: Mapping[str, str],
-    clock: Callable[[], int],
-) -> ReservedReadonlyEnvelope:
-    """Internal testable algorithm. Production calls use system wall time."""
+def _check_reservation_schema(
+    conn: sqlite3.Connection, *, create_if_missing: bool
+) -> None:
+    """Check current schema and affected indexes, not filesystem custody."""
+    ddl = _RESERVATION_DDL
+    existing = conn.execute(
+        "SELECT type, sql FROM sqlite_master WHERE name = ?",
+        ("readonly_envelope_reservations",),
+    ).fetchone()
+    if existing is not None:
+        normalize = lambda value: "".join(value.lower().split()).replace(
+            "ifnotexists", ""
+        )
+        if existing[0] != "table" or normalize(existing[1] or "") != normalize(ddl):
+            raise ReservationStorageError("reservation database schema integrity mismatch")
+    if existing is None and not create_if_missing:
+        raise ReservationStorageError("reservation table missing")
+    if create_if_missing:
+        conn.execute(ddl)
+    trigger = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? LIMIT 1",
+        ("readonly_envelope_reservations",),
+    ).fetchone()
+    if trigger is not None:
+        raise ReservationStorageError("reservation database trigger integrity mismatch")
+    indexes = conn.execute(
+        "PRAGMA index_list(readonly_envelope_reservations)"
+    ).fetchall()
+    specs = set()
+    for _, index_name, unique, origin, partial in indexes:
+        quoted = '"' + index_name.replace('"', '""') + '"'
+        columns = tuple(row[2] for row in conn.execute(
+            f"PRAGMA index_info({quoted})"
+        ))
+        if unique != 1 or partial != 0:
+            raise ReservationStorageError("reservation index integrity mismatch")
+        specs.add((origin, columns))
+    required = {
+        ("pk", ("issuer_id", "nonce")),
+        ("u", ("issuer_id", "dispatch_id")),
+        ("u", ("issuer_id", "attempt_id")),
+    }
+    if len(indexes) != 3 or specs != required:
+        raise ReservationStorageError("reservation index integrity mismatch")
+
+
+def _authenticate_metadata(
+    payload: bytes, signature_hex: str, *,
+    trust: ReadonlyEnvelopeTrust, expected: Mapping[str, str],
+    clock: Callable[[], int] | None,
+) -> tuple[dict, int, int]:
+    """MAC and exact scope, with optional current-time gate for admission."""
     if not isinstance(payload, bytes) or len(payload) > _MAX_PAYLOAD:
         raise ValueError("invalid envelope size or bytes")
     if not isinstance(trust, ReadonlyEnvelopeTrust):
         raise ValueError("owner-provisioned trust configuration is required")
     if type(signature_hex) is not str or _MAC.fullmatch(signature_hex) is None:
         raise ValueError("invalid envelope signature")
-    if not callable(clock):
+    if clock is not None and not callable(clock):
         raise ValueError("invalid verifier clock")
     def read_clock() -> int:
         observed = clock()
         if type(observed) is not int or observed < 0:
             raise ValueError("invalid verifier clock")
         return observed
-    if not isinstance(expected, Mapping) or set(expected) != _PINNED:
+    if not isinstance(expected, Mapping):
+        raise ValueError("exact expected scope is required")
+    expected = dict(expected)
+    if set(expected) != _PINNED or any(type(v) is not str for v in expected.values()):
         raise ValueError("exact expected scope is required")
 
     try:
@@ -197,9 +272,26 @@ def _verify_and_reserve_with_clock(
         type(issued) is not int or type(expiry) is not int
         or issued < 0 or expiry <= issued
         or expiry - issued > _MAX_TTL_SECONDS
-        or not (issued <= read_clock() < expiry)
+        or (clock is not None and not (issued <= read_clock() < expiry))
     ):
         raise ValueError("envelope expired, premature or unbounded")
+
+    return raw, issued, expiry
+
+
+def _verify_and_reserve_with_clock(
+    payload: bytes,
+    signature_hex: str,
+    *,
+    trust: ReadonlyEnvelopeTrust,
+    expected: Mapping[str, str],
+    clock: Callable[[], int],
+) -> ReservedReadonlyEnvelope:
+    """Internal testable algorithm. Production calls use system wall time."""
+    raw, issued, expiry = _authenticate_metadata(
+        payload, signature_hex, trust=trust, expected=expected, clock=clock
+    )
+    read_clock = clock
 
     # Storage owner must protect the database file, parent directory, and
     # backups. This verification cannot defeat an OS-level DB replacement.
@@ -207,56 +299,12 @@ def _verify_and_reserve_with_clock(
     if (not destination.is_absolute() or not destination.parent.is_dir()
             or destination.is_symlink()):
         raise ValueError("untrusted reservation database path")
-    ddl = (
-        "CREATE TABLE IF NOT EXISTS readonly_envelope_reservations ("
-        "issuer_id TEXT NOT NULL, nonce TEXT NOT NULL,"
-        "dispatch_id TEXT NOT NULL,"
-        "attempt_id TEXT NOT NULL,"
-        "payload_sha256 TEXT NOT NULL,"
-        "PRIMARY KEY (issuer_id, nonce),"
-        "UNIQUE (issuer_id, dispatch_id),"
-        "UNIQUE (issuer_id, attempt_id))"
-    )
+    ddl = _RESERVATION_DDL
     try:
         with closing(sqlite3.connect(destination, timeout=10)) as conn:
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                existing = conn.execute(
-                    "SELECT type, sql FROM sqlite_master WHERE name = ?",
-                    ("readonly_envelope_reservations",),
-                ).fetchone()
-                if existing is not None:
-                    normalize = lambda value: "".join(value.lower().split()).replace(
-                        "ifnotexists", ""
-                    )
-                    if existing[0] != "table" or normalize(existing[1] or "") != normalize(ddl):
-                        raise ReservationStorageError("reservation database schema integrity mismatch")
-                conn.execute(ddl)
-                trigger = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? LIMIT 1",
-                    ("readonly_envelope_reservations",),
-                ).fetchone()
-                if trigger is not None:
-                    raise ReservationStorageError("reservation database trigger integrity mismatch")
-                indexes = conn.execute(
-                    "PRAGMA index_list(readonly_envelope_reservations)"
-                ).fetchall()
-                specs = set()
-                for _, index_name, unique, origin, partial in indexes:
-                    quoted = '"' + index_name.replace('"', '""') + '"'
-                    columns = tuple(row[2] for row in conn.execute(
-                        f"PRAGMA index_info({quoted})"
-                    ))
-                    if unique != 1 or partial != 0:
-                        raise ReservationStorageError("reservation index integrity mismatch")
-                    specs.add((origin, columns))
-                required = {
-                    ("pk", ("issuer_id", "nonce")),
-                    ("u", ("issuer_id", "dispatch_id")),
-                    ("u", ("issuer_id", "attempt_id")),
-                }
-                if len(indexes) != 3 or specs != required:
-                    raise ReservationStorageError("reservation index integrity mismatch")
+                _check_reservation_schema(conn, create_if_missing=True)
                 if not (issued <= read_clock() < expiry):
                     raise ValueError("envelope expired during reservation")
                 conn.execute(
@@ -285,3 +333,50 @@ def _verify_and_reserve_with_clock(
         dispatch_id=raw["dispatch_id"],
         attempt_id=raw["attempt_id"],
     )
+
+
+def reconcile_consumed_readonly_envelope(
+    payload: bytes, signature_hex: str, *,
+    trust: ReadonlyEnvelopeTrust,
+    expected: Mapping[str, str],
+) -> ConsumedReservationObservation:
+    """Observe a previously consumed admission; NEVER authorize redispatch.
+
+    A matching row was visible in the SQLite snapshot opened via configured
+    path. Missing state is indeterminate; no absence or retry grant is returned.
+    Schema checks cannot establish database continuity, identity or custody.
+    """
+    raw, _, _ = _authenticate_metadata(
+        payload, signature_hex, trust=trust, expected=expected, clock=None
+    )
+    destination = trust.nonce_db
+    if (not destination.is_absolute() or not destination.exists()
+            or not destination.is_file() or destination.is_symlink()
+            or not destination.parent.is_dir()):
+        raise ReservationStorageError("reservation storage missing or untrusted")
+    try:
+        # URI read-only mode prevents implicit DB creation on missing files.
+        with closing(sqlite3.connect(destination.as_uri() + "?mode=ro",
+                                     uri=True, timeout=2)) as conn:
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("BEGIN")
+            _check_reservation_schema(conn, create_if_missing=False)
+            rows = conn.execute(
+                "SELECT nonce,dispatch_id,attempt_id,payload_sha256 "
+                "FROM readonly_envelope_reservations WHERE issuer_id=? AND "
+                "(nonce=? OR dispatch_id=? OR attempt_id=?)",
+                (raw["issuer_id"],raw["nonce"],raw["dispatch_id"],raw["attempt_id"]),
+            ).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise ReservationStorageError("reservation storage unavailable or corrupt") from exc
+    if not rows:
+        raise ReservationStorageError(
+            "reservation not observed in this snapshot; retry forbidden"
+        )
+    expected_row = (
+        raw["nonce"], raw["dispatch_id"], raw["attempt_id"],
+        hashlib.sha256(payload).hexdigest(),
+    )
+    if len(rows) != 1 or tuple(rows[0]) != expected_row:
+        raise ReservationStorageError("reservation identifier or payload conflict")
+    return ConsumedReservationObservation()
