@@ -1,9 +1,9 @@
 """Source-only verifier for an explicitly pinned, read-only metadata envelope.
 
 No Executor connection, execution driver, authority grant or credential discovery.
-HMAC verifies possession of a caller-supplied key ONLY; it does not authenticate
-a workstation or authorize any effect. Live source-currentness must be checked
-by a separate owning component. The reservation DB is caller-selected.
+HMAC verifies possession of an owner-configured issuer key, not a workstation
+or remote host identity. The owner must protect the trust context and the one
+configured replay database, and separately verify Git/Executor currentness.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
+from types import MappingProxyType
 import re
 import sqlite3
 import time
@@ -38,6 +39,42 @@ _NONCE = re.compile(r"[0-9a-f]{32}\Z")
 _MAC = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_PAYLOAD = 4096
 _MAX_TTL_SECONDS = 120
+_MAC_DOMAIN = b"PORTAL_EXECUTOR_READONLY_ENVELOPE_V1\x00"
+
+
+class ReservationStorageError(RuntimeError):
+    """Reservation state unavailable or malformed; never means replay."""
+
+
+@dataclass(frozen=True)
+class ReadonlyEnvelopeTrust:
+    """An owner-provisioned configuration, not authenticated identity proof.
+
+    The caller creating this object must independently own its issuer registry
+    and reservation database. Request data must NEVER construct this context.
+    """
+    issuer_keys: Mapping[str, bytes]
+    nonce_db: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.issuer_keys, Mapping) or not self.issuer_keys:
+            raise ValueError("trusted issuer registry is required")
+        keys = dict(self.issuer_keys)
+        if any(
+            type(issuer) is not str or _IDENT.fullmatch(issuer) is None
+            or type(key) is not bytes or len(key) < 32
+            for issuer, key in keys.items()
+        ):
+            raise ValueError("invalid trusted issuer registry")
+        if not isinstance(self.nonce_db, (Path, str)):
+            raise ValueError("reservation store path is required")
+        destination = Path(self.nonce_db)
+        if not destination.is_absolute():
+            raise ValueError("reservation store path must be absolute")
+        if len(set(keys.values())) != len(keys):
+            raise ValueError("duplicate issuer keys are forbidden")
+        object.__setattr__(self, "issuer_keys", MappingProxyType(keys))
+        object.__setattr__(self, "nonce_db", destination)
 
 
 @dataclass(frozen=True)
@@ -79,32 +116,39 @@ def verify_and_reserve_readonly_envelope(
     payload: bytes,
     signature_hex: str,
     *,
-    issuer_key: bytes,
+    trust: ReadonlyEnvelopeTrust,
     expected: Mapping[str, str],
-    nonce_db: Path,
-    now: int | None = None,
-    clock: Callable[[], int] | None = None,
 ) -> ReservedReadonlyEnvelope:
-    """Validate signed exact-scope metadata, atomically reserve it once.
+    """Validate a MAC under owner-configured trust, reserving local replay IDs.
 
-    Caller must independently establish issuer key ownership, authorize scope,
-    verify source currentness, and authenticate any eventual Executor transport.
-    This function does not perform those operations or send a command.
+    No remote host authentication, live ref verification or execution authority.
+    A consumer must independently provide those controls.
     """
+    return _verify_and_reserve_with_clock(
+        payload, signature_hex, trust=trust, expected=expected,
+        clock=lambda: int(time.time()),
+    )
+
+
+def _verify_and_reserve_with_clock(
+    payload: bytes,
+    signature_hex: str,
+    *,
+    trust: ReadonlyEnvelopeTrust,
+    expected: Mapping[str, str],
+    clock: Callable[[], int],
+) -> ReservedReadonlyEnvelope:
+    """Internal testable algorithm. Production calls use system wall time."""
     if not isinstance(payload, bytes) or len(payload) > _MAX_PAYLOAD:
         raise ValueError("invalid envelope size or bytes")
-    if not isinstance(issuer_key, bytes) or len(issuer_key) < 32:
-        raise ValueError("issuer key must be caller-provisioned bytes")
+    if not isinstance(trust, ReadonlyEnvelopeTrust):
+        raise ValueError("owner-provisioned trust configuration is required")
     if type(signature_hex) is not str or _MAC.fullmatch(signature_hex) is None:
         raise ValueError("invalid envelope signature")
-    if now is not None and clock is not None:
-        raise ValueError("choose one verifier clock")
-    if clock is not None and not callable(clock):
+    if not callable(clock):
         raise ValueError("invalid verifier clock")
     def read_clock() -> int:
-        observed = clock() if clock is not None else (
-            now if now is not None else int(time.time())
-        )
+        observed = clock()
         if type(observed) is not int or observed < 0:
             raise ValueError("invalid verifier clock")
         return observed
@@ -121,6 +165,15 @@ def verify_and_reserve_readonly_envelope(
         raise ValueError("invalid envelope JSON") from exc
     if type(raw) is not dict or set(raw) != _FIELDS:
         raise ValueError("unexpected envelope fields")
+    issuer = raw.get("issuer_id")
+    if type(issuer) is not str or issuer not in trust.issuer_keys:
+        raise ValueError("unknown envelope issuer")
+    issuer_key = trust.issuer_keys[issuer]
+    calculated = hmac.new(
+        issuer_key, _MAC_DOMAIN + payload, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(calculated, signature_hex):
+        raise ValueError("envelope signature mismatch")
     if raw["schema"] != _SCHEMA or raw["operation"] != _OPERATION:
         raise ValueError("unsupported metadata operation")
     if raw["effect_ceiling"] != "NO_EFFECT":
@@ -148,59 +201,81 @@ def verify_and_reserve_readonly_envelope(
     ):
         raise ValueError("envelope expired, premature or unbounded")
 
-    calculated = hmac.new(issuer_key, payload, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(calculated, signature_hex):
-        raise ValueError("envelope signature mismatch")
-
     # Storage owner must protect the database file, parent directory, and
     # backups. This verification cannot defeat an OS-level DB replacement.
-    destination = Path(nonce_db)
+    destination = trust.nonce_db
     if (not destination.is_absolute() or not destination.parent.is_dir()
             or destination.is_symlink()):
         raise ValueError("untrusted reservation database path")
     ddl = (
         "CREATE TABLE IF NOT EXISTS readonly_envelope_reservations ("
         "issuer_id TEXT NOT NULL, nonce TEXT NOT NULL,"
-        "dispatch_id TEXT NOT NULL UNIQUE,"
-        "attempt_id TEXT NOT NULL UNIQUE,"
+        "dispatch_id TEXT NOT NULL,"
+        "attempt_id TEXT NOT NULL,"
         "payload_sha256 TEXT NOT NULL,"
-        "PRIMARY KEY (issuer_id, nonce))"
+        "PRIMARY KEY (issuer_id, nonce),"
+        "UNIQUE (issuer_id, dispatch_id),"
+        "UNIQUE (issuer_id, attempt_id))"
     )
-    with closing(sqlite3.connect(destination, timeout=10)) as conn:
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            existing = conn.execute(
-                "SELECT type, sql FROM sqlite_master WHERE name = ?",
-                ("readonly_envelope_reservations",),
-            ).fetchone()
-            if existing is not None:
-                normalize = lambda value: "".join(value.lower().split()).replace(
-                    "ifnotexists", ""
+    try:
+        with closing(sqlite3.connect(destination, timeout=10)) as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT type, sql FROM sqlite_master WHERE name = ?",
+                    ("readonly_envelope_reservations",),
+                ).fetchone()
+                if existing is not None:
+                    normalize = lambda value: "".join(value.lower().split()).replace(
+                        "ifnotexists", ""
+                    )
+                    if existing[0] != "table" or normalize(existing[1] or "") != normalize(ddl):
+                        raise ReservationStorageError("reservation database schema integrity mismatch")
+                conn.execute(ddl)
+                trigger = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? LIMIT 1",
+                    ("readonly_envelope_reservations",),
+                ).fetchone()
+                if trigger is not None:
+                    raise ReservationStorageError("reservation database trigger integrity mismatch")
+                indexes = conn.execute(
+                    "PRAGMA index_list(readonly_envelope_reservations)"
+                ).fetchall()
+                specs = set()
+                for _, index_name, unique, origin, partial in indexes:
+                    quoted = '"' + index_name.replace('"', '""') + '"'
+                    columns = tuple(row[2] for row in conn.execute(
+                        f"PRAGMA index_info({quoted})"
+                    ))
+                    if unique != 1 or partial != 0:
+                        raise ReservationStorageError("reservation index integrity mismatch")
+                    specs.add((origin, columns))
+                required = {
+                    ("pk", ("issuer_id", "nonce")),
+                    ("u", ("issuer_id", "dispatch_id")),
+                    ("u", ("issuer_id", "attempt_id")),
+                }
+                if len(indexes) != 3 or specs != required:
+                    raise ReservationStorageError("reservation index integrity mismatch")
+                if not (issued <= read_clock() < expiry):
+                    raise ValueError("envelope expired during reservation")
+                conn.execute(
+                    "INSERT INTO readonly_envelope_reservations"
+                    "(issuer_id, nonce, dispatch_id, attempt_id, payload_sha256)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        raw["issuer_id"], raw["nonce"], raw["dispatch_id"],
+                        raw["attempt_id"], hashlib.sha256(payload).hexdigest(),
+                    ),
                 )
-                if existing[0] != "table" or normalize(existing[1] or "") != normalize(ddl):
-                    raise ValueError("reservation database schema integrity mismatch")
-            conn.execute(ddl)
-            trigger = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? LIMIT 1",
-                ("readonly_envelope_reservations",),
-            ).fetchone()
-            if trigger is not None:
-                raise ValueError("reservation database trigger integrity mismatch")
-            if not (issued <= read_clock() < expiry):
-                raise ValueError("envelope expired during reservation")
-            conn.execute(
-                "INSERT INTO readonly_envelope_reservations"
-                "(issuer_id, nonce, dispatch_id, attempt_id, payload_sha256)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (
-                    raw["issuer_id"], raw["nonce"], raw["dispatch_id"],
-                    raw["attempt_id"], hashlib.sha256(payload).hexdigest(),
-                ),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError as exc:
-            conn.rollback()
-            raise ValueError("envelope replay detected") from exc
+                if not (issued <= read_clock() < expiry):
+                    raise ValueError("envelope expired during reservation")
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise ValueError("envelope replay detected") from exc
+    except sqlite3.DatabaseError as exc:
+        raise ReservationStorageError("reservation storage unavailable or corrupt") from exc
     return ReservedReadonlyEnvelope(
         issuer_id=raw["issuer_id"],
         repository=raw["repository"],
