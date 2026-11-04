@@ -803,3 +803,96 @@ def test_activation_fresh_task_passes_noninteractive_create_and_records_result(
     assert len([args for args, _ in calls if "/Create" in args]) == 1
     assert not host.terminated
     assert (root / "INSTALLATION_RESULT.json").exists()
+
+
+def test_exact_task_readback_ignores_launcher_path_substring() -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    output = (
+        "TaskName: \\UnrelatedTask\n"
+        "Task To Run: C:\\Temp\\VeraDesktopRuntime-desktop-v1.cmd\n"
+    )
+    with pytest.raises(RuntimeError, match="could not be read back exactly"):
+        desktop_installer._require_exact_logon_task_readback(target, output)
+
+
+def test_exact_task_readback_accepts_uppercase_exact_name() -> None:
+    desktop_installer._require_exact_logon_task_readback(
+        "VeraDesktopRuntime-desktop-v1",
+        "HostName: TEST-PC\nTaskName: \\VERADESKTOPRUNTIME-DESKTOP-V1\n"
+        "Task To Run: C:\\Trusted\\StartVeraRuntime.cmd\n",
+    )
+
+
+def test_postregistration_spec_permission_error_creates_uncertain_marker_and_stops_host(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    target = "VeraDesktopRuntime-desktop-v1"
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected task action")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    monkeypatch.setattr(
+        desktop_installer, "_record_activation_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("spec locked")),
+    )
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(PermissionError, match="spec locked"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert sum("/Create" in cmd for cmd in calls) == 1
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    saved_spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert not saved_spec.to_mapping()["activation"].get("active", False)
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["task_name"] == target
+    assert marker["active"] is False
+    assert marker["state"] == "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION"
+
+
+def test_postregistration_receipt_failure_rolls_back_active_spec_to_uncertain(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    target = "VeraDesktopRuntime-desktop-v1"
+
+    def fake_run(args, **kwargs):
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected task action")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    original_write = Path.write_text
+
+    def deny_result(self, *args, **kwargs):
+        if self.name == "INSTALLATION_RESULT.json":
+            raise PermissionError("result locked")
+        return original_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", deny_result)
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(PermissionError, match="result locked"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    saved_spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert saved_spec.to_mapping()["activation"]["active"] is False
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["active"] is False
