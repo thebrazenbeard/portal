@@ -732,6 +732,35 @@ def test_task_create_is_noninteractive_at_subprocess_boundary(monkeypatch) -> No
     assert observed["check"] is True
 
 
+@pytest.mark.parametrize("tool", ["schtasks.exe", "whoami.exe"])
+def test_scheduler_executables_are_pinned_before_subprocess(
+    monkeypatch, tool: str,
+) -> None:
+    spawned = []
+    trusted = "C:\\Windows\\System32\\" + tool
+
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool", lambda _: trusted)
+    monkeypatch.setattr(
+        desktop_installer.subprocess, "run",
+        lambda args, **kwargs: spawned.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    desktop_installer._run([tool, "/Query"], capture=True)
+    assert spawned == [[trusted, "/Query"]]
+
+
+def test_missing_trusted_scheduler_binary_blocks_before_subprocess(monkeypatch) -> None:
+    called = []
+
+    def unavailable(_):
+        raise RuntimeError("trusted system directory unavailable")
+
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool", unavailable)
+    monkeypatch.setattr(desktop_installer.subprocess, "run", lambda *_a, **_k: called.append(True))
+    with pytest.raises(RuntimeError, match="trusted system directory"):
+        desktop_installer._run(["schtasks.exe", "/Query"])
+    assert called == []
+
+
 def test_activate_existing_task_never_creates_or_changes_activation(
     monkeypatch, tmp_path: Path,
 ) -> None:
