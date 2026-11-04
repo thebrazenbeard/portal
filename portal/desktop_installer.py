@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import csv
 import io
 import json
@@ -231,6 +232,30 @@ def _record_task_registration_uncertain(runtime_root: Path, task_name: str) -> N
         json.dump(marker, sink, sort_keys=True, indent=2)
         sink.write("\n")
 
+
+def _trusted_windows_scheduler_tool(name: str) -> str:
+    """Resolve scheduler commands using the OS system directory, not PATH.
+
+    A shadowed schtasks/whoami binary could forge *both* the inventory and
+    post-create receipt. GetSystemDirectoryW bypasses the mutable PATH and
+    SystemRoot environment variables; any uncertainty blocks activation.
+    """
+    name = name.casefold()
+    if os.name != "nt" or name not in {"schtasks.exe", "whoami.exe"}:
+        raise RuntimeError("trusted Windows scheduler tool unavailable")
+    try:
+        system_dir = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetSystemDirectoryW(system_dir, len(system_dir))
+        if not 0 < size < len(system_dir):
+            raise RuntimeError("Windows system directory cannot be resolved")
+        binary = Path(system_dir.value) / name
+        if not binary.is_file():
+            raise RuntimeError("trusted Windows scheduler tool is missing")
+        return str(binary)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise RuntimeError("trusted Windows scheduler tool unavailable") from exc
+
+
 def _run(
     args: list[str],
     *,
@@ -239,6 +264,9 @@ def _run(
     capture: bool = False,
     noninteractive: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    if args and args[0].casefold() in {"schtasks.exe", "whoami.exe"}:
+        # Centralize pinning, including inventory, registration and readback.
+        args = [_trusted_windows_scheduler_tool(args[0]), *args[1:]]
     return subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
