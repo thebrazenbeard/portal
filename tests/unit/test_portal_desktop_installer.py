@@ -46,7 +46,8 @@ def test_launcher_sets_runtime_root_and_invokes_module(tmp_path: Path) -> None:
     text = launcher_text(root, python, "portal.desktop_host")
 
     assert f'set "VERA_RUNTIME_ROOT={root}"' in text
-    assert f'"{python}" -m portal.desktop_host' in text
+    assert f'"{python}" -B -m portal.desktop_host' in text
+    assert 'PYTHONDONTWRITEBYTECODE=1' in text
 
 
 @pytest.mark.parametrize("unsafe", ["%PATH%", 'bad"quote', "bad!bang", "bad^caret", "a&b", "a|b", "a>b", "a<b", "new\nline", "é"])
