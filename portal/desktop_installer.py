@@ -12,6 +12,7 @@ import sys
 import time
 
 from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .runtime_source_attestation import write_attestation, verify_attestation
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
@@ -413,11 +414,13 @@ def install(
 
     python = _install_sources(runtime_root, spec)
     imports = _verify_imports(python, runtime_root)
+    source_attestation = write_attestation(runtime_root, spec)
     staged_host = _start_host(runtime_root, python)
     if staged_host is None:
         raise RuntimeError("staged host was not started by this installer")
     try:
         qualification = _qualify(runtime_root, python)
+        verify_attestation(runtime_root, spec)
     except BaseException:
         _terminate_unqualified_host(staged_host)
         raise
@@ -483,6 +486,11 @@ def install(
                 "sha": item.sha,
             }
             for item in spec.sources
+        },
+        "source_attestation": {
+            "schema": source_attestation["schema"],
+            "sha256": source_attestation["sha256"],
+            "path": "RUNTIME_SOURCE_ATTESTATION.json",
         },
         "imports": imports,
         "qualification": qualification,
@@ -562,3 +570,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
