@@ -292,6 +292,39 @@ def test_qualification_failure_stops_staged_host_and_never_activates(
     assert spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
 
 
+def test_source_drift_after_qualification_stops_host_before_activation(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    class Started:
+        def __init__(self):
+            self.terminated = False
+        def poll(self):
+            return None
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout):
+            return 0
+    child = Started()
+    monkeypatch.setattr(desktop_installer, "_install_sources", lambda root, spec: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda python, root: {})
+    monkeypatch.setattr(desktop_installer, "write_attestation", lambda root, spec: {"schema": "TEST", "sha256": "0" * 64})
+    monkeypatch.setattr(desktop_installer, "_start_host", lambda root, python: child)
+    monkeypatch.setattr(desktop_installer, "_qualify", lambda root, python: {"qualified": True})
+    monkeypatch.setattr(
+        desktop_installer, "verify_attestation",
+        lambda root, spec: (_ for _ in ()).throw(RuntimeError("source attestation mismatch")),
+    )
+    monkeypatch.setattr(desktop_installer, "_run", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("drifted runtime must not register a task")
+    ))
+    runtime = tmp_path / "staged-runtime"
+    with pytest.raises(RuntimeError, match="source attestation mismatch"):
+        desktop_installer.install(runtime_root=runtime, spec=_spec(), activate=True)
+    assert child.terminated
+    assert not (runtime / "INSTALLATION_RESULT.json").exists()
+    assert not (runtime / "StartVeraRuntime.cmd").exists()
+
+
 def test_unqualified_staged_host_timeout_escalates_to_owned_process_kill() -> None:
     import subprocess
 
