@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -87,7 +89,6 @@ def build_logon_task_command(
     return [
         "schtasks.exe",
         "/Create",
-        "/F",
         "/SC",
         "ONLOGON",
         "/TN",
@@ -97,12 +98,46 @@ def build_logon_task_command(
     ]
 
 
+
+def _require_unclaimed_logon_task(task_name: str) -> None:
+    """Inspect the complete scheduler inventory; an uncertain answer blocks activation.
+
+    The single-task /Query exit code cannot distinguish 'not found' from
+    access denial or scheduler failure, so use a successful complete listing.
+    /Create is also issued without /F and with stdin closed to resist races.
+    """
+    if not _TASK_NAME_RE.fullmatch(task_name):
+        raise ValueError("task_name contains unsupported characters")
+    try:
+        inventory = _run(
+            ["schtasks.exe", "/Query", "/FO", "CSV", "/NH"],
+            capture=True,
+        )
+        rows = list(csv.reader(io.StringIO(inventory.stdout.lstrip("\ufeff")), strict=True))
+    except (OSError, subprocess.CalledProcessError, UnicodeError, csv.Error) as exc:
+        raise RuntimeError(
+            "scheduled-task inventory unavailable; refusing logon activation"
+        ) from exc
+    if not rows:
+        raise RuntimeError("scheduled-task inventory empty; refusing logon activation")
+    expected = ("\\" + task_name).casefold()
+    for row in rows:
+        if len(row) < 3 or not row[0].startswith("\\"):
+            raise RuntimeError(
+                "scheduled-task inventory malformed; refusing logon activation"
+            )
+        if row[0].casefold() == expected:
+            raise RuntimeError(
+                "logon task already exists; refusing to replace it"
+            )
+
 def _run(
     args: list[str],
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     capture: bool = False,
+    noninteractive: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
@@ -111,6 +146,7 @@ def _run(
         check=True,
         text=True,
         capture_output=capture,
+        stdin=subprocess.DEVNULL if noninteractive else None,
     )
 
 
@@ -452,26 +488,36 @@ def install(
             "_",
             spec.install_id,
         )
-        _run(
-            build_logon_task_command(
-                task_name=task_name,
-                launcher=host_launcher,
+        try:
+            _require_unclaimed_logon_task(task_name)
+            # /F is forbidden. If another actor creates the task between
+            # inventory and /Create, closed stdin prevents accepting a prompt.
+            _run(
+                build_logon_task_command(
+                    task_name=task_name,
+                    launcher=host_launcher,
+                ),
+                noninteractive=True,
             )
-        )
-        query = _run(
-            [
-                "schtasks.exe",
-                "/Query",
-                "/TN",
-                task_name,
-                "/FO",
-                "LIST",
-                "/V",
-            ],
-            capture=True,
-        )
-        if task_name not in query.stdout:
-            raise RuntimeError("registered logon task could not be read back")
+            query = _run(
+                [
+                    "schtasks.exe",
+                    "/Query",
+                    "/TN",
+                    task_name,
+                    "/FO",
+                    "LIST",
+                    "/V",
+                ],
+                capture=True,
+            )
+            if task_name not in query.stdout:
+                raise RuntimeError("registered logon task could not be read back")
+        except BaseException:
+            # Only this invocation's freshly staged host is owned here.
+            # Leave any registered task untouched for manual reconciliation.
+            _terminate_unqualified_host(staged_host)
+            raise
 
     _record_activation_state(
         runtime_root,
