@@ -896,3 +896,37 @@ def test_postregistration_receipt_failure_rolls_back_active_spec_to_uncertain(
     assert saved_spec.to_mapping()["activation"]["active"] is False
     marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
     assert marker["active"] is False
+
+
+def test_corrupt_spec_after_registration_still_marks_uncertain_and_stops_host(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    root = tmp_path / "fresh-staged-runtime"
+    target = "VeraDesktopRuntime-desktop-v1"
+
+    def fake_run(args, **kwargs):
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            # Simulate a damaged staged metadata file between scheduler create
+            # and activation bookkeeping; no real scheduler operation occurs.
+            (root / "RUNTIME_INSTALL_SPEC.json").write_text(
+                "{malformed-json", encoding="utf-8",
+            )
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected scheduler invocation")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    with pytest.raises(json.JSONDecodeError):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["task_name"] == target
+    assert marker["active"] is False
+    assert marker["state"] == "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION"
