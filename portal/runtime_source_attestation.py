@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 from typing import TYPE_CHECKING
@@ -43,6 +44,27 @@ def _is_reparse(path: Path) -> bool:
     )
 
 
+def _source_file_paths(root: Path):
+    """Prune Git/cache trees before descent and reject redirected directories."""
+    def onerror(exc: OSError) -> None:
+        raise RuntimeError("staged source directory cannot be enumerated") from exc
+
+    for parent_name, directories, filenames in os.walk(root, onerror=onerror):
+        parent = Path(parent_name)
+        retained = []
+        for name in directories:
+            candidate = parent / name
+            if _is_reparse(candidate):
+                raise RuntimeError("staged source contains a redirected directory")
+            if not _is_ephemeral(candidate.relative_to(root)):
+                retained.append(name)
+        directories[:] = retained
+        for name in sorted(filenames):
+            path = parent / name
+            if not _is_ephemeral(path.relative_to(root)):
+                yield path
+
+
 def _assert_checkout_identity(root: Path, expected_sha: str) -> None:
     """Prove staged working bytes still belong to the pinned detached Git tree."""
     def git(*args: str) -> str:
@@ -78,10 +100,8 @@ def build_attestation(runtime_root: Path, spec: InstallSpec) -> dict[str, object
             raise RuntimeError(f"{source.component} source directory is missing or redirected")
         _assert_checkout_identity(root, source.sha)
         files: dict[str, object] = {}
-        for path in sorted(root.rglob("*")):
+        for path in _source_file_paths(root):
             relative = path.relative_to(root)
-            if _is_ephemeral(relative):
-                continue
             if _is_reparse(path):
                 raise RuntimeError(f"{source.component} source contains a reparse point")
             if path.is_file():
