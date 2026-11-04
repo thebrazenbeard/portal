@@ -266,6 +266,10 @@ def test_qualification_failure_stops_staged_host_and_never_activates(
         desktop_installer, "_install_sources", lambda runtime_root, spec: tmp_path / "python.exe",
     )
     monkeypatch.setattr(desktop_installer, "_verify_imports", lambda python, root: {})
+    monkeypatch.setattr(
+        desktop_installer, "write_attestation",
+        lambda runtime_root, spec: {"schema": "TEST", "sha256": "0" * 64},
+    )
     monkeypatch.setattr(desktop_installer, "_start_host", lambda root, python: child)
     monkeypatch.setattr(
         desktop_installer, "_qualify",
@@ -530,3 +534,4 @@ def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path
         "active": True,
     }
     assert "ACTIVE_AT_LOGON" in updated["claim_ceiling"]
+
