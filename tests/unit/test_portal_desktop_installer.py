@@ -561,7 +561,8 @@ def test_logon_task_command_binds_exact_launcher_path(tmp_path: Path) -> None:
         launcher=launcher,
     )
 
-    assert command[:4] == ["schtasks.exe", "/Create", "/F", "/SC"]
+    assert command[:3] == ["schtasks.exe", "/Create", "/SC"]
+    assert "/F" not in command
     assert "ONLOGON" in command
     assert "/TN" in command
     assert "VeraDesktopRuntime-test" in command
@@ -614,3 +615,318 @@ def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path
     }
     assert "ACTIVE_AT_LOGON" in updated["claim_ceiling"]
 
+
+
+def _mock_qualified_activation(monkeypatch):
+    """Exercise registration without cloning, installing, or running a real host."""
+    class OwnedHost:
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    host = OwnedHost()
+    monkeypatch.setattr(
+        desktop_installer, "_install_sources",
+        lambda runtime_root, spec: runtime_root / ".venv" / "Scripts" / "python.exe",
+    )
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_: {})
+    monkeypatch.setattr(
+        desktop_installer, "write_attestation",
+        lambda *_: {"schema": "TEST", "sha256": "0" * 64},
+    )
+    monkeypatch.setattr(desktop_installer, "verify_attestation", lambda *_: {})
+    monkeypatch.setattr(desktop_installer, "_start_host", lambda *_: host)
+    monkeypatch.setattr(desktop_installer, "_qualify", lambda *_: {"qualified": True})
+    return host
+
+
+def _task_inventory(*names):
+    return "".join(f'"\\{name}","N/A","Ready"\n' for name in names)
+
+
+def test_logon_inventory_fails_closed_on_existing_name_and_preserves_task(
+    monkeypatch,
+) -> None:
+    commands = []
+    existing = _task_inventory("Microsoft\\Windows\\Defrag\\ScheduledDefrag",
+                               "VeraDesktopRuntime-DESKTOP-V1")
+
+    def fake_run(args, **kwargs):
+        commands.append(args)
+        return SimpleNamespace(stdout=existing)
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    with pytest.raises(RuntimeError, match="already exists"):
+        desktop_installer._require_unclaimed_logon_task("VeraDesktopRuntime-desktop-v1")
+    assert len(commands) == 1
+    assert commands[0] == ["schtasks.exe", "/Query", "/FO", "CSV", "/NH"]
+    assert not any("/Create" in cmd for cmd in commands)
+
+
+@pytest.mark.parametrize("failure", ["error", "empty", "malformed"])
+def test_logon_inventory_fails_closed_on_uncertain_name(
+    monkeypatch, failure: str,
+) -> None:
+    commands = []
+
+    def fake_run(args, **kwargs):
+        commands.append(args)
+        if failure == "error":
+            raise subprocess.CalledProcessError(5, args)
+        return SimpleNamespace(stdout="" if failure == "empty" else "not CSV")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    with pytest.raises(RuntimeError, match="refusing logon activation"):
+        desktop_installer._require_unclaimed_logon_task("VeraDesktopRuntime-new")
+    assert len(commands) == 1
+    assert not any("/Create" in cmd for cmd in commands)
+
+
+def test_task_create_is_noninteractive_at_subprocess_boundary(monkeypatch) -> None:
+    observed = {}
+
+    def fake_run(args, **kwargs):
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(desktop_installer.subprocess, "run", fake_run)
+    desktop_installer._run(["schtasks.exe", "/Create"], noninteractive=True)
+    assert observed["stdin"] is subprocess.DEVNULL
+    assert observed["check"] is True
+
+
+def test_activate_existing_task_never_creates_or_changes_activation(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    host = _mock_qualified_activation(monkeypatch)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(stdout=_task_inventory("VeraDesktopRuntime-desktop-v1"))
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(RuntimeError, match="already exists"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert calls == [["schtasks.exe", "/Query", "/FO", "CSV", "/NH"]]
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert not spec.to_mapping()["activation"].get("active", False)
+
+
+def test_activation_creation_race_keeps_original_task_and_no_active_receipt(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    host = _mock_qualified_activation(monkeypatch)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        if "/Create" in args:
+            assert "/F" not in args
+            assert kwargs["noninteractive"] is True
+            raise subprocess.CalledProcessError(1, args)  # Another actor won.
+        return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(subprocess.CalledProcessError):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert sum("/Create" in args for args, _ in calls) == 1
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert not spec.to_mapping()["activation"].get("active", False)
+
+
+def test_activation_postcreate_readback_failure_is_not_recorded_active(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    host = _mock_qualified_activation(monkeypatch)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\UnrelatedTask\n")
+        raise AssertionError("unexpected scheduler invocation")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(RuntimeError, match="could not be read back"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert sum("/Create" in cmd for cmd in calls) == 1
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert not spec.to_mapping()["activation"].get("active", False)
+
+
+def test_activation_fresh_task_passes_noninteractive_create_and_records_result(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    host = _mock_qualified_activation(monkeypatch)
+    calls = []
+    target = "VeraDesktopRuntime-desktop-v1"
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            assert "/F" not in args
+            assert kwargs["noninteractive"] is True
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected scheduler invocation")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    root = tmp_path / "fresh-staged-runtime"
+    result = desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert result["activation"]["active_at_logon"] is True
+    assert result["activation"]["task_name"] == target
+    assert len([args for args, _ in calls if "/Create" in args]) == 1
+    assert not host.terminated
+    assert (root / "INSTALLATION_RESULT.json").exists()
+
+
+def test_exact_task_readback_ignores_launcher_path_substring() -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    output = (
+        "TaskName: \\UnrelatedTask\n"
+        "Task To Run: C:\\Temp\\VeraDesktopRuntime-desktop-v1.cmd\n"
+    )
+    with pytest.raises(RuntimeError, match="could not be read back exactly"):
+        desktop_installer._require_exact_logon_task_readback(target, output)
+
+
+def test_exact_task_readback_accepts_uppercase_exact_name() -> None:
+    desktop_installer._require_exact_logon_task_readback(
+        "VeraDesktopRuntime-desktop-v1",
+        "HostName: TEST-PC\nTaskName: \\VERADESKTOPRUNTIME-DESKTOP-V1\n"
+        "Task To Run: C:\\Trusted\\StartVeraRuntime.cmd\n",
+    )
+
+
+def test_postregistration_spec_permission_error_creates_uncertain_marker_and_stops_host(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    target = "VeraDesktopRuntime-desktop-v1"
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected task action")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    monkeypatch.setattr(
+        desktop_installer, "_record_activation_state",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("spec locked")),
+    )
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(PermissionError, match="spec locked"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert sum("/Create" in cmd for cmd in calls) == 1
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    saved_spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert not saved_spec.to_mapping()["activation"].get("active", False)
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["task_name"] == target
+    assert marker["active"] is False
+    assert marker["state"] == "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION"
+
+
+def test_postregistration_receipt_failure_rolls_back_active_spec_to_uncertain(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    target = "VeraDesktopRuntime-desktop-v1"
+
+    def fake_run(args, **kwargs):
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected task action")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    original_write = Path.write_text
+
+    def deny_result(self, *args, **kwargs):
+        if self.name == "INSTALLATION_RESULT.json":
+            raise PermissionError("result locked")
+        return original_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", deny_result)
+    root = tmp_path / "fresh-staged-runtime"
+    with pytest.raises(PermissionError, match="result locked"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    saved_spec = InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json")
+    assert saved_spec.to_mapping()["activation"]["active"] is False
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["active"] is False
+
+
+def test_corrupt_spec_after_registration_still_marks_uncertain_and_stops_host(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    root = tmp_path / "fresh-staged-runtime"
+    target = "VeraDesktopRuntime-desktop-v1"
+
+    def fake_run(args, **kwargs):
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            # Simulate a damaged staged metadata file between scheduler create
+            # and activation bookkeeping; no real scheduler operation occurs.
+            (root / "RUNTIME_INSTALL_SPEC.json").write_text(
+                "{malformed-json", encoding="utf-8",
+            )
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/FO" in args and "LIST" in args:
+            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        raise AssertionError("unexpected scheduler invocation")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    with pytest.raises(json.JSONDecodeError):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["task_name"] == target
+    assert marker["active"] is False
+    assert marker["state"] == "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION"
