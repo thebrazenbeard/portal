@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -652,6 +653,34 @@ def _task_inventory(*names):
     return "".join(f'"\\{name}","N/A","Ready"\n' for name in names)
 
 
+_TEST_ACCOUNT = "LAPPY\\patrick"
+_TEST_ACCOUNT_SID = "S-1-5-21-111-222-333-1001"
+
+
+def _whoami_csv() -> str:
+    return f'"{_TEST_ACCOUNT}","{_TEST_ACCOUNT_SID}"\n'
+
+
+def _task_xml(
+    target: str, launcher: Path, *, uri: str | None = None,
+    command: str | None = None, trigger: str = "LogonTrigger",
+    user_id: str = _TEST_ACCOUNT_SID, runlevel: str = "LeastPrivilege",
+    enabled: str = "true", action_count: int = 1,
+) -> str:
+    uri_xml = escape(uri if uri is not None else "\\" + target)
+    command_xml = escape(command if command is not None else str(launcher.resolve()))
+    exec_xml = "<Exec><Command>" + command_xml + "</Command></Exec>"
+    return (
+        '<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+        "<RegistrationInfo><URI>" + uri_xml + "</URI></RegistrationInfo>"
+        "<Triggers><" + trigger + "><Enabled>" + enabled + "</Enabled></" + trigger + "></Triggers>"
+        "<Principals><Principal id=\"Author\"><UserId>" + escape(user_id) + "</UserId>"
+        "<LogonType>InteractiveToken</LogonType><RunLevel>" + runlevel
+        + "</RunLevel></Principal></Principals>"
+        "<Actions Context=\"Author\">" + exec_xml * action_count + "</Actions></Task>"
+    )
+
+
 def test_logon_inventory_fails_closed_on_existing_name_and_preserves_task(
     monkeypatch,
 ) -> None:
@@ -697,10 +726,41 @@ def test_task_create_is_noninteractive_at_subprocess_boundary(monkeypatch) -> No
         observed.update(kwargs)
         return subprocess.CompletedProcess(args, 0, "", "")
 
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool",
+                        lambda tool: "C:\\Windows\\System32\\" + tool)
     monkeypatch.setattr(desktop_installer.subprocess, "run", fake_run)
     desktop_installer._run(["schtasks.exe", "/Create"], noninteractive=True)
     assert observed["stdin"] is subprocess.DEVNULL
     assert observed["check"] is True
+
+
+@pytest.mark.parametrize("tool", ["schtasks.exe", "whoami.exe"])
+def test_scheduler_executables_are_pinned_before_subprocess(
+    monkeypatch, tool: str,
+) -> None:
+    spawned = []
+    trusted = "C:\\Windows\\System32\\" + tool
+
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool", lambda _: trusted)
+    monkeypatch.setattr(
+        desktop_installer.subprocess, "run",
+        lambda args, **kwargs: spawned.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    desktop_installer._run([tool, "/Query"], capture=True)
+    assert spawned == [[trusted, "/Query"]]
+
+
+def test_missing_trusted_scheduler_binary_blocks_before_subprocess(monkeypatch) -> None:
+    called = []
+
+    def unavailable(_):
+        raise RuntimeError("trusted system directory unavailable")
+
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool", unavailable)
+    monkeypatch.setattr(desktop_installer.subprocess, "run", lambda *_a, **_k: called.append(True))
+    with pytest.raises(RuntimeError, match="trusted system directory"):
+        desktop_installer._run(["schtasks.exe", "/Query"])
+    assert called == []
 
 
 def test_activate_existing_task_never_creates_or_changes_activation(
@@ -732,6 +792,8 @@ def test_activation_creation_race_keeps_original_task_and_no_active_receipt(
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/Create" in args:
             assert "/F" not in args
             assert kwargs["noninteractive"] is True
@@ -757,12 +819,16 @@ def test_activation_postcreate_readback_failure_is_not_recorded_active(
 
     def fake_run(args, **kwargs):
         calls.append(args)
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/FO" in args and "CSV" in args:
             return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
         if "/Create" in args:
             return SimpleNamespace(stdout="SUCCESS")
-        if "/FO" in args and "LIST" in args:
-            return SimpleNamespace(stdout="TaskName: \\UnrelatedTask\n")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                "UnrelatedTask", tmp_path / "fresh-staged-runtime" / "StartVeraRuntime.cmd",
+            ))
         raise AssertionError("unexpected scheduler invocation")
 
     monkeypatch.setattr(desktop_installer, "_run", fake_run)
@@ -776,6 +842,45 @@ def test_activation_postcreate_readback_failure_is_not_recorded_active(
     assert not spec.to_mapping()["activation"].get("active", False)
 
 
+def test_activation_same_name_wrong_action_preserves_uncertain_receipt(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    import json
+
+    host = _mock_qualified_activation(monkeypatch)
+    root = tmp_path / "fresh-staged-runtime"
+    target = "VeraDesktopRuntime-desktop-v1"
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
+        if "/FO" in args and "CSV" in args:
+            return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
+        if "/Create" in args:
+            assert "/F" not in args
+            return SimpleNamespace(stdout="SUCCESS")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                target, root / "StartVeraRuntime.cmd",
+                command=str((root / "Attacker.cmd").resolve()),
+            ))
+        raise AssertionError("unexpected scheduler action")
+
+    monkeypatch.setattr(desktop_installer, "_run", fake_run)
+    with pytest.raises(RuntimeError, match="definition could not be read back exactly"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+    assert sum("/Create" in cmd for cmd in calls) == 1
+    assert sum("/XML" in cmd for cmd in calls) == 1
+    assert host.terminated
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    assert not InstallSpec.read(root / "RUNTIME_INSTALL_SPEC.json").to_mapping()["activation"].get("active", False)
+    marker = json.loads((root / "TASK_REGISTRATION_UNCERTAIN.json").read_text())
+    assert marker["active"] is False
+    assert marker["task_name"] == target
+
+
 def test_activation_fresh_task_passes_noninteractive_create_and_records_result(
     monkeypatch, tmp_path: Path,
 ) -> None:
@@ -785,14 +890,18 @@ def test_activation_fresh_task_passes_noninteractive_create_and_records_result(
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/FO" in args and "CSV" in args:
             return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
         if "/Create" in args:
             assert "/F" not in args
             assert kwargs["noninteractive"] is True
             return SimpleNamespace(stdout="SUCCESS")
-        if "/FO" in args and "LIST" in args:
-            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                target, tmp_path / "fresh-staged-runtime" / "StartVeraRuntime.cmd",
+            ))
         raise AssertionError("unexpected scheduler invocation")
 
     monkeypatch.setattr(desktop_installer, "_run", fake_run)
@@ -805,22 +914,70 @@ def test_activation_fresh_task_passes_noninteractive_create_and_records_result(
     assert (root / "INSTALLATION_RESULT.json").exists()
 
 
-def test_exact_task_readback_ignores_launcher_path_substring() -> None:
-    target = "VeraDesktopRuntime-desktop-v1"
-    output = (
-        "TaskName: \\UnrelatedTask\n"
-        "Task To Run: C:\\Temp\\VeraDesktopRuntime-desktop-v1.cmd\n"
-    )
-    with pytest.raises(RuntimeError, match="could not be read back exactly"):
-        desktop_installer._require_exact_logon_task_readback(target, output)
-
-
-def test_exact_task_readback_accepts_uppercase_exact_name() -> None:
+def _assert_task_xml(target: str, launcher: Path, xml: str) -> None:
     desktop_installer._require_exact_logon_task_readback(
-        "VeraDesktopRuntime-desktop-v1",
-        "HostName: TEST-PC\nTaskName: \\VERADESKTOPRUNTIME-DESKTOP-V1\n"
-        "Task To Run: C:\\Trusted\\StartVeraRuntime.cmd\n",
+        target, launcher, xml, account=_TEST_ACCOUNT, account_sid=_TEST_ACCOUNT_SID,
     )
+
+
+def test_exact_task_readback_ignores_launcher_path_substring(tmp_path: Path) -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    launcher = tmp_path / target / "StartVeraRuntime.cmd"
+    xml = _task_xml(
+        target, launcher, uri="\\UnrelatedTask",
+        command=str((tmp_path / target / "StartVeraRuntime.cmd").resolve()),
+    )
+    with pytest.raises(RuntimeError, match="definition could not be read back exactly"):
+        _assert_task_xml(target, launcher, xml)
+
+
+def test_exact_task_readback_accepts_uppercase_exact_name(tmp_path: Path) -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    launcher = tmp_path / "StartVeraRuntime.cmd"
+    _assert_task_xml(target, launcher, _task_xml(
+        target, launcher, uri="\\VERADESKTOPRUNTIME-DESKTOP-V1",
+    ))
+
+
+def test_same_name_wrong_action_fails_closed_before_activation(tmp_path: Path) -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    launcher = tmp_path / "StartVeraRuntime.cmd"
+    deceptive_xml = _task_xml(
+        target, launcher, command=str(tmp_path / "Untrusted.cmd"),
+    )
+    with pytest.raises(RuntimeError, match="definition could not be read back exactly"):
+        _assert_task_xml(target, launcher, deceptive_xml)
+
+
+@pytest.mark.parametrize("changes", [
+    {"trigger": "CalendarTrigger"},
+    {"user_id": "S-1-5-18"},
+    {"runlevel": "HighestAvailable"},
+    {"enabled": "false"},
+    {"action_count": 2},
+    {"uri": "\\Other\\VeraDesktopRuntime-desktop-v1"},
+])
+def test_task_definition_mismatched_fields_fail_closed(
+    tmp_path: Path, changes: dict,
+) -> None:
+    target = "VeraDesktopRuntime-desktop-v1"
+    launcher = tmp_path / "StartVeraRuntime.cmd"
+    with pytest.raises(RuntimeError, match="definition could not be read back exactly"):
+        _assert_task_xml(target, launcher, _task_xml(target, launcher, **changes))
+
+
+def test_malformed_scheduler_xml_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="definition could not be read back exactly"):
+        _assert_task_xml("VeraDesktopRuntime-test", tmp_path / "Start.cmd", "<Task>")
+
+
+@pytest.mark.parametrize("result", ["not CSV", '"A","wrong SID"\n', ""])
+def test_current_account_malformed_fails_before_create(monkeypatch, result: str) -> None:
+    monkeypatch.setattr(
+        desktop_installer, "_run", lambda *_args, **_kwargs: SimpleNamespace(stdout=result),
+    )
+    with pytest.raises(RuntimeError, match="principal malformed"):
+        desktop_installer._current_scheduler_account()
 
 
 def test_postregistration_spec_permission_error_creates_uncertain_marker_and_stops_host(
@@ -834,12 +991,16 @@ def test_postregistration_spec_permission_error_creates_uncertain_marker_and_sto
 
     def fake_run(args, **kwargs):
         calls.append(args)
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/FO" in args and "CSV" in args:
             return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
         if "/Create" in args:
             return SimpleNamespace(stdout="SUCCESS")
-        if "/FO" in args and "LIST" in args:
-            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                target, tmp_path / "fresh-staged-runtime" / "StartVeraRuntime.cmd",
+            ))
         raise AssertionError("unexpected task action")
 
     monkeypatch.setattr(desktop_installer, "_run", fake_run)
@@ -870,12 +1031,16 @@ def test_postregistration_receipt_failure_rolls_back_active_spec_to_uncertain(
     target = "VeraDesktopRuntime-desktop-v1"
 
     def fake_run(args, **kwargs):
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/FO" in args and "CSV" in args:
             return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
         if "/Create" in args:
             return SimpleNamespace(stdout="SUCCESS")
-        if "/FO" in args and "LIST" in args:
-            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                target, tmp_path / "fresh-staged-runtime" / "StartVeraRuntime.cmd",
+            ))
         raise AssertionError("unexpected task action")
 
     monkeypatch.setattr(desktop_installer, "_run", fake_run)
@@ -908,6 +1073,8 @@ def test_corrupt_spec_after_registration_still_marks_uncertain_and_stops_host(
     target = "VeraDesktopRuntime-desktop-v1"
 
     def fake_run(args, **kwargs):
+        if args[0] == "whoami.exe":
+            return SimpleNamespace(stdout=_whoami_csv())
         if "/FO" in args and "CSV" in args:
             return SimpleNamespace(stdout=_task_inventory("UnrelatedTask"))
         if "/Create" in args:
@@ -917,8 +1084,10 @@ def test_corrupt_spec_after_registration_still_marks_uncertain_and_stops_host(
                 "{malformed-json", encoding="utf-8",
             )
             return SimpleNamespace(stdout="SUCCESS")
-        if "/FO" in args and "LIST" in args:
-            return SimpleNamespace(stdout="TaskName: \\" + target + "\n")
+        if "/XML" in args:
+            return SimpleNamespace(stdout=_task_xml(
+                target, root / "StartVeraRuntime.cmd",
+            ))
         raise AssertionError("unexpected scheduler invocation")
 
     monkeypatch.setattr(desktop_installer, "_run", fake_run)
