@@ -65,8 +65,21 @@ def _source_file_paths(root: Path):
                 yield path
 
 
+def _reject_executable_bytecode(root: Path) -> None:
+    """A valid .pyc can execute different code from pristine .py source bytes."""
+    for parent_name, directories, filenames in os.walk(root):
+        parent = Path(parent_name)
+        directories[:] = [name for name in directories if name != ".git"]
+        for name in filenames:
+            if name.endswith((".pyc", ".pyo")):
+                raise RuntimeError(
+                    f"staged source has unverified executable bytecode: "
+                    f"{(parent / name).relative_to(root)}"
+                )
+
+
 def _assert_checkout_identity(root: Path, expected_sha: str) -> None:
-    """Prove staged working bytes still belong to the pinned detached Git tree."""
+    """Compare actual bytes to pinned Git blobs, ignoring no index flags."""
     def git(*args: str) -> str:
         completed = subprocess.run(
             ["git", "-C", str(root), *args],
@@ -76,8 +89,29 @@ def _assert_checkout_identity(root: Path, expected_sha: str) -> None:
 
     if git("rev-parse", "HEAD").strip() != expected_sha:
         raise RuntimeError("staged source Git HEAD differs from install spec")
-    if git("diff", "--name-only", "HEAD", "--").strip():
-        raise RuntimeError("staged source modified relative to Git HEAD")
+    # 'git diff' alone is insufficient: assume-unchanged and skip-worktree
+    # flags can hide modified files. Read immutable HEAD blob contents.
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "HEAD"],
+        capture_output=True, check=True,
+    ).stdout
+    for record in tracked.split(b"\0"):
+        if not record:
+            continue
+        metadata, name = record.split(b"\t", 1)
+        mode, kind, oid = metadata.split()
+        if kind != b"blob" or mode not in {b"100644", b"100755"}:
+            raise RuntimeError("staged source contains unsupported Git object")
+        relative = Path(name.decode("utf-8", "surrogateescape"))
+        path = root / relative
+        if not path.is_file() or _is_reparse(path):
+            raise RuntimeError("staged source tracked path is missing or redirected")
+        pinned_bytes = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "blob", oid.decode("ascii")],
+            capture_output=True, check=True,
+        ).stdout
+        if hashlib.sha256(pinned_bytes).hexdigest() != _sha256_file(path)[0]:
+            raise RuntimeError("staged source bytes differ from pinned Git blob")
     for name in git("ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0"):
         if name and not _is_ephemeral(Path(name)):
             raise RuntimeError("staged source contains unexpected ignored files")
@@ -98,6 +132,7 @@ def build_attestation(runtime_root: Path, spec: InstallSpec) -> dict[str, object
         root = source_root / source.component
         if not root.is_dir() or _is_reparse(root):
             raise RuntimeError(f"{source.component} source directory is missing or redirected")
+        _reject_executable_bytecode(root)
         _assert_checkout_identity(root, source.sha)
         files: dict[str, object] = {}
         for path in _source_file_paths(root):
