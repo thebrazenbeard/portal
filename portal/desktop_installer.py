@@ -12,12 +12,15 @@ import stat
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
 from .runtime_source_attestation import write_attestation, verify_attestation
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_WINDOWS_SID_RE = re.compile(r"^S-1-[0-9]+(?:-[0-9]+)+$", re.IGNORECASE)
+_TASK_XML_NS = "{http://schemas.microsoft.com/windows/2004/02/mit/task}"
 _UNSAFE_CMD_PATH_CHARS = frozenset('%!^"&|<>\r\n')
 
 
@@ -132,16 +135,77 @@ def _require_unclaimed_logon_task(task_name: str) -> None:
             )
 
 
-def _require_exact_logon_task_readback(task_name: str, listing: str) -> None:
-    """Accept one exact TaskName field, never a substring in another LIST field."""
-    expected = task_name.lstrip("\\").casefold()
-    found = []
-    for line in listing.splitlines():
-        field, separator, value = line.partition(":")
-        if separator and field.strip().casefold() == "taskname":
-            found.append(value.strip().lstrip("\\").casefold())
-    if found != [expected]:
-        raise RuntimeError("registered logon task could not be read back exactly")
+def _current_scheduler_account() -> tuple[str, str]:
+    """Bind the expected principal to this installer process, before /Create."""
+    try:
+        output = _run(
+            ["whoami.exe", "/user", "/fo", "csv", "/nh"], capture=True,
+        ).stdout
+        rows = list(csv.reader(io.StringIO(output.lstrip("\ufeff")), strict=True))
+    except (OSError, subprocess.CalledProcessError, UnicodeError, csv.Error) as exc:
+        raise RuntimeError("current scheduler principal unavailable; refusing activation") from exc
+    if (len(rows) != 1 or len(rows[0]) != 2 or not rows[0][0].strip()
+            or not _WINDOWS_SID_RE.fullmatch(rows[0][1].strip())):
+        raise RuntimeError("current scheduler principal malformed; refusing activation")
+    return rows[0][0].strip(), rows[0][1].strip()
+
+
+def _require_exact_logon_task_readback(
+    task_name: str, launcher: Path, xml: str, *, account: str, account_sid: str,
+) -> None:
+    """Fail closed unless scheduler XML matches this exact owned task definition.
+
+    Checking TaskName alone is insufficient after registration: a competing
+    actor can preposition a different action/trigger/principal under the same
+    name. /Query /TN /XML exposes the actual definition without mutating it.
+    """
+    failure = "registered logon task definition could not be read back exactly"
+    if not _TASK_NAME_RE.fullmatch(task_name) or not isinstance(xml, str) or len(xml) > 262144:
+        raise RuntimeError(failure)
+    try:
+        root = ET.fromstring(xml.lstrip("\ufeff"))
+    except ET.ParseError as exc:
+        raise RuntimeError(failure) from exc
+    n = _TASK_XML_NS
+    if root.tag != n + "Task":
+        raise RuntimeError(failure)
+    uri = root.findtext(f"{n}RegistrationInfo/{n}URI")
+    triggers = root.findall(f"{n}Triggers/*")
+    actions = root.findall(f"{n}Actions/*")
+    principals = root.findall(f"{n}Principals/{n}Principal")
+    if (uri is None or uri.casefold() != ("\\" + task_name).casefold()
+            or len(triggers) != 1 or triggers[0].tag != n + "LogonTrigger"
+            or len(actions) != 1 or actions[0].tag != n + "Exec"
+            or len(principals) != 1):
+        raise RuntimeError(failure)
+    trigger = triggers[0]
+    if (trigger.findtext(n + "Enabled", "true").casefold() != "true"
+            or root.findtext(f"{n}Settings/{n}Enabled", "true").casefold() != "true"):
+        raise RuntimeError(failure)
+    # /SC ONLOGON without /RU allows a logon trigger for any local user.
+    # If the scheduler binds a specific user, it must still be this account.
+    trigger_user = trigger.findtext(n + "UserId")
+    allowed_users = {account.casefold(), account_sid.casefold()}
+    if trigger_user and trigger_user.casefold() not in allowed_users:
+        raise RuntimeError(failure)
+    action = actions[0]
+    # /TR is an exact launcher, with neither arguments nor a working directory.
+    if (action.findtext(n + "Command") != str(Path(launcher).resolve())
+            or action.findtext(n + "Arguments") not in (None, "")
+            or action.findtext(n + "WorkingDirectory") not in (None, "")):
+        raise RuntimeError(failure)
+    principal = principals[0]
+    user_id = principal.findtext(n + "UserId")
+    if (user_id is None or user_id.casefold() not in allowed_users
+            or principal.find(n + "GroupId") is not None
+            or principal.findtext(n + "RunLevel") != "LeastPrivilege"
+            or principal.findtext(n + "LogonType") not in (None, "InteractiveToken")):
+        raise RuntimeError(failure)
+    context = root.find(n + "Actions")
+    context_id = context.get("Context") if context is not None else None
+    principal_id = principal.get("id")
+    if context_id and context_id != principal_id:
+        raise RuntimeError(failure)
 
 
 def _record_task_registration_uncertain(runtime_root: Path, task_name: str) -> None:
@@ -527,6 +591,7 @@ def install(
                 spec.install_id,
             )
             _require_unclaimed_logon_task(task_name)
+            account, account_sid = _current_scheduler_account()
             # Mark uncertainty before invoking an effect: a scheduler failure
             # could mean the task was created before the client received error.
             task_registration_attempted = True
@@ -543,13 +608,14 @@ def install(
                     "/Query",
                     "/TN",
                     task_name,
-                    "/FO",
-                    "LIST",
-                    "/V",
+                    "/XML",
                 ],
                 capture=True,
             )
-            _require_exact_logon_task_readback(task_name, query.stdout)
+            _require_exact_logon_task_readback(
+                task_name, host_launcher, query.stdout,
+                account=account, account_sid=account_sid,
+            )
 
         _record_activation_state(
             runtime_root,
