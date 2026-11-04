@@ -150,9 +150,9 @@ def _record_task_registration_uncertain(runtime_root: Path, task_name: str) -> N
         _record_activation_state(
             runtime_root, requested=True, qualified=True, active=False,
         )
-    except OSError:
-        # A locked runtime spec cannot be trusted; the separate marker still
-        # identifies the task whose registration must be reconciled manually.
+    except (OSError, ValueError, RuntimeError):
+        # A locked or malformed runtime spec cannot be trusted; the separate
+        # marker still identifies the task requiring manual reconciliation.
         pass
     marker = {
         "schema": "PORTAL_LOGON_TASK_REGISTRATION_UNCERTAIN_V1",
