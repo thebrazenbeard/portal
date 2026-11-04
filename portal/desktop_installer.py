@@ -126,6 +126,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "clone",
             "--filter=blob:none",
             "--no-checkout",
@@ -147,6 +149,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "-C",
             str(destination),
             "checkout",
