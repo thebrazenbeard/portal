@@ -12,6 +12,7 @@ import sys
 import time
 
 from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .runtime_source_attestation import write_attestation, verify_attestation
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
@@ -70,7 +71,8 @@ def launcher_text(runtime_root: Path, python: Path, module: str) -> str:
     return (
         "@echo off\r\n"
         f'set "VERA_RUNTIME_ROOT={root_value}"\r\n'
-        f'"{python_value}" -m {module}\r\n'
+        'set "PYTHONDONTWRITEBYTECODE=1"\r\n'
+        f'"{python_value}" -B -m {module}\r\n'
     )
 
 
@@ -124,6 +126,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "clone",
             "--filter=blob:none",
             "--no-checkout",
@@ -145,6 +149,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "-C",
             str(destination),
             "checkout",
@@ -213,6 +219,7 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
     _run(
         [
             str(python),
+            "-B",
             "-m",
             "pip",
             "install",
@@ -221,7 +228,8 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
             arg
             for source in spec.sources
             for arg in ("-e", str(sources / source.component))
-        ]
+        ],
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     return python
 
@@ -245,7 +253,7 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
         + "}))"
     )
     completed = _run(
-        [str(python), "-c", code],
+        [str(python), "-B", "-c", code],
         cwd=runtime_root,
         capture=True,
     )
@@ -314,7 +322,7 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
     )
     try:
         return subprocess.Popen(
-            [str(python), "-m", "portal.desktop_host"],
+            [str(python), "-B", "-m", "portal.desktop_host"],
             cwd=str(runtime_root),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -343,9 +351,11 @@ def _terminate_unqualified_host(process: subprocess.Popen[bytes]) -> None:
 def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
     env = dict(os.environ)
     env["VERA_RUNTIME_ROOT"] = str(runtime_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     completed = _run(
         [
             str(python),
+            "-B",
             "-m",
             "portal.desktop_qualify",
             "--runtime-root",
@@ -413,11 +423,13 @@ def install(
 
     python = _install_sources(runtime_root, spec)
     imports = _verify_imports(python, runtime_root)
+    source_attestation = write_attestation(runtime_root, spec)
     staged_host = _start_host(runtime_root, python)
     if staged_host is None:
         raise RuntimeError("staged host was not started by this installer")
     try:
         qualification = _qualify(runtime_root, python)
+        verify_attestation(runtime_root, spec)
     except BaseException:
         _terminate_unqualified_host(staged_host)
         raise
@@ -483,6 +495,11 @@ def install(
                 "sha": item.sha,
             }
             for item in spec.sources
+        },
+        "source_attestation": {
+            "schema": source_attestation["schema"],
+            "sha256": source_attestation["sha256"],
+            "path": "RUNTIME_SOURCE_ATTESTATION.json",
         },
         "imports": imports,
         "qualification": qualification,
@@ -562,3 +579,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

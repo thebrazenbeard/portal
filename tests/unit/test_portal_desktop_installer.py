@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +41,49 @@ def _meso_spec() -> InstallSpec:
     )
 
 
+def test_exact_clone_disables_global_autocrlf_for_pinned_bytes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    source = tmp_path / "fixture-source"
+    source.mkdir()
+    (source / "runtime.py").write_bytes(b"line1\nline2\n")
+    config = tmp_path / "git-global-config"
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(config)}
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], env=env, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    git("config", "--file", str(config), "core.autocrlf", "true")
+    git("-C", str(source), "init", "--quiet")
+    git("-C", str(source), "add", ".")
+    git("-C", str(source), "-c", "user.name=Fixture",
+        "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "LF file")
+    head = git("-C", str(source), "rev-parse", "HEAD")
+
+    plain = tmp_path / "plain-global-checkout"
+    git("clone", "--no-checkout", str(source), str(plain))
+    git("-C", str(plain), "checkout", "--detach", head)
+    assert (plain / "runtime.py").read_bytes() == b"line1\r\nline2\r\n"
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    real_run = desktop_installer._run
+
+    def local_clone(args, **kwargs):
+        mapped = list(args)
+        if "clone" in mapped:
+            mapped[-2] = str(source)
+        return real_run(mapped, **kwargs)
+
+    monkeypatch.setattr(desktop_installer, "_run", local_clone)
+    pinned = tmp_path / "exact-pinned-checkout"
+    desktop_installer._clone_exact(
+        RuntimeSource("portal", "thebrazenbeard/portal", "main", head), pinned,
+    )
+    assert (pinned / "runtime.py").read_bytes() == b"line1\nline2\n"
+
+
 def test_launcher_sets_runtime_root_and_invokes_module(tmp_path: Path) -> None:
     root = tmp_path / "Vera Desktop"
     python = root / ".venv" / "Scripts" / "python.exe"
@@ -46,7 +91,8 @@ def test_launcher_sets_runtime_root_and_invokes_module(tmp_path: Path) -> None:
     text = launcher_text(root, python, "portal.desktop_host")
 
     assert f'set "VERA_RUNTIME_ROOT={root}"' in text
-    assert f'"{python}" -m portal.desktop_host' in text
+    assert f'"{python}" -B -m portal.desktop_host' in text
+    assert 'PYTHONDONTWRITEBYTECODE=1' in text
 
 
 @pytest.mark.parametrize("unsafe", ["%PATH%", 'bad"quote', "bad!bang", "bad^caret", "a&b", "a|b", "a>b", "a<b", "new\nline", "é"])
@@ -266,6 +312,10 @@ def test_qualification_failure_stops_staged_host_and_never_activates(
         desktop_installer, "_install_sources", lambda runtime_root, spec: tmp_path / "python.exe",
     )
     monkeypatch.setattr(desktop_installer, "_verify_imports", lambda python, root: {})
+    monkeypatch.setattr(
+        desktop_installer, "write_attestation",
+        lambda runtime_root, spec: {"schema": "TEST", "sha256": "0" * 64},
+    )
     monkeypatch.setattr(desktop_installer, "_start_host", lambda root, python: child)
     monkeypatch.setattr(
         desktop_installer, "_qualify",
@@ -286,6 +336,39 @@ def test_qualification_failure_stops_staged_host_and_never_activates(
     assert not (runtime / "PortalDesktop.cmd").exists()
     spec = InstallSpec.read(runtime / "RUNTIME_INSTALL_SPEC.json")
     assert spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+
+
+def test_source_drift_after_qualification_stops_host_before_activation(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    class Started:
+        def __init__(self):
+            self.terminated = False
+        def poll(self):
+            return None
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout):
+            return 0
+    child = Started()
+    monkeypatch.setattr(desktop_installer, "_install_sources", lambda root, spec: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda python, root: {})
+    monkeypatch.setattr(desktop_installer, "write_attestation", lambda root, spec: {"schema": "TEST", "sha256": "0" * 64})
+    monkeypatch.setattr(desktop_installer, "_start_host", lambda root, python: child)
+    monkeypatch.setattr(desktop_installer, "_qualify", lambda root, python: {"qualified": True})
+    monkeypatch.setattr(
+        desktop_installer, "verify_attestation",
+        lambda root, spec: (_ for _ in ()).throw(RuntimeError("source attestation mismatch")),
+    )
+    monkeypatch.setattr(desktop_installer, "_run", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("drifted runtime must not register a task")
+    ))
+    runtime = tmp_path / "staged-runtime"
+    with pytest.raises(RuntimeError, match="source attestation mismatch"):
+        desktop_installer.install(runtime_root=runtime, spec=_spec(), activate=True)
+    assert child.terminated
+    assert not (runtime / "INSTALLATION_RESULT.json").exists()
+    assert not (runtime / "StartVeraRuntime.cmd").exists()
 
 
 def test_unqualified_staged_host_timeout_escalates_to_owned_process_kill() -> None:
@@ -530,3 +613,4 @@ def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path
         "active": True,
     }
     assert "ACTIVE_AT_LOGON" in updated["claim_ceiling"]
+
