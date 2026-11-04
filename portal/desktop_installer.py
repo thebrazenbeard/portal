@@ -71,7 +71,8 @@ def launcher_text(runtime_root: Path, python: Path, module: str) -> str:
     return (
         "@echo off\r\n"
         f'set "VERA_RUNTIME_ROOT={root_value}"\r\n'
-        f'"{python_value}" -m {module}\r\n'
+        'set "PYTHONDONTWRITEBYTECODE=1"\r\n'
+        f'"{python_value}" -B -m {module}\r\n'
     )
 
 
@@ -214,6 +215,7 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
     _run(
         [
             str(python),
+            "-B",
             "-m",
             "pip",
             "install",
@@ -222,7 +224,8 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
             arg
             for source in spec.sources
             for arg in ("-e", str(sources / source.component))
-        ]
+        ],
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     return python
 
@@ -246,7 +249,7 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
         + "}))"
     )
     completed = _run(
-        [str(python), "-c", code],
+        [str(python), "-B", "-c", code],
         cwd=runtime_root,
         capture=True,
     )
@@ -315,7 +318,7 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
     )
     try:
         return subprocess.Popen(
-            [str(python), "-m", "portal.desktop_host"],
+            [str(python), "-B", "-m", "portal.desktop_host"],
             cwd=str(runtime_root),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -344,9 +347,11 @@ def _terminate_unqualified_host(process: subprocess.Popen[bytes]) -> None:
 def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
     env = dict(os.environ)
     env["VERA_RUNTIME_ROOT"] = str(runtime_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     completed = _run(
         [
             str(python),
+            "-B",
             "-m",
             "portal.desktop_qualify",
             "--runtime-root",
