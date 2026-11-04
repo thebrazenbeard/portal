@@ -131,6 +131,42 @@ def _require_unclaimed_logon_task(task_name: str) -> None:
                 "logon task already exists; refusing to replace it"
             )
 
+
+def _require_exact_logon_task_readback(task_name: str, listing: str) -> None:
+    """Accept one exact TaskName field, never a substring in another LIST field."""
+    expected = task_name.lstrip("\\").casefold()
+    found = []
+    for line in listing.splitlines():
+        field, separator, value = line.partition(":")
+        if separator and field.strip().casefold() == "taskname":
+            found.append(value.strip().lstrip("\\").casefold())
+    if found != [expected]:
+        raise RuntimeError("registered logon task could not be read back exactly")
+
+
+def _record_task_registration_uncertain(runtime_root: Path, task_name: str) -> None:
+    """Retain a fail-closed recovery marker; never delete or replace a scheduler task."""
+    try:
+        _record_activation_state(
+            runtime_root, requested=True, qualified=True, active=False,
+        )
+    except OSError:
+        # A locked runtime spec cannot be trusted; the separate marker still
+        # identifies the task whose registration must be reconciled manually.
+        pass
+    marker = {
+        "schema": "PORTAL_LOGON_TASK_REGISTRATION_UNCERTAIN_V1",
+        "task_name": task_name,
+        "state": "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION",
+        "active": False,
+        "recorded_at": time.time(),
+    }
+    with (runtime_root / "TASK_REGISTRATION_UNCERTAIN.json").open(
+        "x", encoding="utf-8",
+    ) as sink:
+        json.dump(marker, sink, sort_keys=True, indent=2)
+        sink.write("\n")
+
 def _run(
     args: list[str],
     *,
@@ -482,16 +518,18 @@ def install(
     )
 
     task_name = None
-    if activate:
-        task_name = "VeraDesktopRuntime-" + re.sub(
-            r"[^A-Za-z0-9_.-]",
-            "_",
-            spec.install_id,
-        )
-        try:
+    task_registration_attempted = False
+    try:
+        if activate:
+            task_name = "VeraDesktopRuntime-" + re.sub(
+                r"[^A-Za-z0-9_.-]",
+                "_",
+                spec.install_id,
+            )
             _require_unclaimed_logon_task(task_name)
-            # /F is forbidden. If another actor creates the task between
-            # inventory and /Create, closed stdin prevents accepting a prompt.
+            # Mark uncertainty before invoking an effect: a scheduler failure
+            # could mean the task was created before the client received error.
+            task_registration_attempted = True
             _run(
                 build_logon_task_command(
                     task_name=task_name,
@@ -511,58 +549,70 @@ def install(
                 ],
                 capture=True,
             )
-            if task_name not in query.stdout:
-                raise RuntimeError("registered logon task could not be read back")
-        except BaseException:
-            # Only this invocation's freshly staged host is owned here.
-            # Leave any registered task untouched for manual reconciliation.
+            _require_exact_logon_task_readback(task_name, query.stdout)
+
+        _record_activation_state(
+            runtime_root,
+            requested=activate,
+            qualified=True,
+            active=bool(activate),
+        )
+    
+        result = {
+            "schema": (
+                "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
+                if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+                else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
+            ),
+            "runtime_root": str(runtime_root),
+            "install_id": spec.install_id,
+            "source_map": {
+                item.component: {
+                    "repository": item.repository,
+                    "ref": item.ref,
+                    "sha": item.sha,
+                }
+                for item in spec.sources
+            },
+            "source_attestation": {
+                "schema": source_attestation["schema"],
+                "sha256": source_attestation["sha256"],
+                "path": "RUNTIME_SOURCE_ATTESTATION.json",
+            },
+            "imports": imports,
+            "qualification": qualification,
+            "activation": {
+                "requested": activate,
+                "task_name": task_name,
+                "active_at_logon": bool(activate),
+            },
+            "protected_effect_authority": False,
+            "native_openai_router_replaced": False,
+            "installed_at": time.time(),
+        }
+        (runtime_root / "INSTALLATION_RESULT.json").write_text(
+            json.dumps(result, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return result
+    except BaseException:
+        # After any attempted registration the task's ownership/status is
+        # indeterminate, even when the scheduler operation reported success.
+        # Preserve the existing scheduler task and never claim activation.
+        marker_error = None
+        try:
+            if task_registration_attempted:
+                _record_task_registration_uncertain(runtime_root, task_name)
+        except OSError as exc:
+            marker_error = exc
+        finally:
             _terminate_unqualified_host(staged_host)
-            raise
-
-    _record_activation_state(
-        runtime_root,
-        requested=activate,
-        qualified=True,
-        active=bool(activate),
-    )
-
-    result = {
-        "schema": (
-            "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
-            if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
-            else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
-        ),
-        "runtime_root": str(runtime_root),
-        "install_id": spec.install_id,
-        "source_map": {
-            item.component: {
-                "repository": item.repository,
-                "ref": item.ref,
-                "sha": item.sha,
-            }
-            for item in spec.sources
-        },
-        "source_attestation": {
-            "schema": source_attestation["schema"],
-            "sha256": source_attestation["sha256"],
-            "path": "RUNTIME_SOURCE_ATTESTATION.json",
-        },
-        "imports": imports,
-        "qualification": qualification,
-        "activation": {
-            "requested": activate,
-            "task_name": task_name,
-            "active_at_logon": bool(activate),
-        },
-        "protected_effect_authority": False,
-        "native_openai_router_replaced": False,
-        "installed_at": time.time(),
-    }
-    (runtime_root / "INSTALLATION_RESULT.json").write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return result
+        if marker_error is not None:
+            raise RuntimeError(
+                "task activation failed and uncertainty marker could not be saved; "
+                "manual scheduler reconciliation is required"
+            ) from marker_error
+        raise
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
