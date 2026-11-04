@@ -20,7 +20,8 @@ def _stage(tmp_path: Path) -> InstallSpec:
     for component in ("vera-mono", "portal", "pre-active", "volition"):
         root = tmp_path / "sources" / component
         root.mkdir(parents=True)
-        (root / "runtime.py").write_text("ENABLED = True\n", encoding="utf-8")
+        # Write Git's canonical LF bytes even when Windows text mode uses CRLF.
+        (root / "runtime.py").write_bytes(b"ENABLED = True\n")
         _run("git", "-C", str(root), "init", "--quiet")
         _run("git", "-C", str(root), "add", ".")
         _run("git", "-C", str(root), "-c", "user.name=Fixture",
