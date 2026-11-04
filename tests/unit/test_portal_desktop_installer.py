@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +39,49 @@ def _meso_spec() -> InstallSpec:
             RuntimeSource("meso-crct", "thebrazenbeard/meso-crct", "main", "e" * 40),
         ),
     )
+
+
+def test_exact_clone_disables_global_autocrlf_for_pinned_bytes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    source = tmp_path / "fixture-source"
+    source.mkdir()
+    (source / "runtime.py").write_bytes(b"line1\nline2\n")
+    config = tmp_path / "git-global-config"
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(config)}
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], env=env, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    git("config", "--file", str(config), "core.autocrlf", "true")
+    git("-C", str(source), "init", "--quiet")
+    git("-C", str(source), "add", ".")
+    git("-C", str(source), "-c", "user.name=Fixture",
+        "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "LF file")
+    head = git("-C", str(source), "rev-parse", "HEAD")
+
+    plain = tmp_path / "plain-global-checkout"
+    git("clone", "--no-checkout", str(source), str(plain))
+    git("-C", str(plain), "checkout", "--detach", head)
+    assert (plain / "runtime.py").read_bytes() == b"line1\r\nline2\r\n"
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    real_run = desktop_installer._run
+
+    def local_clone(args, **kwargs):
+        mapped = list(args)
+        if "clone" in mapped:
+            mapped[-2] = str(source)
+        return real_run(mapped, **kwargs)
+
+    monkeypatch.setattr(desktop_installer, "_run", local_clone)
+    pinned = tmp_path / "exact-pinned-checkout"
+    desktop_installer._clone_exact(
+        RuntimeSource("portal", "thebrazenbeard/portal", "main", head), pinned,
+    )
+    assert (pinned / "runtime.py").read_bytes() == b"line1\nline2\n"
 
 
 def test_launcher_sets_runtime_root_and_invokes_module(tmp_path: Path) -> None:
