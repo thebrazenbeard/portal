@@ -726,6 +726,8 @@ def test_task_create_is_noninteractive_at_subprocess_boundary(monkeypatch) -> No
         observed.update(kwargs)
         return subprocess.CompletedProcess(args, 0, "", "")
 
+    monkeypatch.setattr(desktop_installer, "_trusted_windows_scheduler_tool",
+                        lambda tool: "C:\\Windows\\System32\\" + tool)
     monkeypatch.setattr(desktop_installer.subprocess, "run", fake_run)
     desktop_installer._run(["schtasks.exe", "/Create"], noninteractive=True)
     assert observed["stdin"] is subprocess.DEVNULL
