@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 
 SCHEMA = "VERA_ECOSYSTEM_HOST_PREFLIGHT_V1"
+MAX_EVIDENCE_BYTES = 32 * 1024
 REQUIRED_PROBES: dict[str, str] = {
     "control.vera_mono_pilot": "WINDOWS_SERVICE",
     "control.veramesh_tunnel": "WINDOWS_SERVICE",
@@ -26,13 +27,17 @@ REQUIRED_PROBES: dict[str, str] = {
     "worker_b.llama_models": "HTTP",
 }
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_ALLOWED_TOP = frozenset({"schema", "observed_at_utc", "observations", "model_selection"})
+_STRICT_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z\Z")
+_ALLOWED_TOP = frozenset({"schema", "observed_at_utc", "observations", "model_inventory", "model_selection"})
 _ALLOWED_OBSERVATION = frozenset({"id", "kind", "status", "credential_applied"})
-_ALLOWED_MODEL = frozenset({"host", "model_tag", "digest_sha256", "incremental_paid_compute"})
+_ALLOWED_INVENTORY = frozenset({"host", "model_tag", "digest_kind", "digest_sha256"})
+_ALLOWED_MODEL = _ALLOWED_INVENTORY | {"incremental_paid_compute"}
+_DIGEST_KINDS = ("OLLAMA_TAG_DIGEST", "GGUF_FILE_SHA256")
+_HOST_ROLES = ("control", "worker_a", "worker_b")
 
 
 def _utc(value: object, *, field: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or _STRICT_UTC.fullmatch(value) is None:
         raise ValueError(f"{field} must be an RFC3339 UTC Z timestamp")
     try:
         date = datetime.fromisoformat(value[:-1] + "+00:00")
@@ -115,13 +120,35 @@ def evaluate_preflight(
         elif row["status"] != 200:
             reasons.append(f"{probe_id} returned HTTP {row['status']}")
 
+    raw_inventory = root["model_inventory"]
+    if not isinstance(raw_inventory, list) or len(raw_inventory) > 64:
+        raise ValueError("model_inventory must be an array of at most 64 entries")
+    inventory: set[tuple[str, str, str, str]] = set()
+    for index, raw in enumerate(raw_inventory):
+        entry = _exact_keys(raw, _ALLOWED_INVENTORY, f"model_inventory[{index}]")
+        host, tag, kind, digest = (entry[field] for field in
+                                   ("host", "model_tag", "digest_kind", "digest_sha256"))
+        if (host not in _HOST_ROLES or not isinstance(tag, str) or not tag.strip()
+                or kind not in _DIGEST_KINDS or not isinstance(digest, str)
+                or not _SHA256.fullmatch(digest)):
+            raise ValueError(f"model_inventory[{index}] has an invalid model identity")
+        identity = (host, tag, kind, digest)
+        if identity in inventory:
+            raise ValueError(f"duplicate model_inventory identity at {index}")
+        inventory.add(identity)
+
     model = _exact_keys(root["model_selection"], _ALLOWED_MODEL, "model_selection")
-    if model["host"] not in ("control", "worker_a", "worker_b"):
+    if model["host"] not in _HOST_ROLES:
         raise ValueError("model_selection host is invalid")
     if not isinstance(model["model_tag"], str) or not model["model_tag"].strip():
         reasons.append("selected local model tag not evidenced")
     if not isinstance(model["digest_sha256"], str) or not _SHA256.fullmatch(model["digest_sha256"]):
         reasons.append("selected local model digest not evidenced")
+    if model["digest_kind"] not in _DIGEST_KINDS:
+        reasons.append("selected model digest kind not evidenced")
+    selected_identity = tuple(model[key] for key in ("host", "model_tag", "digest_kind", "digest_sha256"))
+    if not all(isinstance(part, str) for part in selected_identity) or selected_identity not in inventory:
+        reasons.append("selected model identity absent from same-receipt host inventory")
     if model["incremental_paid_compute"] is not False:
         reasons.append("selected inference route does not prove zero incremental paid compute")
 
@@ -143,9 +170,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-age-seconds", type=int, default=120)
     args = parser.parse_args(argv)
     try:
-        evidence = json.loads(args.evidence.read_text(encoding="utf-8"))
+        with args.evidence.open("rb") as source:
+            payload = source.read(MAX_EVIDENCE_BYTES + 1)
+        if len(payload) > MAX_EVIDENCE_BYTES:
+            raise ValueError("evidence exceeds 32 KiB limit")
+        evidence = json.loads(payload.decode("utf-8"))
         verdict = evaluate_preflight(evidence, max_age_seconds=args.max_age_seconds)
-    except (ValueError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError, UnicodeDecodeError, RecursionError) as exc:
         print(json.dumps({"status": "INVALID_EVIDENCE", "error": str(exc)}))
         return 3
     print(json.dumps(verdict, sort_keys=True))
