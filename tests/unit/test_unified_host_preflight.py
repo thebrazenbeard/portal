@@ -27,9 +27,14 @@ def evidence() -> dict:
         "schema": SCHEMA,
         "observed_at_utc": "2026-11-05T23:00:00Z",
         "observations": observations,
+        "model_inventory": [{
+            "host": "control", "model_tag": "vera-local:latest",
+            "digest_kind": "OLLAMA_TAG_DIGEST", "digest_sha256": "a" * 64,
+        }],
         "model_selection": {
             "host": "control", "model_tag": "vera-local:latest",
-            "digest_sha256": "a" * 64, "incremental_paid_compute": False,
+            "digest_kind": "OLLAMA_TAG_DIGEST", "digest_sha256": "a" * 64,
+            "incremental_paid_compute": False,
         },
     }
 
@@ -93,6 +98,31 @@ def test_tags_200_without_selected_model_digest_is_not_route_qualification():
     assert "selected local model digest not evidenced" in result["reason_codes"]
 
 
+@pytest.mark.parametrize("mutation", [
+    {"host": "worker_b"},
+    {"model_tag": "nonexistent:fake"},
+    {"digest_kind": "GGUF_FILE_SHA256"},
+    {"digest_sha256": "b" * 64},
+])
+def test_selected_model_must_match_same_receipt_host_inventory(mutation):
+    report = evidence()
+    report["model_selection"].update(mutation)
+    result = evaluate_preflight(report, now=NOW)
+    assert result["status"] == "HOLD"
+    assert "selected model identity absent from same-receipt host inventory" in result["reason_codes"]
+
+
+def test_inventory_digests_have_distinct_types_and_reject_duplicate_or_invalid_entries():
+    report = evidence()
+    report["model_inventory"].append(deepcopy(report["model_inventory"][0]))
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_preflight(report, now=NOW)
+    report = evidence()
+    report["model_inventory"][0]["digest_kind"] = "UNVERIFIED_HASH"
+    with pytest.raises(ValueError, match="invalid model identity"):
+        evaluate_preflight(report, now=NOW)
+
+
 def test_paid_route_or_unknown_cost_is_not_admissible():
     for value in (None, True, "false", 0):
         report = evidence()
@@ -144,6 +174,20 @@ def test_invalid_time_and_max_age_fail_closed():
         evaluate_preflight(evidence(), now=NOW, max_age_seconds=True)
 
 
+@pytest.mark.parametrize("bad_timestamp", [
+    "2026-11-05 23:00:00Z",  # permissive ISO 8601, not strict RFC3339
+    "2026-11-05T23:00Z",     # required seconds missing
+    "20261105T230000Z",      # compact timestamp
+    "2026-11-05t23:00:00Z",  # lowercase separator
+    "2026-11-05T23:00:00z",  # lowercase UTC suffix
+])
+def test_non_rfc3339_observation_timestamp_rejected(bad_timestamp):
+    report = evidence()
+    report["observed_at_utc"] = bad_timestamp
+    with pytest.raises(ValueError, match="RFC3339 UTC Z"):
+        evaluate_preflight(report, now=NOW)
+
+
 def test_cli_is_observational_and_never_starts_runtime(tmp_path, monkeypatch, capsys):
     receipt = tmp_path / "synthetic.json"
     receipt.write_text(json.dumps(evidence()), encoding="utf-8")
@@ -164,3 +208,18 @@ def test_cli_bad_evidence_rejected_without_traceback(tmp_path, capsys):
     receipt.write_text("[", encoding="utf-8")
     assert main(["--evidence", str(receipt)]) == 3
     assert json.loads(capsys.readouterr().out)["status"] == "INVALID_EVIDENCE"
+
+
+@pytest.mark.parametrize("bad_payload", [
+    b"[" * 2000 + b"]" * 2000,
+    b" " * (32 * 1024 + 1),
+    b"\xff\xfe",
+])
+def test_cli_malformed_deep_oversize_or_non_utf8_receipt_fails_closed(
+    bad_payload, tmp_path, capsys,
+):
+    receipt = tmp_path / "invalid.json"
+    receipt.write_bytes(bad_payload)
+    assert main(["--evidence", str(receipt)]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "INVALID_EVIDENCE"
