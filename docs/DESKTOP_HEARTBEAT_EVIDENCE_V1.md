@@ -16,6 +16,21 @@ is alive, the singleton is owned, or a recovery operation is permitted.
 The output deliberately fixes `live_singleton_owner=UNVERIFIED` and
 `recovery_authorized=false` for every classification.
 
+The `heartbeat.path_custody` field distinguishes the read mechanism:
+
+- `NOFOLLOW_COMPONENT_HANDLES`: on supported POSIX systems, every directory
+  component and the final file is opened through a directory descriptor with
+  `O_NOFOLLOW`; symlinked parents and final-path swaps are rejected.
+- `BEST_EFFORT_UNVERIFIED`: on Windows and other platforms without that
+  handle mechanism, symlink and (where supported) junction metadata are
+  checked before opening. **A subsequent reparse-point swap is not ruled
+  out.** The classification must never be used as a security or recovery
+  grant, even when it returns `JSON_OBJECT` or `ZERO_FILLED`.
+
+`SYMLINK_UNTRUSTED` is an intentionally conservative rejection and can also
+cover a non-directory path component. Related PID and reservation hints are
+reported `null` when the heartbeat path itself is rejected.
+
 ## Incident reproduction
 
 The November 5 inspection of Lappy's installed Portal source found a
