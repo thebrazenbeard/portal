@@ -30,9 +30,13 @@ The required gates use abstract host roles rather than personal machine names:
 | worker-b | `worker_b.rezon_readyz` | HTTP 200 **with credentials actually applied by host observer** |
 | worker-b | `worker_b.llama_models` | HTTP 200, no credential |
 
-`model_selection` additionally requires a nonempty selected model tag, raw
-64-character lowercase SHA-256 digest, and an observed zero-incremental-paid
-compute route. A 200 `/api/tags` response alone is insufficient. A 401 from
+`model_inventory` records bounded, same-receipt model claims by abstract host,
+tag, digest kind (`OLLAMA_TAG_DIGEST` or `GGUF_FILE_SHA256`), and 64-character
+lowercase SHA-256 value. `model_selection` must exactly match one of those
+host/tag/kind/digest tuples and report zero incremental paid compute. This
+blocks accidental wrong-host or wrong-model digest reuse *within the report*;
+it is **not** independent evidence of a weight hash, cost or installed model.
+A 200 `/api/tags` response alone is insufficient. A 401 from
 Rezon `/readyz` with no credential is *not* evidence that Rezon is down; it is
 also *not* an authenticated readiness PASS.
 
@@ -40,15 +44,15 @@ also *not* an authenticated readiness PASS.
 of the readbacks relayed to this source-review session on Nov 5, 2026, not an
 original, independently attested host receipt. Its timestamp records assembly
 of the reconstruction, **not** the execution time of the underlying probes.
-The control services were reported STOPPED; Lappy and VN1 Ollama `/api/tags`
-were 200; VN2 Rezon `/healthz` was 200 and unauthenticated `/readyz` was 401;
-VN2 llama `/v1/models` was 200; exact model selection and route cost evidence
-were not supplied. The verdict must be `HOLD`.
+The control services were reported STOPPED; the two Ollama model listings
+were 200; the collective health endpoint was 200 while unauthenticated
+readiness was 401; a local llama models listing was 200. Exact model-selection
+and route-cost evidence were not supplied. The verdict must be `HOLD`.
 
 ## Hostile-review limits
 
 > A caller can forge a JSON receipt, mark `credential_applied=true`, or copy
-> old observations into a freshly timestamped envelope. A preflight PASS is
+> a model inventory tuple and old observations into a fresh envelope. A PASS is
 > **not** authentication, attestation, host integrity, or runtime qualification.
 > Real startup release still requires host-owned observation provenance,
 > exact installed source attestation, route currentness, and effect fencing.
