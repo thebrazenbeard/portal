@@ -139,7 +139,7 @@ def pr_candidate(
     return {
         "schema": CANDIDATE_SCHEMA,
         "subject_key": key,
-        "revision_key": f"{key}@{head}:{files_sha}",
+        "revision_key": f"{key}@{head}:{base}:{files_sha}",
         "repository": repository.full_name,
         "private": repository.private,
         "number": number,
