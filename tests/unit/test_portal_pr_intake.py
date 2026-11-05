@@ -222,7 +222,7 @@ def test_paginated_read_returns_every_page_and_no_partial_silent_limit():
 
         def _get_json(self, url):
             self.urls.append(url)
-            return list(range(100)) if "page=1" in url else [101]
+            return list(range(100)) if "&page=1" in url else [101]
 
     catalog = Stub()
     result = catalog.list_open_pull_requests(REPOSITORY)
