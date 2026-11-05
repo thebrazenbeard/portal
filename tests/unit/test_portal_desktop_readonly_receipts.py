@@ -91,6 +91,24 @@ def test_malformed_response_is_preserved_without_escalation(tmp_path: Path) -> N
     assert response.read_text(encoding="utf-8") == "not-json"
 
 
+def test_deeply_nested_json_response_is_invalid_without_escaping(
+    tmp_path: Path,
+) -> None:
+    client = ReadOnlyBridgeClient(tmp_path)
+    client.submit_once("nested-1")
+    _path(tmp_path, "requests", "nested-1").replace(
+        _path(tmp_path, "claimed", "nested-1")
+    )
+    response = _path(tmp_path, "responses", "nested-1")
+    malicious = "[" * 10000 + "0" + "]" * 10000
+    assert len(malicious) < 1024 * 1024
+    response.write_text(malicious, encoding="utf-8")
+    observed = client.observe("nested-1")
+    assert observed.state == "INVALID_RESPONSE_PRESERVED"
+    assert observed.result is None
+    assert response.read_text(encoding="utf-8") == malicious
+
+
 def test_claimed_response_cannot_self_assert_protected_effect_authority(
     tmp_path: Path,
 ) -> None:
