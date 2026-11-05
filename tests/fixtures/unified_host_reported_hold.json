@@ -10,9 +10,11 @@
     {"id": "worker_b.rezon_readyz", "kind": "AUTHENTICATED_HTTP", "status": 401, "credential_applied": false},
     {"id": "worker_b.llama_models", "kind": "HTTP", "status": 200, "credential_applied": false}
   ],
+  "model_inventory": [],
   "model_selection": {
     "host": "control",
     "model_tag": "",
+    "digest_kind": "",
     "digest_sha256": "",
     "incremental_paid_compute": null
   }
