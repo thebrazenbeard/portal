@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 from typing import Callable
 
 from .desktop_install import InstallSpec
@@ -136,7 +137,10 @@ def inspect_staged_runtime(
             if result.get("native_openai_router_replaced") is not False:
                 raise RuntimeError("unqualified native router replacement flag")
             source_bytes_verified = True
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError, UnicodeError) as exc:
+        except (
+            OSError, ValueError, KeyError, TypeError, RuntimeError,
+            UnicodeError, subprocess.SubprocessError,
+        ):
             # The exception is evidence of a hold, not permission to repair
             # the staged directory or infer the installed process's behavior.
             problems.append("STAGED_SOURCE_OR_RECEIPT_UNVERIFIED")
@@ -170,7 +174,7 @@ def main() -> int:
         expected_attestation_sha256=args.expected_attestation_sha256,
     )
     print(json.dumps(evidence, sort_keys=True))
-    return 0 if evidence["source_bytes_verified"] else 2
+    return 0 if evidence["status"] == "SOURCE_PREFLIGHT_ONLY" else 2
 
 
 if __name__ == "__main__":
