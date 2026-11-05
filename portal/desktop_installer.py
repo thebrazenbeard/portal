@@ -119,7 +119,8 @@ def build_task_recovery_settings_command(*, task_name: str) -> list[str]:
         "if ($actual.RestartCount -ne 3 -or "
         "[string]$actual.RestartInterval -ne 'PT5M' -or "
         "[string]$actual.ExecutionTimeLimit -ne 'PT0S' -or "
-        "[string]$actual.MultipleInstances -ne 'IgnoreNew') "
+        "[string]$actual.MultipleInstances -ne 'IgnoreNew' -or "
+        "$actual.StartWhenAvailable -ne $true) "
         "{ throw 'Task recovery settings readback mismatch' }"
     )
     return [
@@ -458,93 +459,99 @@ def install(
         _terminate_unqualified_host(staged_host)
         raise
 
-    host_launcher = runtime_root / "StartVeraRuntime.cmd"
-    host_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_host"),
-        encoding="ascii",
-    )
-    desktop_launcher = runtime_root / "PortalDesktop.cmd"
-    desktop_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_app"),
-        encoding="ascii",
-    )
-
-    task_name = None
-    if activate:
-        task_name = "VeraDesktopRuntime-" + re.sub(
-            r"[^A-Za-z0-9_.-]",
-            "_",
-            spec.install_id,
+    try:
+        host_launcher = runtime_root / "StartVeraRuntime.cmd"
+        host_launcher.write_text(
+            launcher_text(runtime_root, python, "portal.desktop_host"),
+            encoding="ascii",
         )
-        _run(
-            build_logon_task_command(
-                task_name=task_name,
-                launcher=host_launcher,
+        desktop_launcher = runtime_root / "PortalDesktop.cmd"
+        desktop_launcher.write_text(
+            launcher_text(runtime_root, python, "portal.desktop_app"),
+            encoding="ascii",
+        )
+
+        task_name = None
+        if activate:
+            task_name = "VeraDesktopRuntime-" + re.sub(
+                r"[^A-Za-z0-9_.-]",
+                "_",
+                spec.install_id,
             )
-        )
-        try:
-            _run(build_task_recovery_settings_command(task_name=task_name))
-        except Exception as exc:
-            # A task may now exist, but no activation claim may be recorded.
-            # Do not blindly replay an install or delete the ambiguous task.
-            raise RuntimeError(
-                "desktop host task registered, but restart settings were not "
-                "verified; inspect the exact task before any retry"
-            ) from exc
-        query = _run(
-            [
-                "schtasks.exe",
-                "/Query",
-                "/TN",
-                task_name,
-                "/FO",
-                "LIST",
-                "/V",
-            ],
-            capture=True,
-        )
-        if task_name not in query.stdout:
-            raise RuntimeError("registered logon task could not be read back")
+            _run(
+                build_logon_task_command(
+                    task_name=task_name,
+                    launcher=host_launcher,
+                )
+            )
+            try:
+                _run(build_task_recovery_settings_command(task_name=task_name))
+            except Exception as exc:
+                # A task may now exist, but no activation claim may be recorded.
+                # Do not blindly replay an install or delete the ambiguous task.
+                raise RuntimeError(
+                    "desktop host task registered, but restart settings were not "
+                    "verified; inspect the exact task before any retry"
+                ) from exc
+            query = _run(
+                [
+                    "schtasks.exe",
+                    "/Query",
+                    "/TN",
+                    task_name,
+                    "/FO",
+                    "LIST",
+                    "/V",
+                ],
+                capture=True,
+            )
+            if task_name not in query.stdout:
+                raise RuntimeError("registered logon task could not be read back")
 
-    _record_activation_state(
-        runtime_root,
-        requested=activate,
-        qualified=True,
-        active=bool(activate),
-    )
+        _record_activation_state(
+            runtime_root,
+            requested=activate,
+            qualified=True,
+            active=bool(activate),
+        )
 
-    result = {
-        "schema": (
-            "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
-            if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
-            else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
-        ),
-        "runtime_root": str(runtime_root),
-        "install_id": spec.install_id,
-        "source_map": {
-            item.component: {
-                "repository": item.repository,
-                "ref": item.ref,
-                "sha": item.sha,
-            }
-            for item in spec.sources
-        },
-        "imports": imports,
-        "qualification": qualification,
-        "activation": {
-            "requested": activate,
-            "task_name": task_name,
-            "active_at_logon": bool(activate),
-        },
-        "protected_effect_authority": False,
-        "native_openai_router_replaced": False,
-        "installed_at": time.time(),
-    }
-    (runtime_root / "INSTALLATION_RESULT.json").write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return result
+        result = {
+            "schema": (
+                "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
+                if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+                else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
+            ),
+            "runtime_root": str(runtime_root),
+            "install_id": spec.install_id,
+            "source_map": {
+                item.component: {
+                    "repository": item.repository,
+                    "ref": item.ref,
+                    "sha": item.sha,
+                }
+                for item in spec.sources
+            },
+            "imports": imports,
+            "qualification": qualification,
+            "activation": {
+                "requested": activate,
+                "task_name": task_name,
+                "active_at_logon": bool(activate),
+            },
+            "protected_effect_authority": False,
+            "native_openai_router_replaced": False,
+            "installed_at": time.time(),
+        }
+        (runtime_root / "INSTALLATION_RESULT.json").write_text(
+            json.dumps(result, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return result
+    except BaseException:
+        # Only the child launched by this invocation is ours to stop. A task
+        # may remain registered after partial failure; never delete/retry it.
+        _terminate_unqualified_host(staged_host)
+        raise
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:

@@ -16,6 +16,24 @@ from portal.desktop_installer import (
 )
 
 
+class _FakeOwnedHost:
+    """Host child launched by the current installer invocation only."""
+
+    def __init__(self) -> None:
+        self.terminated = False
+        self.waited = False
+
+    def poll(self):
+        return None if not self.terminated else 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        return 0
+
+
 def _spec() -> InstallSpec:
     return InstallSpec(
         schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
@@ -501,6 +519,7 @@ def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout() -> N
     assert "-RestartInterval (New-TimeSpan -Minutes 5)" in script
     assert "-ExecutionTimeLimit (New-TimeSpan -Seconds 0)" in script
     assert "-MultipleInstances IgnoreNew" in script
+    assert "$actual.StartWhenAvailable -ne $true" in script
     assert "Get-ScheduledTask" in script
     assert "Task recovery settings readback mismatch" in script
     assert "Start-ScheduledTask" not in script
@@ -539,8 +558,9 @@ def test_failed_restart_settings_leave_install_activation_unclaimed(
                         lambda *_args: tmp_path / "python.exe")
     monkeypatch.setattr(desktop_installer, "_verify_imports",
                         lambda *_args: {})
+    owned_host = _FakeOwnedHost()
     monkeypatch.setattr(desktop_installer, "_start_host",
-                        lambda *_args: object())
+                        lambda *_args: owned_host)
     monkeypatch.setattr(desktop_installer, "_qualify",
                         lambda *_args: {"qualified": True})
     seen = []
@@ -556,10 +576,48 @@ def test_failed_restart_settings_leave_install_activation_unclaimed(
         desktop_installer.install(runtime_root=root, spec=spec, activate=True)
 
     assert seen == ["schtasks.exe", "powershell.exe"]
+    assert owned_host.terminated and owned_host.waited
     assert not (root / "INSTALLATION_RESULT.json").exists()
     assert "ACTIVE_AT_LOGON" not in (
         root / "RUNTIME_INSTALL_SPEC.json"
     ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("failure", ("task_create", "task_query", "activation_receipt"))
+def test_postqualification_failure_terminates_only_owned_host(
+    failure: str, monkeypatch, tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+
+    def fail_selected_command(command, **_kwargs):
+        if failure == "task_create" and "/Create" in command:
+            raise RuntimeError("task name collision")
+        if failure == "task_query" and "/Query" in command:
+            raise RuntimeError("task readback failed")
+        if "/Query" in command:
+            return SimpleNamespace(stdout="VeraDesktopRuntime-desktop-v1")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(desktop_installer, "_run", fail_selected_command)
+    if failure == "activation_receipt":
+        def failed_receipt(*_args, **_kwargs):
+            raise RuntimeError("could not persist activation state")
+        monkeypatch.setattr(desktop_installer, "_record_activation_state",
+                            failed_receipt)
+
+    with pytest.raises(RuntimeError):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    assert not (root / "INSTALLATION_RESULT.json").exists()
 
 
 def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:
