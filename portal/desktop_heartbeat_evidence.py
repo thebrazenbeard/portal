@@ -8,24 +8,86 @@ Even a dead PID hint cannot establish exclusive ownership of a host singleton.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
+import errno
 import json
+import os
 from pathlib import Path
+import stat
 from typing import Any
 
 
 _MAX_INSPECTION_BYTES = 64 * 1024
+_HAS_DIR_FD_OPEN = os.open in os.supports_dir_fd
+
+
+class _UntrustedPath(Exception):
+    """The read would traverse a symlink, reparse point, or non-directory."""
+
+
+def _posix_bounded_nofollow_read(path: Path) -> bytes:
+    """Open each component relative to a pinned parent descriptor.
+
+    This prevents path-component symlinks and final-path swaps from redirecting
+    the file read on POSIX. It is not a host identity or mount-custody proof.
+    """
+    components = path.parts[1:] if path.is_absolute() else path.parts
+    if not components or any(part in {"", ".", ".."} for part in components):
+        raise _UntrustedPath
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    leaf_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    with ExitStack() as stack:
+        base = path.anchor if path.is_absolute() else "."
+        descriptor = os.open(base, directory_flags)
+        stack.callback(os.close, descriptor)
+        try:
+            for component in components[:-1]:
+                descriptor = os.open(component, directory_flags, dir_fd=descriptor)
+                stack.callback(os.close, descriptor)
+            leaf = os.open(components[-1], leaf_flags, dir_fd=descriptor)
+            stack.callback(os.close, leaf)
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                raise _UntrustedPath from exc
+            raise
+        if not stat.S_ISREG(os.fstat(leaf).st_mode):
+            raise _UntrustedPath
+        return os.read(leaf, _MAX_INSPECTION_BYTES + 1)
+
+
+def _best_effort_bounded_read(path: Path) -> bytes:
+    """Windows fallback: no guaranteed reparse-point or swap resistance."""
+    for component in (path, *path.parents):
+        if component.is_symlink() or getattr(component, "is_junction", lambda: False)():
+            raise _UntrustedPath
+    with path.open("rb") as stream:
+        return stream.read(_MAX_INSPECTION_BYTES + 1)
 
 
 def _classify_heartbeat(path: Path) -> dict[str, Any]:
-    if path.is_symlink():
-        return {"classification": "SYMLINK_UNTRUSTED", "bytes_observed": None}
+    handle_nofollow = (
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and _HAS_DIR_FD_OPEN
+    )
+    custody = "NOFOLLOW_COMPONENT_HANDLES" if handle_nofollow else "BEST_EFFORT_UNVERIFIED"
     try:
-        with path.open("rb") as stream:
-            raw = stream.read(_MAX_INSPECTION_BYTES + 1)
+        raw = (
+            _posix_bounded_nofollow_read(path)
+            if handle_nofollow
+            else _best_effort_bounded_read(path)
+        )
+    except _UntrustedPath:
+        return {
+            "classification": "SYMLINK_UNTRUSTED",
+            "bytes_observed": None,
+            "path_custody": custody,
+        }
     except FileNotFoundError:
-        return {"classification": "MISSING", "bytes_observed": None}
+        return {"classification": "MISSING", "bytes_observed": None, "path_custody": custody}
     except OSError:
-        return {"classification": "UNREADABLE", "bytes_observed": None}
+        return {"classification": "UNREADABLE", "bytes_observed": None, "path_custody": custody}
 
     count = len(raw)
     if count > _MAX_INSPECTION_BYTES:
@@ -42,7 +104,7 @@ def _classify_heartbeat(path: Path) -> dict[str, Any]:
         else:
             # JSON_OBJECT does not imply acceptance by RuntimeSupervisor.
             classification = "JSON_OBJECT" if isinstance(document, dict) else "JSON_NON_OBJECT"
-    return {"classification": classification, "bytes_observed": count}
+    return {"classification": classification, "bytes_observed": count, "path_custody": custody}
 
 
 def inspect_heartbeat_evidence(runtime_root: Path) -> dict[str, Any]:
@@ -53,11 +115,14 @@ def inspect_heartbeat_evidence(runtime_root: Path) -> dict[str, Any]:
     authorize moving a file or starting a runtime.
     """
     bridge = Path(runtime_root) / "bridge"
+    heartbeat = _classify_heartbeat(bridge / "heartbeat.json")
+    # A rejected path cannot establish even the existence of related hint files.
+    untrusted = heartbeat["classification"] == "SYMLINK_UNTRUSTED"
     return {
         "schema": "PORTAL_HEARTBEAT_EVIDENCE_V1",
-        "heartbeat": _classify_heartbeat(bridge / "heartbeat.json"),
-        "pid_hint_present": (bridge / "pid.txt").exists(),
-        "launch_reservation_present": (bridge / "launch.json").exists(),
+        "heartbeat": heartbeat,
+        "pid_hint_present": None if untrusted else (bridge / "pid.txt").exists(),
+        "launch_reservation_present": None if untrusted else (bridge / "launch.json").exists(),
         "live_singleton_owner": "UNVERIFIED",
         "recovery_authorized": False,
         "mutation_performed": False,
