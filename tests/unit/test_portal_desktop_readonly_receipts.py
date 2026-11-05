@@ -205,6 +205,18 @@ def test_bridge_symlink_ancestor_cannot_redirect_an_intent_outside_root(
     assert not list(outside.iterdir())
 
 
+def test_runtime_parent_symlink_ancestor_is_rejected(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    (outside / "runtime").mkdir(parents=True)
+    try:
+        (tmp_path / "linked_parent").symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable to this user/platform")
+    with pytest.raises(BridgeIntentConflict, match="symlink/junction"):
+        ReadOnlyBridgeClient(tmp_path / "linked_parent" / "runtime")
+    assert not (outside / "runtime" / "bridge").exists()
+
+
 def test_intent_subdirectory_symlink_cannot_redirect_a_write(tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     bridge = runtime / "bridge"
