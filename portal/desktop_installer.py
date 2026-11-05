@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -10,11 +13,15 @@ import stat
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .runtime_source_attestation import write_attestation, verify_attestation
 
 
 _TASK_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+_WINDOWS_SID_RE = re.compile(r"^S-1-[0-9]+(?:-[0-9]+)+$", re.IGNORECASE)
+_TASK_XML_NS = "{http://schemas.microsoft.com/windows/2004/02/mit/task}"
 _UNSAFE_CMD_PATH_CHARS = frozenset('%!^"&|<>\r\n')
 
 
@@ -70,7 +77,8 @@ def launcher_text(runtime_root: Path, python: Path, module: str) -> str:
     return (
         "@echo off\r\n"
         f'set "VERA_RUNTIME_ROOT={root_value}"\r\n'
-        f'"{python_value}" -m {module}\r\n'
+        'set "PYTHONDONTWRITEBYTECODE=1"\r\n'
+        f'"{python_value}" -B -m {module}\r\n'
     )
 
 
@@ -85,7 +93,6 @@ def build_logon_task_command(
     return [
         "schtasks.exe",
         "/Create",
-        "/F",
         "/SC",
         "ONLOGON",
         "/TN",
@@ -95,13 +102,171 @@ def build_logon_task_command(
     ]
 
 
+
+def _require_unclaimed_logon_task(task_name: str) -> None:
+    """Inspect the complete scheduler inventory; an uncertain answer blocks activation.
+
+    The single-task /Query exit code cannot distinguish 'not found' from
+    access denial or scheduler failure, so use a successful complete listing.
+    /Create is also issued without /F and with stdin closed to resist races.
+    """
+    if not _TASK_NAME_RE.fullmatch(task_name):
+        raise ValueError("task_name contains unsupported characters")
+    try:
+        inventory = _run(
+            ["schtasks.exe", "/Query", "/FO", "CSV", "/NH"],
+            capture=True,
+        )
+        rows = list(csv.reader(io.StringIO(inventory.stdout.lstrip("\ufeff")), strict=True))
+    except (OSError, subprocess.CalledProcessError, UnicodeError, csv.Error) as exc:
+        raise RuntimeError(
+            "scheduled-task inventory unavailable; refusing logon activation"
+        ) from exc
+    if not rows:
+        raise RuntimeError("scheduled-task inventory empty; refusing logon activation")
+    expected = ("\\" + task_name).casefold()
+    for row in rows:
+        if len(row) < 3 or not row[0].startswith("\\"):
+            raise RuntimeError(
+                "scheduled-task inventory malformed; refusing logon activation"
+            )
+        if row[0].casefold() == expected:
+            raise RuntimeError(
+                "logon task already exists; refusing to replace it"
+            )
+
+
+def _current_scheduler_account() -> tuple[str, str]:
+    """Bind the expected principal to this installer process, before /Create."""
+    try:
+        output = _run(
+            ["whoami.exe", "/user", "/fo", "csv", "/nh"], capture=True,
+        ).stdout
+        rows = list(csv.reader(io.StringIO(output.lstrip("\ufeff")), strict=True))
+    except (OSError, subprocess.CalledProcessError, UnicodeError, csv.Error) as exc:
+        raise RuntimeError("current scheduler principal unavailable; refusing activation") from exc
+    if (len(rows) != 1 or len(rows[0]) != 2 or not rows[0][0].strip()
+            or not _WINDOWS_SID_RE.fullmatch(rows[0][1].strip())):
+        raise RuntimeError("current scheduler principal malformed; refusing activation")
+    return rows[0][0].strip(), rows[0][1].strip()
+
+
+def _require_exact_logon_task_readback(
+    task_name: str, launcher: Path, xml: str, *, account: str, account_sid: str,
+) -> None:
+    """Fail closed unless scheduler XML matches this exact owned task definition.
+
+    Checking TaskName alone is insufficient after registration: a competing
+    actor can preposition a different action/trigger/principal under the same
+    name. /Query /TN /XML exposes the actual definition without mutating it.
+    """
+    failure = "registered logon task definition could not be read back exactly"
+    if not _TASK_NAME_RE.fullmatch(task_name) or not isinstance(xml, str) or len(xml) > 262144:
+        raise RuntimeError(failure)
+    try:
+        root = ET.fromstring(xml.lstrip("\ufeff"))
+    except ET.ParseError as exc:
+        raise RuntimeError(failure) from exc
+    n = _TASK_XML_NS
+    if root.tag != n + "Task":
+        raise RuntimeError(failure)
+    uri = root.findtext(f"{n}RegistrationInfo/{n}URI")
+    triggers = root.findall(f"{n}Triggers/*")
+    actions = root.findall(f"{n}Actions/*")
+    principals = root.findall(f"{n}Principals/{n}Principal")
+    if (uri is None or uri.casefold() != ("\\" + task_name).casefold()
+            or len(triggers) != 1 or triggers[0].tag != n + "LogonTrigger"
+            or len(actions) != 1 or actions[0].tag != n + "Exec"
+            or len(principals) != 1):
+        raise RuntimeError(failure)
+    trigger = triggers[0]
+    if (trigger.findtext(n + "Enabled", "true").casefold() != "true"
+            or root.findtext(f"{n}Settings/{n}Enabled", "true").casefold() != "true"):
+        raise RuntimeError(failure)
+    # /SC ONLOGON without /RU allows a logon trigger for any local user.
+    # If the scheduler binds a specific user, it must still be this account.
+    trigger_user = trigger.findtext(n + "UserId")
+    allowed_users = {account.casefold(), account_sid.casefold()}
+    if trigger_user and trigger_user.casefold() not in allowed_users:
+        raise RuntimeError(failure)
+    action = actions[0]
+    # /TR is an exact launcher, with neither arguments nor a working directory.
+    if (action.findtext(n + "Command") != str(Path(launcher).resolve())
+            or action.findtext(n + "Arguments") not in (None, "")
+            or action.findtext(n + "WorkingDirectory") not in (None, "")):
+        raise RuntimeError(failure)
+    principal = principals[0]
+    user_id = principal.findtext(n + "UserId")
+    if (user_id is None or user_id.casefold() not in allowed_users
+            or principal.find(n + "GroupId") is not None
+            or principal.findtext(n + "RunLevel") != "LeastPrivilege"
+            or principal.findtext(n + "LogonType") not in (None, "InteractiveToken")):
+        raise RuntimeError(failure)
+    context = root.find(n + "Actions")
+    context_id = context.get("Context") if context is not None else None
+    principal_id = principal.get("id")
+    if context_id and context_id != principal_id:
+        raise RuntimeError(failure)
+
+
+def _record_task_registration_uncertain(runtime_root: Path, task_name: str) -> None:
+    """Retain a fail-closed recovery marker; never delete or replace a scheduler task."""
+    try:
+        _record_activation_state(
+            runtime_root, requested=True, qualified=True, active=False,
+        )
+    except (OSError, ValueError, RuntimeError):
+        # A locked or malformed runtime spec cannot be trusted; the separate
+        # marker still identifies the task requiring manual reconciliation.
+        pass
+    marker = {
+        "schema": "PORTAL_LOGON_TASK_REGISTRATION_UNCERTAIN_V1",
+        "task_name": task_name,
+        "state": "UNCERTAIN_REQUIRES_MANUAL_RECONCILIATION",
+        "active": False,
+        "recorded_at": time.time(),
+    }
+    with (runtime_root / "TASK_REGISTRATION_UNCERTAIN.json").open(
+        "x", encoding="utf-8",
+    ) as sink:
+        json.dump(marker, sink, sort_keys=True, indent=2)
+        sink.write("\n")
+
+
+def _trusted_windows_scheduler_tool(name: str) -> str:
+    """Resolve scheduler commands using the OS system directory, not PATH.
+
+    A shadowed schtasks/whoami binary could forge *both* the inventory and
+    post-create receipt. GetSystemDirectoryW bypasses the mutable PATH and
+    SystemRoot environment variables; any uncertainty blocks activation.
+    """
+    name = name.casefold()
+    if os.name != "nt" or name not in {"schtasks.exe", "whoami.exe"}:
+        raise RuntimeError("trusted Windows scheduler tool unavailable")
+    try:
+        system_dir = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetSystemDirectoryW(system_dir, len(system_dir))
+        if not 0 < size < len(system_dir):
+            raise RuntimeError("Windows system directory cannot be resolved")
+        binary = Path(system_dir.value) / name
+        if not binary.is_file():
+            raise RuntimeError("trusted Windows scheduler tool is missing")
+        return str(binary)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise RuntimeError("trusted Windows scheduler tool unavailable") from exc
+
+
 def _run(
     args: list[str],
     *,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
     capture: bool = False,
+    noninteractive: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    if args and args[0].casefold() in {"schtasks.exe", "whoami.exe"}:
+        # Centralize pinning, including inventory, registration and readback.
+        args = [_trusted_windows_scheduler_tool(args[0]), *args[1:]]
     return subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
@@ -109,6 +274,7 @@ def _run(
         check=True,
         text=True,
         capture_output=capture,
+        stdin=subprocess.DEVNULL if noninteractive else None,
     )
 
 
@@ -124,6 +290,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "clone",
             "--filter=blob:none",
             "--no-checkout",
@@ -145,6 +313,8 @@ def _clone_exact(source: RuntimeSource, destination: Path) -> None:
     _run(
         [
             "git",
+            "-c",
+            "core.autocrlf=false",
             "-C",
             str(destination),
             "checkout",
@@ -213,6 +383,7 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
     _run(
         [
             str(python),
+            "-B",
             "-m",
             "pip",
             "install",
@@ -221,7 +392,8 @@ def _install_sources(runtime_root: Path, spec: InstallSpec) -> Path:
             arg
             for source in spec.sources
             for arg in ("-e", str(sources / source.component))
-        ]
+        ],
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     return python
 
@@ -245,7 +417,7 @@ def _verify_imports(python: Path, runtime_root: Path) -> dict[str, str]:
         + "}))"
     )
     completed = _run(
-        [str(python), "-c", code],
+        [str(python), "-B", "-c", code],
         cwd=runtime_root,
         capture=True,
     )
@@ -314,7 +486,7 @@ def _start_host(runtime_root: Path, python: Path) -> subprocess.Popen[bytes] | N
     )
     try:
         return subprocess.Popen(
-            [str(python), "-m", "portal.desktop_host"],
+            [str(python), "-B", "-m", "portal.desktop_host"],
             cwd=str(runtime_root),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -343,9 +515,11 @@ def _terminate_unqualified_host(process: subprocess.Popen[bytes]) -> None:
 def _qualify(runtime_root: Path, python: Path) -> dict[str, object]:
     env = dict(os.environ)
     env["VERA_RUNTIME_ROOT"] = str(runtime_root)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     completed = _run(
         [
             str(python),
+            "-B",
             "-m",
             "portal.desktop_qualify",
             "--runtime-root",
@@ -413,11 +587,13 @@ def install(
 
     python = _install_sources(runtime_root, spec)
     imports = _verify_imports(python, runtime_root)
+    source_attestation = write_attestation(runtime_root, spec)
     staged_host = _start_host(runtime_root, python)
     if staged_host is None:
         raise RuntimeError("staged host was not started by this installer")
     try:
         qualification = _qualify(runtime_root, python)
+        verify_attestation(runtime_root, spec)
     except BaseException:
         _terminate_unqualified_host(staged_host)
         raise
@@ -434,72 +610,103 @@ def install(
     )
 
     task_name = None
-    if activate:
-        task_name = "VeraDesktopRuntime-" + re.sub(
-            r"[^A-Za-z0-9_.-]",
-            "_",
-            spec.install_id,
-        )
-        _run(
-            build_logon_task_command(
-                task_name=task_name,
-                launcher=host_launcher,
+    task_registration_attempted = False
+    try:
+        if activate:
+            task_name = "VeraDesktopRuntime-" + re.sub(
+                r"[^A-Za-z0-9_.-]",
+                "_",
+                spec.install_id,
             )
-        )
-        query = _run(
-            [
-                "schtasks.exe",
-                "/Query",
-                "/TN",
-                task_name,
-                "/FO",
-                "LIST",
-                "/V",
-            ],
-            capture=True,
-        )
-        if task_name not in query.stdout:
-            raise RuntimeError("registered logon task could not be read back")
+            _require_unclaimed_logon_task(task_name)
+            account, account_sid = _current_scheduler_account()
+            # Mark uncertainty before invoking an effect: a scheduler failure
+            # could mean the task was created before the client received error.
+            task_registration_attempted = True
+            _run(
+                build_logon_task_command(
+                    task_name=task_name,
+                    launcher=host_launcher,
+                ),
+                noninteractive=True,
+            )
+            query = _run(
+                [
+                    "schtasks.exe",
+                    "/Query",
+                    "/TN",
+                    task_name,
+                    "/XML",
+                ],
+                capture=True,
+            )
+            _require_exact_logon_task_readback(
+                task_name, host_launcher, query.stdout,
+                account=account, account_sid=account_sid,
+            )
 
-    _record_activation_state(
-        runtime_root,
-        requested=activate,
-        qualified=True,
-        active=bool(activate),
-    )
+        _record_activation_state(
+            runtime_root,
+            requested=activate,
+            qualified=True,
+            active=bool(activate),
+        )
 
-    result = {
-        "schema": (
-            "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
-            if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
-            else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
-        ),
-        "runtime_root": str(runtime_root),
-        "install_id": spec.install_id,
-        "source_map": {
-            item.component: {
-                "repository": item.repository,
-                "ref": item.ref,
-                "sha": item.sha,
-            }
-            for item in spec.sources
-        },
-        "imports": imports,
-        "qualification": qualification,
-        "activation": {
-            "requested": activate,
-            "task_name": task_name,
-            "active_at_logon": bool(activate),
-        },
-        "protected_effect_authority": False,
-        "native_openai_router_replaced": False,
-        "installed_at": time.time(),
-    }
-    (runtime_root / "INSTALLATION_RESULT.json").write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return result
+        result = {
+            "schema": (
+                "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
+                if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+                else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
+            ),
+            "runtime_root": str(runtime_root),
+            "install_id": spec.install_id,
+            "source_map": {
+                item.component: {
+                    "repository": item.repository,
+                    "ref": item.ref,
+                    "sha": item.sha,
+                }
+                for item in spec.sources
+            },
+            "source_attestation": {
+                "schema": source_attestation["schema"],
+                "sha256": source_attestation["sha256"],
+                "path": "RUNTIME_SOURCE_ATTESTATION.json",
+            },
+            "imports": imports,
+            "qualification": qualification,
+            "activation": {
+                "requested": activate,
+                "task_name": task_name,
+                "active_at_logon": bool(activate),
+            },
+            "protected_effect_authority": False,
+            "native_openai_router_replaced": False,
+            "installed_at": time.time(),
+        }
+        (runtime_root / "INSTALLATION_RESULT.json").write_text(
+            json.dumps(result, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return result
+    except BaseException:
+        # After any attempted registration the task's ownership/status is
+        # indeterminate, even when the scheduler operation reported success.
+        # Preserve the existing scheduler task and never claim activation.
+        marker_error = None
+        try:
+            if task_registration_attempted:
+                _record_task_registration_uncertain(runtime_root, task_name)
+        except OSError as exc:
+            marker_error = exc
+        finally:
+            _terminate_unqualified_host(staged_host)
+        if marker_error is not None:
+            raise RuntimeError(
+                "task activation failed and uncertainty marker could not be saved; "
+                "manual scheduler reconciliation is required"
+            ) from marker_error
+        raise
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
