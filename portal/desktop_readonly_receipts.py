@@ -78,7 +78,10 @@ def _read_json(path: Path, *, limit: int) -> object:
         payload = stream.read(limit + 1)
     if len(payload) > limit:
         raise ValueError("file exceeds bound")
-    return json.loads(payload.decode("utf-8-sig"))
+    try:
+        return json.loads(payload.decode("utf-8-sig"))
+    except RecursionError as exc:
+        raise ValueError("excessive JSON nesting") from exc
 
 
 class ReadOnlyBridgeClient:
