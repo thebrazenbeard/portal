@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from portal.desktop_heartbeat_evidence import inspect_heartbeat_evidence
 from portal.desktop_supervisor import RuntimeState, RuntimeSupervisor, RuntimeSupervisorConfig
@@ -84,8 +87,74 @@ def test_symlink_heartbeat_is_not_followed(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     outside = tmp_path / "sensitive.txt"
     outside.write_text("sensitive content", encoding="utf-8")
-    (bridge / "heartbeat.json").symlink_to(outside)
+    try:
+        (bridge / "heartbeat.json").symlink_to(outside)
+    except OSError:
+        pytest.skip("local user cannot create a symlink")
     evidence = inspect_heartbeat_evidence(tmp_path)
     assert evidence["heartbeat"]["classification"] == "SYMLINK_UNTRUSTED"
     assert evidence["heartbeat"]["bytes_observed"] is None
     assert outside.read_text(encoding="utf-8") == "sensitive content"
+
+
+def test_symlinked_bridge_directory_is_not_followed(tmp_path: Path) -> None:
+    external_bridge = tmp_path / "external-bridge"
+    external_bridge.mkdir()
+    (external_bridge / "heartbeat.json").write_text("{}", encoding="utf-8")
+    root = tmp_path / "runtime"
+    root.mkdir()
+    try:
+        (root / "bridge").symlink_to(external_bridge, target_is_directory=True)
+    except OSError:
+        pytest.skip("local user cannot create a directory symlink")
+
+    evidence = inspect_heartbeat_evidence(root)
+
+    assert evidence["heartbeat"]["classification"] == "SYMLINK_UNTRUSTED"
+    assert evidence["heartbeat"]["bytes_observed"] is None
+    assert evidence["pid_hint_present"] is None
+    assert evidence["launch_reservation_present"] is None
+    assert evidence["recovery_authorized"] is False
+
+
+def test_swap_after_precheck_cannot_follow_symlink_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("POSIX directory-handle nofollow test")
+    bridge = _bridge(tmp_path)
+    heartbeat = bridge / "heartbeat.json"
+    heartbeat.write_text("{}", encoding="utf-8")
+    external = tmp_path / "outside.json"
+    external.write_text('{"externally_swapped":true}', encoding="utf-8")
+    original_path_open = Path.open
+    original_os_open = os.open
+    swapped = False
+
+    def swap_target() -> None:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            heartbeat.unlink()
+            heartbeat.symlink_to(external)
+
+    def path_open_with_swap(self: Path, *args: object, **kwargs: object):
+        if self == heartbeat:
+            swap_target()
+        return original_path_open(self, *args, **kwargs)
+
+    def os_open_with_swap(path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None):
+        if path == "heartbeat.json" and dir_fd is not None:
+            swap_target()
+        return original_os_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(Path, "open", path_open_with_swap)
+    monkeypatch.setattr(os, "open", os_open_with_swap)
+
+    evidence = inspect_heartbeat_evidence(tmp_path)
+
+    assert swapped is True
+    assert evidence["heartbeat"]["classification"] == "SYMLINK_UNTRUSTED"
+    assert evidence["heartbeat"]["bytes_observed"] is None
+    assert evidence["heartbeat"]["path_custody"] == "NOFOLLOW_COMPONENT_HANDLES"
+    assert evidence["recovery_authorized"] is False
