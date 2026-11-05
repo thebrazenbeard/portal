@@ -13,7 +13,6 @@ Requires Python 3.12+ and the existing Portal dependencies.
 ```bash
 # Public-only proof; writes an explicitly chosen local file once.
 python -m portal.pr_intake --owner thebrazenbeard \
-  --expected-repos 118 \
   --output /an/operator/controlled/path/pr-snapshot.json
 
 # Include authenticated private PRs only in a local access-controlled destination.
