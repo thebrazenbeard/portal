@@ -82,16 +82,52 @@ def build_logon_task_command(
     if not _TASK_NAME_RE.fullmatch(task_name):
         raise ValueError("task_name contains unsupported characters")
     launcher_value = _validated_cmd_path(Path(launcher).resolve())
+    # Never overwrite a pre-existing runtime task with the same install identity.
     return [
         "schtasks.exe",
         "/Create",
-        "/F",
         "/SC",
         "ONLOGON",
         "/TN",
         task_name,
         "/TR",
         launcher_value,
+    ]
+
+
+def build_task_recovery_settings_command(*, task_name: str) -> list[str]:
+    """Set bounded restart recovery without starting or stopping the host.
+
+    Schtasks /Create /SC ONLOGON alone leaves RestartCount=0, so an exit
+    strands the resident host until another logon. Keep one-at-a-time
+    execution and leave host-level duplicate protection intact.
+    """
+    if not _TASK_NAME_RE.fullmatch(task_name):
+        raise ValueError("task_name contains unsupported characters")
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        f"$name='{task_name}'; "
+        "$settings=New-ScheduledTaskSettingsSet "
+        "-RestartCount 3 "
+        "-RestartInterval (New-TimeSpan -Minutes 5) "
+        "-ExecutionTimeLimit (New-TimeSpan -Seconds 0) "
+        "-MultipleInstances IgnoreNew -StartWhenAvailable; "
+        "Set-ScheduledTask -TaskPath '\\' -TaskName $name "
+        "-Settings $settings -ErrorAction Stop | Out-Null; "
+        "$actual=(Get-ScheduledTask -TaskPath '\\' -TaskName $name "
+        "-ErrorAction Stop).Settings; "
+        "if ($actual.RestartCount -ne 3 -or "
+        "[string]$actual.RestartInterval -ne 'PT5M' -or "
+        "[string]$actual.ExecutionTimeLimit -ne 'PT0S' -or "
+        "[string]$actual.MultipleInstances -ne 'IgnoreNew') "
+        "{ throw 'Task recovery settings readback mismatch' }"
+    )
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        script,
     ]
 
 
@@ -446,6 +482,15 @@ def install(
                 launcher=host_launcher,
             )
         )
+        try:
+            _run(build_task_recovery_settings_command(task_name=task_name))
+        except Exception as exc:
+            # A task may now exist, but no activation claim may be recorded.
+            # Do not blindly replay an install or delete the ambiguous task.
+            raise RuntimeError(
+                "desktop host task registered, but restart settings were not "
+                "verified; inspect the exact task before any retry"
+            ) from exc
         query = _run(
             [
                 "schtasks.exe",

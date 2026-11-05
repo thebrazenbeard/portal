@@ -11,6 +11,7 @@ from portal.desktop_install import InstallSpec, RuntimeSource
 from portal.desktop_installer import (
     _record_activation_state,
     build_logon_task_command,
+    build_task_recovery_settings_command,
     launcher_text,
 )
 
@@ -478,11 +479,37 @@ def test_logon_task_command_binds_exact_launcher_path(tmp_path: Path) -> None:
         launcher=launcher,
     )
 
-    assert command[:4] == ["schtasks.exe", "/Create", "/F", "/SC"]
+    assert command[:3] == ["schtasks.exe", "/Create", "/SC"]
+    assert "/F" not in command  # Existing install IDs are never overwritten.
     assert "ONLOGON" in command
     assert "/TN" in command
     assert "VeraDesktopRuntime-test" in command
     assert str(launcher) in command[-1]
+
+
+def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout() -> None:
+    command = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test"
+    )
+
+    assert command[:4] == [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+    ]
+    script = command[4]
+    assert "-TaskPath '\\'" in script
+    assert "-RestartCount 3" in script
+    assert "-RestartInterval (New-TimeSpan -Minutes 5)" in script
+    assert "-ExecutionTimeLimit (New-TimeSpan -Seconds 0)" in script
+    assert "-MultipleInstances IgnoreNew" in script
+    assert "Get-ScheduledTask" in script
+    assert "Task recovery settings readback mismatch" in script
+    assert "Start-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+
+
+def test_recovery_policy_rejects_untrusted_task_name() -> None:
+    with pytest.raises(ValueError, match="task_name"):
+        build_task_recovery_settings_command(task_name="other'; dangerous")
 
 
 def test_logon_task_name_is_not_shell_interpolated(tmp_path: Path) -> None:
@@ -501,6 +528,38 @@ def test_logon_task_launcher_path_cannot_expand_environment_variables(tmp_path: 
             task_name="VeraDesktopRuntime-test",
             launcher=tmp_path / "%COMSPEC%" / "StartVeraRuntime.cmd",
         )
+
+
+def test_failed_restart_settings_leave_install_activation_unclaimed(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    spec = _spec()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports",
+                        lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: object())
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    seen = []
+
+    def fail_task_settings(command, **_kwargs):
+        seen.append(command[0])
+        if command[0] == "powershell.exe":
+            raise RuntimeError("simulated task settings failure")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(desktop_installer, "_run", fail_task_settings)
+    with pytest.raises(RuntimeError, match="task registered, but restart settings"):
+        desktop_installer.install(runtime_root=root, spec=spec, activate=True)
+
+    assert seen == ["schtasks.exe", "powershell.exe"]
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    assert "ACTIVE_AT_LOGON" not in (
+        root / "RUNTIME_INSTALL_SPEC.json"
+    ).read_text(encoding="utf-8")
 
 
 def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:
