@@ -21,28 +21,74 @@ EXPECTED = {
 }
 
 
-def _read_wheel(path: Path) -> tuple[set[str], str, dict[str, str]]:
+_SCHEME_DESTINATIONS = {
+    "purelib": "site-packages",
+    "platlib": "site-packages",
+    "scripts": "scripts",
+    "data": "prefix-data",
+    "headers": "headers",
+}
+
+
+def _installed_destination(archive_path: str, data_stem: str) -> str:
+    # Wheels are ZIP files with forward-slash paths. Reject ambiguous Windows
+    # aliases, traversal, and backslashes rather than silently normalizing them.
+    parts = archive_path.split("/")
+    if (archive_path.startswith("/") or "\\" in archive_path or
+            any(not part or part in {".", ".."} or part[-1] in {" ", "."}
+                or any(c in part for c in ':*?"<>|\x00') for part in parts)):
+        raise ValueError(f"unsafe archive path {archive_path!r}")
+
+    if parts[0] == f"{data_stem}.data":
+        if len(parts) < 3 or parts[1] not in _SCHEME_DESTINATIONS:
+            raise ValueError(f"unsupported wheel .data relocation {archive_path!r}")
+        return "/".join((_SCHEME_DESTINATIONS[parts[1]], *parts[2:])).casefold()
+    return f"site-packages/{archive_path}".casefold()
+
+
+def _read_wheel(path: Path) -> tuple[set[str], set[str], str, dict[str, str], list[str]]:
     with ZipFile(path) as archive:
-        names = {entry.filename for entry in archive.infolist() if not entry.is_dir()}
-        metadata = [name for name in names if name.endswith(".dist-info/METADATA")]
+        filenames = [entry.filename for entry in archive.infolist() if not entry.is_dir()]
+        names = set(filenames)
+        metadata = [name for name in filenames if name.endswith(".dist-info/METADATA")]
         if len(metadata) != 1:
             raise ValueError(f"{path}: expected one wheel METADATA, found {len(metadata)}")
         distribution = Parser().parsestr(archive.read(metadata[0]).decode())["Name"]
+        data_stem = metadata[0].removesuffix(".dist-info/METADATA")
         entry_file = metadata[0].removesuffix("METADATA") + "entry_points.txt"
         entrypoints: dict[str, str] = {}
         if entry_file in names:
             parser = configparser.ConfigParser()
+            parser.optionxform = str  # preserve case so Windows aliases can be tested
             parser.read_string(archive.read(entry_file).decode())
             entrypoints = dict(parser.items("console_scripts")) if parser.has_section("console_scripts") else {}
-        return names, distribution, entrypoints
+
+        installed: set[str] = set()
+        problems: list[str] = []
+        for name in filenames:
+            try:
+                destination = _installed_destination(name, data_stem)
+            except ValueError as exc:
+                problems.append(str(exc))
+                continue
+            if destination in installed:
+                problems.append(f"duplicate installed destination {destination!r} from {name!r}")
+            installed.add(destination)
+        for command in entrypoints:
+            destination = f"scripts/{command.casefold()}"
+            if destination in installed:
+                problems.append(f"generated CLI conflicts with installed destination {destination!r}")
+            installed.add(destination)
+        return names, installed, distribution, entrypoints, problems
 
 
 def assess_wheels(wheels: dict[str, Path]) -> dict[str, object]:
     packages = {}
     problems: list[str] = []
     for role, (expected_name, *required_files) in EXPECTED.items():
-        names, distribution, scripts = _read_wheel(wheels[role])
-        packages[role] = (names, scripts)
+        names, installed, distribution, scripts, wheel_problems = _read_wheel(wheels[role])
+        packages[role] = (names, installed, scripts)
+        problems.extend(f"{role}: {problem}" for problem in wheel_problems)
         if distribution != expected_name:
             problems.append(f"{role}: distribution {distribution!r}, expected {expected_name!r}")
         for required in required_files:
@@ -51,29 +97,30 @@ def assess_wheels(wheels: dict[str, Path]) -> dict[str, object]:
 
     overlaps: dict[str, list[str]] = {}
     for left, right in (("portal", "runner"), ("portal", "mono"), ("runner", "mono")):
-        common = sorted(packages[left][0] & packages[right][0])
+        common = sorted(packages[left][1] & packages[right][1])
         if common:
             overlaps[f"{left}/{right}"] = common
-            problems.append(f"{left}/{right}: {len(common)} owned archive path collisions")
+            problems.append(f"{left}/{right}: {len(common)} installed destination collisions")
 
     commands: dict[str, str] = {}
-    for role, (_, scripts) in packages.items():
+    for role, (_, _, scripts) in packages.items():
         for name, target in scripts.items():
-            if name in commands:
+            if name.casefold() in commands:
                 problems.append(f"CLI command {name!r} claimed by multiple distributions")
-            commands[name] = f"{role}:{target}"
+            commands[name.casefold()] = f"{role}:{target}"
     expected_commands = {"portal", "portal-desktop", "project-runner", "vera-mono"}
     for missing in sorted(expected_commands - commands.keys()):
         problems.append(f"missing CLI command {missing!r}")
 
     return {
-        "schema": "PORTAL_DISJOINT_WHEELS_REVIEW_V1",
+        "schema": "PORTAL_DISJOINT_WHEELS_REVIEW_V2",
         "qualified_source_ownership": not problems,
-        "path_counts": {role: len(paths) for role, (paths, _) in packages.items()},
-        "archive_collisions": overlaps,
+        "archive_path_counts": {role: len(paths) for role, (paths, _, _) in packages.items()},
+        "installed_destination_counts": {role: len(paths) for role, (_, paths, _) in packages.items()},
+        "installed_destination_collisions": overlaps,
         "commands": commands,
         "problems": problems,
-        "limits": "Does not prove dependencies, runtime behavior, GUI, install order, or host admission",
+        "limits": "Models wheel purelib/platlib/scripts/data/headers destinations and Windows case aliases; does not prove dependencies, runtime behavior, GUI, install order, or host admission",
     }
 
 
