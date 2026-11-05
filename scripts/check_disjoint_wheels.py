@@ -29,6 +29,11 @@ _SCHEME_DESTINATIONS = {
     "headers": "headers",
 }
 
+# pip/distlib's Windows entry-point wrapper uses name.exe. Reserve the other
+# common shell wrapper spellings conservatively: this is an ownership gate,
+# not an assertion about which files a given installer will generate.
+_WINDOWS_COMMAND_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1", "-script.py", "-script.pyw")
+
 
 def _installed_destination(archive_path: str, data_stem: str) -> str:
     # Wheels are ZIP files with forward-slash paths. Reject ambiguous Windows
@@ -75,10 +80,14 @@ def _read_wheel(path: Path) -> tuple[set[str], set[str], str, dict[str, str], li
                 problems.append(f"duplicate installed destination {destination!r} from {name!r}")
             installed.add(destination)
         for command in entrypoints:
-            destination = f"scripts/{command.casefold()}"
-            if destination in installed:
-                problems.append(f"generated CLI conflicts with installed destination {destination!r}")
-            installed.add(destination)
+            if any(c in command for c in "/\\:*?\"<>|\x00") or command.endswith((" ", ".")):
+                problems.append(f"unsafe generated CLI name {command!r}")
+                continue
+            for alias in ("", *_WINDOWS_COMMAND_SUFFIXES):
+                destination = f"scripts/{command.casefold()}{alias}"
+                if destination in installed:
+                    problems.append(f"generated CLI conflicts with installed destination {destination!r}")
+                installed.add(destination)
         return names, installed, distribution, entrypoints, problems
 
 

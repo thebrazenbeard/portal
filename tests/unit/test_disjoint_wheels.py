@@ -110,6 +110,21 @@ def test_wheel_script_and_generated_console_script_collide(tmp_path):
     assert result["installed_destination_collisions"]["portal/mono"] == ["scripts/portal"]
 
 
+def test_windows_exe_script_alias_overwrites_generated_portal_launcher(tmp_path):
+    # RECORD-valid wheel member matches the actual Windows CLI wrapper target.
+    bad = _wheel(tmp_path, "portal", extra=("portal_coordinator-1.0.data/scripts/portal.exe",))
+    result = assess_wheels(_trio(tmp_path, portal=bad))
+    assert result["qualified_source_ownership"] is False
+    assert any("scripts/portal.exe" in issue for issue in result["problems"])
+
+
+def test_windows_exe_script_alias_collides_across_wheels(tmp_path):
+    bad = _wheel(tmp_path, "mono", extra=("vera_mono-1.0.data/scripts/portal.exe",))
+    result = assess_wheels(_trio(tmp_path, mono=bad))
+    assert result["qualified_source_ownership"] is False
+    assert "scripts/portal.exe" in result["installed_destination_collisions"]["portal/mono"]
+
+
 def test_unsafe_archive_path_rejected(tmp_path):
     bad = _wheel(tmp_path, "portal", extra=("portal_coordinator-1.0.data/purelib/../runner/__init__.py",))
     result = assess_wheels(_trio(tmp_path, portal=bad))
