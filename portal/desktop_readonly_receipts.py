@@ -109,10 +109,19 @@ class ReadOnlyBridgeClient:
             relative = path.relative_to(self.runtime_root)
         except ValueError as exc:
             raise BridgeIntentConflict("bridge path escapes runtime root") from exc
+        # Check the entire caller-provided root ancestry too. A symlink in a
+        # parent of runtime_root is just as capable of redirecting writes.
         cursor = self.runtime_root
-        for part in ("", *relative.parts[:-1]):
-            if part:
-                cursor = cursor / part
+        while True:
+            junction = getattr(cursor, "is_junction", None)
+            if cursor.is_symlink() or (junction is not None and junction()):
+                raise BridgeIntentConflict("bridge ancestor is a symlink/junction")
+            if cursor.parent == cursor:
+                break
+            cursor = cursor.parent
+        cursor = self.runtime_root
+        for part in relative.parts[:-1]:
+            cursor = cursor / part
             junction = getattr(cursor, "is_junction", None)
             if cursor.is_symlink() or (junction is not None and junction()):
                 raise BridgeIntentConflict("bridge ancestor is a symlink/junction")
