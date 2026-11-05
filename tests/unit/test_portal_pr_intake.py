@@ -111,8 +111,8 @@ def test_candidate_digest_is_stable_for_file_listing_order():
 @pytest.mark.parametrize(
     ("changed", "match"),
     [
-        ({"head": {"sha": NEXT}}, "PR head"),
-        ({"base": {"sha": NEXT}}, "PR base"),
+        ({"head": {"sha": NEXT}}, "changed during intake"),
+        ({"base": {"sha": NEXT}}, "changed during intake"),
         ({"base": {"ref": "other"}}, "target ref"),
         ({"state": "closed"}, "no longer open"),
         ({"number": 99}, "identity changed"),
