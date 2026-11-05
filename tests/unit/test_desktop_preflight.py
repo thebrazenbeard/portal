@@ -7,13 +7,14 @@ from pathlib import Path
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 from unittest.mock import patch
 
 import pytest
 
 from portal.desktop_install import InstallSpec, RuntimeSource
-from portal.desktop_preflight import inspect_staged_runtime
+from portal.desktop_preflight import inspect_staged_runtime, main
 
 
 def _digest(path: Path) -> str:
@@ -118,6 +119,23 @@ def test_source_verifier_disagreement_fails_closed(tmp_path):
     assert _inspect(root, {**att, "sha256": "0" * 64}, spec_sha, att_sha)["status"] == "HOLD"
 
 
+def test_git_verifier_failure_returns_structured_hold(tmp_path):
+    root = tmp_path / "staged"
+    _, _, spec_sha, att_sha = _fixture(root)
+    def failed_git(*_args):
+        raise subprocess.CalledProcessError(128, ("git", "ls-tree"))
+    result = inspect_staged_runtime(
+        root,
+        expected_install_id="source-only-test",
+        expected_spec_sha256=spec_sha,
+        expected_attestation_sha256=att_sha,
+        source_verifier=failed_git,
+    )
+    assert result["status"] == "HOLD"
+    assert result["source_bytes_verified"] is False
+    assert "STAGED_SOURCE_OR_RECEIPT_UNVERIFIED" in result["blockers"]
+
+
 def test_install_id_disagreement_fails_closed(tmp_path):
     root = tmp_path / "staged"
     _, att, spec_sha, att_sha = _fixture(root)
@@ -205,3 +223,35 @@ def test_invalid_external_digest_rejected(tmp_path):
             expected_spec_sha256="NOT_A_DIGEST",
             expected_attestation_sha256="0" * 64,
         )
+
+
+@pytest.mark.parametrize("unsafe", ["world_writable", "missing_directory"])
+def test_cli_exit_holds_even_when_source_bytes_match(tmp_path, unsafe, capsys):
+    root = tmp_path / "staged"
+    _, att, spec_sha, att_sha = _fixture(root)
+    if unsafe == "world_writable":
+        if os.name == "nt":
+            pytest.skip("POSIX write bits are not Windows DACLs")
+        root.chmod(root.stat().st_mode | stat.S_IWOTH)
+    else:
+        (root / "bridge" / "responses").rmdir()
+    try:
+        evidence = _inspect(root, att, spec_sha, att_sha)
+        assert evidence["status"] == "HOLD"
+        assert evidence["source_bytes_verified"] is True
+        argv = [
+            "desktop_preflight",
+            "--runtime-root", str(root),
+            "--expected-install-id", "source-only-test",
+            "--expected-spec-sha256", spec_sha,
+            "--expected-attestation-sha256", att_sha,
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch("portal.desktop_preflight.inspect_staged_runtime", return_value=evidence),
+        ):
+            assert main() == 2
+        assert json.loads(capsys.readouterr().out)["status"] == "HOLD"
+    finally:
+        if unsafe == "world_writable":
+            root.chmod(0o700)
