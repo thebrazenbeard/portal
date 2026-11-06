@@ -9,12 +9,22 @@ request fails closed with `host_pre_route_admission_failed` and is likewise
 nonretryable. Replaying either request does not rerun the gate or inference.
 
 The caller opts in through the engine constructor's `pre_route_gate` callback.
-It receives the full request envelope and the `PORTAL_DESKTOP_COGNITION_EVIDENCE_V2`
-claim identity (`cognition:` SHA-256 digest) and must return an exact
-`PreRouteDecision` bearing that identity and `action` `ALLOW` or `STOP_PLAY`.
-This binds a decision to source, reason, task, creation timestamp,
-required capabilities, and an opaque conversation-session binding. Decisions
-cannot be carried over to a different task or session.
+It receives the full request envelope and a fresh `cognition-attempt:`
+SHA-256 binding derived from the `PORTAL_DESKTOP_COGNITION_EVIDENCE_V2`
+request claim and the claim's unpredictable attempt token. It must return an
+exact `PreRouteDecision` bearing that `attempt_binding_id` and action `ALLOW`
+or `STOP_PLAY`. This binds the decision to source, reason, task, creation
+timestamp, required capabilities, opaque conversation-session binding **and
+the current attempt**. The raw attempt token stays inside the engine.
+Decisions cannot be replayed for a different task, session, or retry after
+a transient failure.
+
+The model and ledger use a private request snapshot. The callback receives a
+**different** envelope object; a change to that clone is detected and
+rejected. Even a caller mutating the original frozen dataclass via
+`object.__setattr__` cannot retarget the task executed by a model while the
+ledger still records its original text. This guards the demonstrated
+TOCTOU counterexample, not arbitrary mutation by already-trusted host code.
 
 This is **not** an authorization/token mechanism for arbitrary callers:
 
