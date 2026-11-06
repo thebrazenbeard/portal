@@ -54,6 +54,16 @@ def _exact_keys(value: object, keys: frozenset[str], field: str) -> Mapping[str,
     return value
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous receipts before dict conversion loses duplicate keys."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("evidence contains duplicate JSON object keys")
+        result[key] = value
+    return result
+
+
 def evaluate_preflight(
     evidence: object, *, now: datetime | None = None, max_age_seconds: int = 120,
 ) -> dict[str, object]:
@@ -124,6 +134,7 @@ def evaluate_preflight(
     if not isinstance(raw_inventory, list) or len(raw_inventory) > 64:
         raise ValueError("model_inventory must be an array of at most 64 entries")
     inventory: set[tuple[str, str, str, str]] = set()
+    model_names: set[tuple[str, str, str]] = set()
     for index, raw in enumerate(raw_inventory):
         entry = _exact_keys(raw, _ALLOWED_INVENTORY, f"model_inventory[{index}]")
         host, tag, kind, digest = (entry[field] for field in
@@ -133,8 +144,10 @@ def evaluate_preflight(
                 or not _SHA256.fullmatch(digest)):
             raise ValueError(f"model_inventory[{index}] has an invalid model identity")
         identity = (host, tag, kind, digest)
-        if identity in inventory:
-            raise ValueError(f"duplicate model_inventory identity at {index}")
+        name = (host, tag, kind)
+        if name in model_names:
+            raise ValueError(f"ambiguous duplicate model_inventory tag at {index}")
+        model_names.add(name)
         inventory.add(identity)
 
     model = _exact_keys(root["model_selection"], _ALLOWED_MODEL, "model_selection")
@@ -174,7 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             payload = source.read(MAX_EVIDENCE_BYTES + 1)
         if len(payload) > MAX_EVIDENCE_BYTES:
             raise ValueError("evidence exceeds 32 KiB limit")
-        evidence = json.loads(payload.decode("utf-8"))
+        evidence = json.loads(
+            payload.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys,
+        )
         verdict = evaluate_preflight(evidence, max_age_seconds=args.max_age_seconds)
     except (ValueError, OSError, UnicodeDecodeError, RecursionError) as exc:
         print(json.dumps({"status": "INVALID_EVIDENCE", "error": str(exc)}))
