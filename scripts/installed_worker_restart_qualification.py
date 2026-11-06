@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib.metadata import distribution
 from importlib.resources import files
 import json
 from pathlib import Path
@@ -29,6 +30,24 @@ from portal._runner.worker_routing import SqliteWorkerRouteStore, resolve_read_o
 
 TARGET_REPO = "thebrazenbeard/project-runner"
 TARGET_REF = "main"
+
+
+def assert_installed_distinct_wheels() -> None:
+    """Reject source-tree imports or a shared/overwritten wheel namespace."""
+    expected = (
+        ("portal-coordinator", "portal", portal),
+        ("project-runner", "runner", runner),
+    )
+    for distribution_name, module_name, module in expected:
+        installed = distribution(distribution_name)
+        packaged = {str(p).replace("\\", "/") for p in (installed.files or ())}
+        entry = f"{module_name}/__init__.py"
+        if entry not in packaged:
+            raise RuntimeError(f"{distribution_name} wheel does not own {entry}")
+        expected_file = Path(installed.locate_file(entry)).resolve()
+        module_file = Path(module.__file__).resolve()
+        if expected_file != module_file or "site-packages" not in expected_file.parts:
+            raise RuntimeError(f"{module_name} is not imported from its installed wheel")
 
 
 def workers():
@@ -197,10 +216,7 @@ def main():
     if (not args.db.resolve().is_relative_to(safe_tmp)
             or args.db.name != "qualification.sqlite3"):
         raise ValueError("qualification database must be named qualification.sqlite3 under OS temp")
-    if not str(portal.__file__).find("site-packages") >= 0:
-        raise RuntimeError("Portal is not imported from an installed wheel")
-    if not str(runner.__file__).find("site-packages") >= 0:
-        raise RuntimeError("Runner is not imported from an installed wheel")
+    assert_installed_distinct_wheels()
     if args.phase == "prepare":
         if args.fixture_observed_head:
             raise ValueError("fixture observed head only applies to consume phase")
