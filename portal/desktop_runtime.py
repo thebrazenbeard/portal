@@ -50,6 +50,21 @@ class CognitionResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class PreRouteDecision:
+    """Host-owned admission for one exact cognition request, never model text.
+
+    The host obtains an attempt-bound ID from the engine after the SQLite
+    claim and supplies a decision through an in-process callback. This is a routing
+    enforcement seam, not a proof that any upstream cognitive donor was run,
+    authenticated, or qualified.
+    """
+
+    attempt_binding_id: str
+    action: str  # exact ALLOW or STOP_PLAY; no truthy/falsy coercion
+    schema: str = "PORTAL_PRE_ROUTE_ADMISSION_V1"
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS desktop_cognition_runs (
     request_id TEXT PRIMARY KEY,
@@ -386,6 +401,7 @@ class CognitionLedger:
 RouteDiscovery = Callable[[], tuple[CognitionRoute, ...]]
 RouteInvoker = Callable[[CognitionRoute, str], str]
 ChatInvoker = Callable[[CognitionRoute, list[dict[str, str]]], str]
+PreRouteGate = Callable[[CognitionRequestEnvelope, str], PreRouteDecision]
 
 _MAX_LOCAL_PROMPT_BYTES = 16 * 1024
 _MAX_LOCAL_RESPONSE_BYTES = 256 * 1024
@@ -583,6 +599,7 @@ class ResidentCognitionEngine:
         invoke_chat: ChatInvoker = invoke_local_messages,
         authorized_route_ids: frozenset[str] = frozenset(),
         accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
+        pre_route_gate: PreRouteGate | None = None,
     ) -> None:
         self.ledger = ledger
         self.discover_routes = discover_routes
@@ -590,6 +607,9 @@ class ResidentCognitionEngine:
         self.invoke_chat = invoke_chat
         self.authorized_route_ids = authorized_route_ids
         self.accept_result = accept_result
+        # Explicit trusted host opt-in only. Do not accept admission decisions
+        # from desktop IPC fields, model output, or unauthenticated telemetry.
+        self.pre_route_gate = pre_route_gate
         # Resident process memory only. Never hydrate from the durable cognition
         # ledger: that ledger also contains unrelated autonomous tasks.
         self._context: OrderedDict[str, tuple[str, list[tuple[str, str]]]] = OrderedDict()
@@ -649,6 +669,18 @@ class ResidentCognitionEngine:
         now: float | None = None,
         conversation_session_id: str | None = None,
     ) -> CognitionResult:
+        # Pin the host input to private scalar/tuple fields before ledger
+        # claim. The caller may keep its original dataclass reference and
+        # bypass frozen=True with object.__setattr__; neither that object nor
+        # the callback's copy may retarget the task after ledger admission.
+        request = CognitionRequestEnvelope(
+            request_id=request.request_id,
+            source=request.source,
+            reason=request.reason,
+            task=request.task,
+            created_at=request.created_at,
+            required_capabilities=request.required_capabilities,
+        )
         if conversation_session_id is not None:
             if request.source != "HUMAN":
                 raise ValueError("conversation context is HUMAN-only")
@@ -679,6 +711,63 @@ class ResidentCognitionEngine:
                 )
             return self._result_from_stored(stored)
         assert attempt_token is not None
+
+        if self.pre_route_gate is not None:
+            # Bind the full request/session and the *fresh claim attempt*.
+            # Request evidence is stable across retryable failures, but an old
+            # ALLOW must not authorize a later retry after policy has changed.
+            request_evidence_id = CognitionLedger._evidence(
+                request, state="RUNNING", route=None, response_text=None,
+                error=None, conversation_binding_digest=session_binding,
+            )
+            attempt_binding_id = "cognition-attempt:" + hashlib.sha256(
+                ("PORTAL_PRE_ROUTE_ATTEMPT_V1:" + request_evidence_id
+                 + ":" + attempt_token).encode("ascii")
+            ).hexdigest()
+            try:
+                # Never hand the claimed/executed request instance to an
+                # arbitrary host callback. The explicit clone also allows a
+                # post-call integrity check for callback-side mutation.
+                gate_request = CognitionRequestEnvelope(
+                    request_id=request.request_id,
+                    source=request.source,
+                    reason=request.reason,
+                    task=request.task,
+                    created_at=request.created_at,
+                    required_capabilities=request.required_capabilities,
+                )
+                decision = self.pre_route_gate(gate_request, attempt_binding_id)
+                if (
+                    gate_request != request
+                    or type(decision) is not PreRouteDecision
+                    or decision.schema != "PORTAL_PRE_ROUTE_ADMISSION_V1"
+                    or type(decision.attempt_binding_id) is not str
+                    or decision.attempt_binding_id != attempt_binding_id
+                    or type(decision.action) is not str
+                    or decision.action not in ("ALLOW", "STOP_PLAY")
+                ):
+                    raise ValueError("invalid host pre-route admission")
+            except Exception:
+                # Do not leak host admission internals into shared telemetry.
+                # Ambiguous or malformed policy results never fall through to
+                # route discovery, model generation, or acceptance callbacks.
+                error = "host_pre_route_admission_failed"
+            else:
+                error = "host_pre_route_STOP_PLAY" if decision.action == "STOP_PLAY" else None
+
+            if error is not None:
+                observed_now = float(time.time() if now is None else now)
+                evidence_id = self.ledger.finish(
+                    request, attempt_token=attempt_token,
+                    state="FAILED", retryable=False, now=observed_now,
+                    error=error, completed_at=observed_now,
+                    conversation_binding_digest=session_binding,
+                )
+                return CognitionResult(
+                    request_id=request.request_id, state="FAILED",
+                    route_id=None, response_text=None, retryable=False,
+                    evidence_id=evidence_id, error=error,
+                )
 
         try:
             routes = self.discover_routes()
