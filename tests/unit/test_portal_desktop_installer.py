@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,8 +12,27 @@ from portal.desktop_install import InstallSpec, RuntimeSource
 from portal.desktop_installer import (
     _record_activation_state,
     build_logon_task_command,
+    build_task_recovery_settings_command,
     launcher_text,
 )
+
+
+class _FakeOwnedHost:
+    """Host child launched by the current installer invocation only."""
+
+    def __init__(self) -> None:
+        self.terminated = False
+        self.waited = False
+
+    def poll(self):
+        return None if not self.terminated else 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        return 0
 
 
 def _spec() -> InstallSpec:
@@ -478,11 +498,71 @@ def test_logon_task_command_binds_exact_launcher_path(tmp_path: Path) -> None:
         launcher=launcher,
     )
 
-    assert command[:4] == ["schtasks.exe", "/Create", "/F", "/SC"]
+    assert command[:3] == ["schtasks.exe", "/Create", "/SC"]
+    assert "/F" not in command  # Existing install IDs are never overwritten.
     assert "ONLOGON" in command
     assert "/TN" in command
     assert "VeraDesktopRuntime-test" in command
     assert str(launcher) in command[-1]
+
+
+def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout(tmp_path: Path) -> None:
+    command = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test",
+        launcher=tmp_path / "StartVeraRuntime.cmd",
+    )
+
+    assert command[:4] == [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+    ]
+    script = command[4]
+    assert "-TaskPath '\\'" in script
+    assert "-RestartCount 3" in script
+    assert "-RestartInterval (New-TimeSpan -Minutes 5)" in script
+    assert "-ExecutionTimeLimit (New-TimeSpan -Seconds 0)" in script
+    assert "-MultipleInstances IgnoreNew" in script
+    assert "$actual.StartWhenAvailable -ne $true" in script
+    assert "Get-ScheduledTask" in script
+    assert "Task recovery settings readback mismatch" in script
+    assert "Start-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+
+
+def test_recovery_policy_attests_exact_action_principal_and_trigger(tmp_path: Path) -> None:
+    launcher = tmp_path / "StartVeraRuntime.cmd"
+    command = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test", launcher=launcher,
+    )
+    script = command[4]
+    assert "$expectedLauncher=" in script
+    assert "Task binding readback mismatch" in script
+    assert "$task.TaskName -cne $name" in script
+    assert "$task.TaskPath -cne" in script
+    assert "$actions.Count -ne 1" in script
+    assert "$actions[0].Execute" in script
+    assert "$actions[0].Arguments" in script
+    assert "$principalSid" in script
+    assert "WindowsIdentity]::GetCurrent()" in script
+    assert "MSFT_TaskLogonTrigger" in script
+    assert "$task.Principal.LogonType" in script
+    assert "$task.Principal.RunLevel" in script
+    assert "Start-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+
+
+def test_recovery_policy_escapes_apostrophes_in_launcher_path(tmp_path: Path) -> None:
+    launcher = tmp_path / "O'Brien" / "StartVeraRuntime.cmd"
+    script = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test", launcher=launcher,
+    )[4]
+    assert "O''Brien" in script
+
+
+def test_recovery_policy_rejects_untrusted_task_name(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="task_name"):
+        build_task_recovery_settings_command(
+            task_name="other'; dangerous", launcher=tmp_path / "Start.cmd",
+        )
 
 
 def test_logon_task_name_is_not_shell_interpolated(tmp_path: Path) -> None:
@@ -501,6 +581,177 @@ def test_logon_task_launcher_path_cannot_expand_environment_variables(tmp_path: 
             task_name="VeraDesktopRuntime-test",
             launcher=tmp_path / "%COMSPEC%" / "StartVeraRuntime.cmd",
         )
+
+
+def test_failed_restart_settings_leave_install_activation_unclaimed(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    spec = _spec()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports",
+                        lambda *_args: {})
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    seen = []
+
+    def fail_task_settings(command, **_kwargs):
+        seen.append(command[0])
+        if command[0] == "powershell.exe":
+            raise RuntimeError("simulated task settings failure")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(desktop_installer, "_run", fail_task_settings)
+    with pytest.raises(RuntimeError, match="task registered, but exact task binding"):
+        desktop_installer.install(runtime_root=root, spec=spec, activate=True)
+
+    assert seen == ["schtasks.exe", "powershell.exe"]
+    assert owned_host.terminated and owned_host.waited
+    assert not (root / "INSTALLATION_RESULT.json").exists()
+    assert "ACTIVE_AT_LOGON" not in (
+        root / "RUNTIME_INSTALL_SPEC.json"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("failure", ("task_create", "task_binding", "activation_receipt"))
+def test_postqualification_failure_terminates_only_owned_host(
+    failure: str, monkeypatch, tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+
+    def fail_selected_command(command, **_kwargs):
+        if failure == "task_create" and "/Create" in command:
+            raise RuntimeError("task name collision")
+        if failure == "task_binding" and command[0] == "powershell.exe":
+            raise RuntimeError("Task binding readback mismatch")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(desktop_installer, "_run", fail_selected_command)
+    if failure == "activation_receipt":
+        def failed_receipt(*_args, **_kwargs):
+            raise RuntimeError("could not persist activation state")
+        monkeypatch.setattr(desktop_installer, "_record_activation_state",
+                            failed_receipt)
+
+    with pytest.raises(RuntimeError):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    result_exists = (root / "INSTALLATION_RESULT.json").exists()
+    if failure == "activation_receipt":
+        # Registration has a durable receipt, but spec activation did not commit.
+        assert result_exists
+        state = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+            encoding="utf-8"))
+        assert state.get("activation", {}).get("active") is not True
+    else:
+        assert not result_exists
+
+
+@pytest.mark.parametrize("fault", ("write", "publish", "readback"))
+def test_final_install_result_failure_does_not_claim_active(
+    fault: str, monkeypatch, tmp_path: Path,
+) -> None:
+    """An incomplete final receipt must never promote the active spec claim."""
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    monkeypatch.setattr(desktop_installer, "_run",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            stdout="VeraDesktopRuntime-desktop-v1"))
+    original_write_text = Path.write_text
+    original_replace = Path.replace
+    original_read_text = Path.read_text
+
+    def fault_write(self: Path, data: str, **kwargs):
+        if fault == "write" and self.name == "INSTALLATION_RESULT.json.tmp":
+            raise OSError("simulated final result write failure")
+        return original_write_text(self, data, **kwargs)
+
+    def fault_replace(self: Path, target: Path):
+        if fault == "publish" and self.name == "INSTALLATION_RESULT.json.tmp":
+            raise OSError("simulated final result publish failure")
+        return original_replace(self, target)
+
+    def fault_readback(self: Path, **kwargs):
+        if fault == "readback" and self.name == "INSTALLATION_RESULT.json":
+            return "tampered result receipt"
+        return original_read_text(self, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fault_write)
+    monkeypatch.setattr(Path, "replace", fault_replace)
+    monkeypatch.setattr(Path, "read_text", fault_readback)
+    expected_type = RuntimeError if fault == "readback" else OSError
+    with pytest.raises(expected_type, match="result"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    spec = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+        encoding="utf-8"))
+    assert spec.get("activation", {}).get("active") is not True
+    assert "ACTIVE_AT_LOGON" not in spec.get("claim_ceiling", "")
+    assert (root / "INSTALLATION_RESULT.json").exists() is (fault == "readback")
+
+
+
+@pytest.mark.parametrize("phase", ("before_replace", "after_replace"))
+def test_activation_spec_publish_failure_preserves_ambiguous_registration(
+    phase: str, monkeypatch, tmp_path: Path,
+) -> None:
+    """A task/result can exist when final activation publication fails."""
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    monkeypatch.setattr(desktop_installer, "_run",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            stdout="VeraDesktopRuntime-desktop-v1"))
+    original_replace = Path.replace
+
+    def fault_spec_replace(self: Path, target: Path):
+        if self.name == "RUNTIME_INSTALL_SPEC.json.tmp":
+            if phase == "before_replace":
+                raise OSError("simulated before spec publication")
+            original_replace(self, target)
+            raise OSError("simulated after spec publication")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fault_spec_replace)
+    with pytest.raises(OSError, match="spec publication"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    assert (root / "INSTALLATION_RESULT.json").exists()
+    spec = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+        encoding="utf-8"))
+    # A confirmed pre-rename failure is non-active. Once rename happened,
+    # the effect is ambiguous to the caller; it must not blindly delete/retry.
+    assert (spec.get("activation", {}).get("active") is True) is (
+        phase == "after_replace"
+    )
 
 
 def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:

@@ -82,16 +82,84 @@ def build_logon_task_command(
     if not _TASK_NAME_RE.fullmatch(task_name):
         raise ValueError("task_name contains unsupported characters")
     launcher_value = _validated_cmd_path(Path(launcher).resolve())
+    # Never overwrite a pre-existing runtime task with the same install identity.
     return [
         "schtasks.exe",
         "/Create",
-        "/F",
         "/SC",
         "ONLOGON",
         "/TN",
         task_name,
         "/TR",
         launcher_value,
+    ]
+
+
+def build_task_recovery_settings_command(
+    *, task_name: str, launcher: Path,
+) -> list[str]:
+    """Set bounded restart recovery; attest task action, trigger, and principal.
+
+    A settings-only readback can pass after the action or task owner has been
+    replaced. The exact launcher and caller's SID must still be bound to the
+    scheduled task before an activation receipt can be published.
+    """
+    if not _TASK_NAME_RE.fullmatch(task_name):
+        raise ValueError("task_name contains unsupported characters")
+    # Single-quoted PowerShell strings escape apostrophes by doubling them.
+    launcher_value = _validated_cmd_path(Path(launcher).resolve()).replace("'", "''")
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        f"$name='{task_name}'; "
+        f"$expectedLauncher='{launcher_value}'; "
+        "$settings=New-ScheduledTaskSettingsSet "
+        "-RestartCount 3 "
+        "-RestartInterval (New-TimeSpan -Minutes 5) "
+        "-ExecutionTimeLimit (New-TimeSpan -Seconds 0) "
+        "-MultipleInstances IgnoreNew -StartWhenAvailable; "
+        "Set-ScheduledTask -TaskPath '\\' -TaskName $name "
+        "-Settings $settings -ErrorAction Stop | Out-Null; "
+        "$task=Get-ScheduledTask -TaskPath '\\' -TaskName $name "
+        "-ErrorAction Stop; "
+        "$actual=$task.Settings; "
+        "if ($actual.RestartCount -ne 3 -or "
+        "[string]$actual.RestartInterval -ne 'PT5M' -or "
+        "[string]$actual.ExecutionTimeLimit -ne 'PT0S' -or "
+        "[string]$actual.MultipleInstances -ne 'IgnoreNew' -or "
+        "$actual.StartWhenAvailable -ne $true) "
+        "{ throw 'Task recovery settings readback mismatch' }; "
+        "$actions=@($task.Actions); "
+        "$triggers=@($task.Triggers); "
+        "$principal=[string]$task.Principal.UserId; "
+        r"if ($principal -match '^S-\d+(-\d+)+$') "
+        "{ $principalSid=$principal } else "
+        "{ $principalSid=(New-Object System.Security.Principal.NTAccount("
+        "$principal)).Translate("
+        "[System.Security.Principal.SecurityIdentifier]).Value }; "
+        "$expectedSid=[System.Security.Principal.WindowsIdentity]::GetCurrent()"
+        ".User.Value; "
+        "$actionPath=''; $actionArgs=''; "
+        "if ($actions.Count -eq 1) "
+        "{ $actionPath=[System.IO.Path]::GetFullPath("
+        "[string]$actions[0].Execute); "
+        "$actionArgs=[string]$actions[0].Arguments }; "
+        "if ($task.TaskName -cne $name -or $task.TaskPath -cne '\\' -or "
+        "$actions.Count -ne 1 -or $actionPath -ine $expectedLauncher -or "
+        "-not [string]::IsNullOrWhiteSpace($actionArgs) -or "
+        "$principalSid -ne $expectedSid -or "
+        "[string]$task.Principal.LogonType -ne 'Interactive' -or "
+        "[string]$task.Principal.RunLevel -ne 'Limited' -or "
+        "$triggers.Count -ne 1 -or "
+        "$triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger' -or "
+        "$triggers[0].Enabled -ne $true) "
+        "{ throw 'Task binding readback mismatch' }"
+    )
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        script,
     ]
 
 
@@ -422,84 +490,98 @@ def install(
         _terminate_unqualified_host(staged_host)
         raise
 
-    host_launcher = runtime_root / "StartVeraRuntime.cmd"
-    host_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_host"),
-        encoding="ascii",
-    )
-    desktop_launcher = runtime_root / "PortalDesktop.cmd"
-    desktop_launcher.write_text(
-        launcher_text(runtime_root, python, "portal.desktop_app"),
-        encoding="ascii",
-    )
-
-    task_name = None
-    if activate:
-        task_name = "VeraDesktopRuntime-" + re.sub(
-            r"[^A-Za-z0-9_.-]",
-            "_",
-            spec.install_id,
+    try:
+        host_launcher = runtime_root / "StartVeraRuntime.cmd"
+        host_launcher.write_text(
+            launcher_text(runtime_root, python, "portal.desktop_host"),
+            encoding="ascii",
         )
-        _run(
-            build_logon_task_command(
-                task_name=task_name,
-                launcher=host_launcher,
+        desktop_launcher = runtime_root / "PortalDesktop.cmd"
+        desktop_launcher.write_text(
+            launcher_text(runtime_root, python, "portal.desktop_app"),
+            encoding="ascii",
+        )
+
+        task_name = None
+        if activate:
+            task_name = "VeraDesktopRuntime-" + re.sub(
+                r"[^A-Za-z0-9_.-]",
+                "_",
+                spec.install_id,
             )
-        )
-        query = _run(
-            [
-                "schtasks.exe",
-                "/Query",
-                "/TN",
-                task_name,
-                "/FO",
-                "LIST",
-                "/V",
-            ],
-            capture=True,
-        )
-        if task_name not in query.stdout:
-            raise RuntimeError("registered logon task could not be read back")
+            _run(
+                build_logon_task_command(
+                    task_name=task_name,
+                    launcher=host_launcher,
+                )
+            )
+            try:
+                _run(build_task_recovery_settings_command(
+                    task_name=task_name, launcher=host_launcher,
+                ))
+            except Exception as exc:
+                # A task may now exist, but no activation claim may be recorded.
+                # Exact action, principal, trigger, and settings readback must
+                # all pass. Never replay/delete an ambiguously registered task.
+                raise RuntimeError(
+                    "desktop host task registered, but exact task binding and "
+                    "restart settings were not verified; inspect the exact task "
+                    "before any retry"
+                ) from exc
 
-    _record_activation_state(
-        runtime_root,
-        requested=activate,
-        qualified=True,
-        active=bool(activate),
-    )
+        # Persist the exact registration result before promoting the separate
+        # runtime-spec activation claim. A failed result write must never leave
+        # RUNTIME_INSTALL_SPEC.json claiming ACTIVE_AT_LOGON.
+        result = {
+            "schema": (
+                "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
+                if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
+                else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
+            ),
+            "runtime_root": str(runtime_root),
+            "install_id": spec.install_id,
+            "source_map": {
+                item.component: {
+                    "repository": item.repository,
+                    "ref": item.ref,
+                    "sha": item.sha,
+                }
+                for item in spec.sources
+            },
+            "imports": imports,
+            "qualification": qualification,
+            "activation": {
+                "requested": activate,
+                "task_name": task_name,
+                "active_at_logon": bool(activate),
+            },
+            "protected_effect_authority": False,
+            "native_openai_router_replaced": False,
+            "installed_at": time.time(),
+        }
+        result_path = runtime_root / "INSTALLATION_RESULT.json"
+        result_text = json.dumps(result, sort_keys=True, indent=2) + "\n"
+        staged_result_path = result_path.with_suffix(".json.tmp")
+        staged_result_path.write_text(result_text, encoding="utf-8")
+        staged_result_path.replace(result_path)
+        if result_path.read_text(encoding="utf-8") != result_text:
+            raise RuntimeError("installation result readback mismatch")
 
-    result = {
-        "schema": (
-            "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
-            if spec.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
-            else "PORTAL_DESKTOP_INSTALLATION_RESULT_V1"
-        ),
-        "runtime_root": str(runtime_root),
-        "install_id": spec.install_id,
-        "source_map": {
-            item.component: {
-                "repository": item.repository,
-                "ref": item.ref,
-                "sha": item.sha,
-            }
-            for item in spec.sources
-        },
-        "imports": imports,
-        "qualification": qualification,
-        "activation": {
-            "requested": activate,
-            "task_name": task_name,
-            "active_at_logon": bool(activate),
-        },
-        "protected_effect_authority": False,
-        "native_openai_router_replaced": False,
-        "installed_at": time.time(),
-    }
-    (runtime_root / "INSTALLATION_RESULT.json").write_text(
-        json.dumps(result, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return result
+        # The runtime-spec active flag is the final activation claim. The
+        # installation result above is necessary but not sufficient evidence:
+        # it records verified task registration even if this final step fails.
+        _record_activation_state(
+            runtime_root,
+            requested=activate,
+            qualified=True,
+            active=bool(activate),
+        )
+        return result
+    except BaseException:
+        # Only the child launched by this invocation is ours to stop. A task
+        # may remain registered after partial failure; never delete/retry it.
+        _terminate_unqualified_host(staged_host)
+        raise
 
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
