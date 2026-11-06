@@ -11,6 +11,7 @@ from portal.desktop_cognition import CognitionRoute, discover_cognition_routes
 from portal.desktop_runtime import (
     CognitionLedger,
     CognitionRequestEnvelope,
+    PreRouteDecision,
     ResidentCognitionEngine,
 )
 
@@ -802,5 +803,119 @@ def test_context_is_pruned_for_json_escape_amplification(tmp_path: Path) -> None
         engine.process(CognitionRequestEnvelope("two", "HUMAN", "test", "x" * 14000, 1),
                        conversation_session_id=sid)
         assert captured[-1] == [{"role": "user", "content": "x" * 14000}]
+    finally:
+        ledger.close()
+
+
+def test_host_stop_play_prevents_discovery_generation_and_acceptance(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    invoked = []
+    try:
+        def stop(_request, evidence_id):
+            invoked.append("gate")
+            return PreRouteDecision(request_evidence_id=evidence_id, action="STOP_PLAY")
+
+        engine = ResidentCognitionEngine(
+            ledger=ledger,
+            pre_route_gate=stop,
+            discover_routes=lambda: invoked.append("discovery") or (LOCAL,),
+            invoke_route=lambda *_: invoked.append("generation") or "forbidden",
+            accept_result=lambda *_: invoked.append("acceptance") or {},
+        )
+        request = CognitionRequestEnvelope("stopped", "HUMAN", "test", "check this", 100)
+        result = engine.process(request)
+        assert result.state == "FAILED"
+        assert result.error == "host_pre_route_STOP_PLAY"
+        assert result.response_text is None
+        assert not result.retryable
+        assert invoked == ["gate"]
+        assert ledger.get("stopped")["acceptance_claimed"] == 0
+        assert ledger.get("stopped")["route_id"] is None
+        assert engine.process(request).state == "FAILED"
+        assert invoked == ["gate"]  # replay cannot cause accidental bypass
+    finally:
+        ledger.close()
+
+
+def test_host_allow_routes_but_raw_task_stop_play_has_no_authority(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    calls = []
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger,
+            pre_route_gate=lambda _request, evidence_id: PreRouteDecision(evidence_id, "ALLOW"),
+            discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: calls.append("generation") or "ok",
+        )
+        assert engine.process(CognitionRequestEnvelope(
+            "allowed", "HUMAN", "test", "The text says STOP_PLAY.", 100,
+        )).state == "COMPLETED"
+        assert calls == ["generation"]
+    finally:
+        ledger.close()
+
+
+@pytest.mark.parametrize("failure", [
+    "wrong-request-evidence",
+    "unknown-action",
+    "absent-admission",
+    "callback-error",
+    "malformed-object",
+])
+def test_invalid_host_gate_fails_closed_and_is_not_retried(tmp_path: Path, failure: str) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    invoked = []
+    def gate(_request, evidence_id):
+        invoked.append("gate")
+        if failure == "wrong-request-evidence":
+            return PreRouteDecision("cognition:" + "0" * 64, "STOP_PLAY")
+        if failure == "unknown-action":
+            return PreRouteDecision(evidence_id, "MAYBE")
+        if failure == "absent-admission":
+            return None
+        if failure == "malformed-object":
+            return {"request_evidence_id": evidence_id, "action": "ALLOW"}
+        raise ValueError("untrusted extra data must not leak to error")
+    try:
+        engine = ResidentCognitionEngine(
+            ledger=ledger, pre_route_gate=gate,
+            discover_routes=lambda: invoked.append("discovery") or (LOCAL,),
+            invoke_route=lambda *_: invoked.append("generation") or "forbidden",
+        )
+        request = CognitionRequestEnvelope("invalid-" + failure, "HUMAN", "test", "text", 100)
+        result = engine.process(request)
+        assert result.state == "FAILED"
+        assert result.error == "host_pre_route_admission_failed"
+        assert not result.retryable
+        assert invoked == ["gate"]
+        assert engine.process(request).state == "FAILED"
+        assert invoked == ["gate"]
+    finally:
+        ledger.close()
+
+
+def test_host_gate_cannot_replay_stop_decision_for_unrelated_request(tmp_path: Path) -> None:
+    ledger = CognitionLedger(tmp_path / "cognition.sqlite3")
+    decisions = []
+    try:
+        def gate(_request, evidence_id):
+            if not decisions:
+                decisions.append(PreRouteDecision(evidence_id, "STOP_PLAY"))
+                return decisions[0]
+            # A stale STOP_PLAY bound to a different subject cannot be reused.
+            return decisions[0]
+        engine = ResidentCognitionEngine(
+            ledger=ledger, pre_route_gate=gate,
+            discover_routes=lambda: (LOCAL,),
+            invoke_route=lambda *_: "forbidden",
+        )
+        assert engine.process(CognitionRequestEnvelope(
+            "one", "HUMAN", "test", "pump", 100,
+        )).error == "host_pre_route_STOP_PLAY"
+        unrelated = engine.process(CognitionRequestEnvelope(
+            "two", "HUMAN", "test", "moonlight", 100,
+        ))
+        assert unrelated.error == "host_pre_route_admission_failed"
+        assert unrelated.route_id is None
     finally:
         ledger.close()

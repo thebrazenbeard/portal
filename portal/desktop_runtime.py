@@ -50,6 +50,21 @@ class CognitionResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class PreRouteDecision:
+    """Host-owned admission for one exact cognition request, never model text.
+
+    The host obtains the evidence ID from the engine's claimed request and
+    supplies a decision through an in-process callback. This is a routing
+    enforcement seam, not a proof that any upstream cognitive donor was run,
+    authenticated, or qualified.
+    """
+
+    request_evidence_id: str
+    action: str  # exact ALLOW or STOP_PLAY; no truthy/falsy coercion
+    schema: str = "PORTAL_PRE_ROUTE_ADMISSION_V1"
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS desktop_cognition_runs (
     request_id TEXT PRIMARY KEY,
@@ -386,6 +401,7 @@ class CognitionLedger:
 RouteDiscovery = Callable[[], tuple[CognitionRoute, ...]]
 RouteInvoker = Callable[[CognitionRoute, str], str]
 ChatInvoker = Callable[[CognitionRoute, list[dict[str, str]]], str]
+PreRouteGate = Callable[[CognitionRequestEnvelope, str], PreRouteDecision]
 
 _MAX_LOCAL_PROMPT_BYTES = 16 * 1024
 _MAX_LOCAL_RESPONSE_BYTES = 256 * 1024
@@ -583,6 +599,7 @@ class ResidentCognitionEngine:
         invoke_chat: ChatInvoker = invoke_local_messages,
         authorized_route_ids: frozenset[str] = frozenset(),
         accept_result: Callable[[CognitionRequestEnvelope, CognitionRoute, str], dict[str, object]] | None = None,
+        pre_route_gate: PreRouteGate | None = None,
     ) -> None:
         self.ledger = ledger
         self.discover_routes = discover_routes
@@ -590,6 +607,9 @@ class ResidentCognitionEngine:
         self.invoke_chat = invoke_chat
         self.authorized_route_ids = authorized_route_ids
         self.accept_result = accept_result
+        # Explicit trusted host opt-in only. Do not accept admission decisions
+        # from desktop IPC fields, model output, or unauthenticated telemetry.
+        self.pre_route_gate = pre_route_gate
         # Resident process memory only. Never hydrate from the durable cognition
         # ledger: that ledger also contains unrelated autonomous tasks.
         self._context: OrderedDict[str, tuple[str, list[tuple[str, str]]]] = OrderedDict()
@@ -679,6 +699,47 @@ class ResidentCognitionEngine:
                 )
             return self._result_from_stored(stored)
         assert attempt_token is not None
+
+        if self.pre_route_gate is not None:
+            # This value binds source, reason, task, creation time, capability
+            # requirements and opaque conversation session to the decision.
+            # An old STOP_PLAY (or ALLOW) cannot be replayed for another turn.
+            request_evidence_id = CognitionLedger._evidence(
+                request, state="RUNNING", route=None, response_text=None,
+                error=None, conversation_binding_digest=session_binding,
+            )
+            try:
+                decision = self.pre_route_gate(request, request_evidence_id)
+                if (
+                    type(decision) is not PreRouteDecision
+                    or decision.schema != "PORTAL_PRE_ROUTE_ADMISSION_V1"
+                    or type(decision.request_evidence_id) is not str
+                    or decision.request_evidence_id != request_evidence_id
+                    or type(decision.action) is not str
+                    or decision.action not in ("ALLOW", "STOP_PLAY")
+                ):
+                    raise ValueError("invalid host pre-route admission")
+            except Exception:
+                # Do not leak host admission internals into shared telemetry.
+                # Ambiguous or malformed policy results never fall through to
+                # route discovery, model generation, or acceptance callbacks.
+                error = "host_pre_route_admission_failed"
+            else:
+                error = "host_pre_route_STOP_PLAY" if decision.action == "STOP_PLAY" else None
+
+            if error is not None:
+                observed_now = float(time.time() if now is None else now)
+                evidence_id = self.ledger.finish(
+                    request, attempt_token=attempt_token,
+                    state="FAILED", retryable=False, now=observed_now,
+                    error=error, completed_at=observed_now,
+                    conversation_binding_digest=session_binding,
+                )
+                return CognitionResult(
+                    request_id=request.request_id, state="FAILED",
+                    route_id=None, response_text=None, retryable=False,
+                    evidence_id=evidence_id, error=error,
+                )
 
         try:
             routes = self.discover_routes()
