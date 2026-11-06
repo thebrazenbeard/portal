@@ -506,9 +506,10 @@ def test_logon_task_command_binds_exact_launcher_path(tmp_path: Path) -> None:
     assert str(launcher) in command[-1]
 
 
-def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout() -> None:
+def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout(tmp_path: Path) -> None:
     command = build_task_recovery_settings_command(
-        task_name="VeraDesktopRuntime-test"
+        task_name="VeraDesktopRuntime-test",
+        launcher=tmp_path / "StartVeraRuntime.cmd",
     )
 
     assert command[:4] == [
@@ -527,9 +528,41 @@ def test_recovery_policy_is_bounded_single_instance_and_no_forced_timeout() -> N
     assert "Unregister-ScheduledTask" not in script
 
 
-def test_recovery_policy_rejects_untrusted_task_name() -> None:
+def test_recovery_policy_attests_exact_action_principal_and_trigger(tmp_path: Path) -> None:
+    launcher = tmp_path / "StartVeraRuntime.cmd"
+    command = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test", launcher=launcher,
+    )
+    script = command[4]
+    assert "$expectedLauncher=" in script
+    assert "Task binding readback mismatch" in script
+    assert "$task.TaskName -cne $name" in script
+    assert "$task.TaskPath -cne" in script
+    assert "$actions.Count -ne 1" in script
+    assert "$actions[0].Execute" in script
+    assert "$actions[0].Arguments" in script
+    assert "$principalSid" in script
+    assert "WindowsIdentity]::GetCurrent()" in script
+    assert "MSFT_TaskLogonTrigger" in script
+    assert "$task.Principal.LogonType" in script
+    assert "$task.Principal.RunLevel" in script
+    assert "Start-ScheduledTask" not in script
+    assert "Unregister-ScheduledTask" not in script
+
+
+def test_recovery_policy_escapes_apostrophes_in_launcher_path(tmp_path: Path) -> None:
+    launcher = tmp_path / "O'Brien" / "StartVeraRuntime.cmd"
+    script = build_task_recovery_settings_command(
+        task_name="VeraDesktopRuntime-test", launcher=launcher,
+    )[4]
+    assert "O''Brien" in script
+
+
+def test_recovery_policy_rejects_untrusted_task_name(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="task_name"):
-        build_task_recovery_settings_command(task_name="other'; dangerous")
+        build_task_recovery_settings_command(
+            task_name="other'; dangerous", launcher=tmp_path / "Start.cmd",
+        )
 
 
 def test_logon_task_name_is_not_shell_interpolated(tmp_path: Path) -> None:
@@ -573,7 +606,7 @@ def test_failed_restart_settings_leave_install_activation_unclaimed(
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr(desktop_installer, "_run", fail_task_settings)
-    with pytest.raises(RuntimeError, match="task registered, but restart settings"):
+    with pytest.raises(RuntimeError, match="task registered, but exact task binding"):
         desktop_installer.install(runtime_root=root, spec=spec, activate=True)
 
     assert seen == ["schtasks.exe", "powershell.exe"]
@@ -584,7 +617,7 @@ def test_failed_restart_settings_leave_install_activation_unclaimed(
     ).read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("failure", ("task_create", "task_query", "activation_receipt"))
+@pytest.mark.parametrize("failure", ("task_create", "task_binding", "activation_receipt"))
 def test_postqualification_failure_terminates_only_owned_host(
     failure: str, monkeypatch, tmp_path: Path,
 ) -> None:
@@ -601,10 +634,8 @@ def test_postqualification_failure_terminates_only_owned_host(
     def fail_selected_command(command, **_kwargs):
         if failure == "task_create" and "/Create" in command:
             raise RuntimeError("task name collision")
-        if failure == "task_query" and "/Query" in command:
-            raise RuntimeError("task readback failed")
-        if "/Query" in command:
-            return SimpleNamespace(stdout="VeraDesktopRuntime-desktop-v1")
+        if failure == "task_binding" and command[0] == "powershell.exe":
+            raise RuntimeError("Task binding readback mismatch")
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr(desktop_installer, "_run", fail_selected_command)
