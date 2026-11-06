@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -617,7 +618,66 @@ def test_postqualification_failure_terminates_only_owned_host(
         desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
 
     assert owned_host.terminated and owned_host.waited
-    assert not (root / "INSTALLATION_RESULT.json").exists()
+    result_exists = (root / "INSTALLATION_RESULT.json").exists()
+    if failure == "activation_receipt":
+        # Registration has a durable receipt, but spec activation did not commit.
+        assert result_exists
+        state = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+            encoding="utf-8"))
+        assert state.get("activation", {}).get("active") is not True
+    else:
+        assert not result_exists
+
+
+@pytest.mark.parametrize("fault", ("write", "publish", "readback"))
+def test_final_install_result_failure_does_not_claim_active(
+    fault: str, monkeypatch, tmp_path: Path,
+) -> None:
+    """An incomplete final receipt must never promote the active spec claim."""
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    monkeypatch.setattr(desktop_installer, "_run",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            stdout="VeraDesktopRuntime-desktop-v1"))
+    original_write_text = Path.write_text
+    original_replace = Path.replace
+    original_read_text = Path.read_text
+
+    def fault_write(self: Path, data: str, **kwargs):
+        if fault == "write" and self.name == "INSTALLATION_RESULT.json.tmp":
+            raise OSError("simulated final result write failure")
+        return original_write_text(self, data, **kwargs)
+
+    def fault_replace(self: Path, target: Path):
+        if fault == "publish" and self.name == "INSTALLATION_RESULT.json.tmp":
+            raise OSError("simulated final result publish failure")
+        return original_replace(self, target)
+
+    def fault_readback(self: Path, **kwargs):
+        if fault == "readback" and self.name == "INSTALLATION_RESULT.json":
+            return "tampered result receipt"
+        return original_read_text(self, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fault_write)
+    monkeypatch.setattr(Path, "replace", fault_replace)
+    monkeypatch.setattr(Path, "read_text", fault_readback)
+    expected_type = RuntimeError if fault == "readback" else OSError
+    with pytest.raises(expected_type, match="result"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    spec = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+        encoding="utf-8"))
+    assert spec.get("activation", {}).get("active") is not True
+    assert "ACTIVE_AT_LOGON" not in spec.get("claim_ceiling", "")
+    assert (root / "INSTALLATION_RESULT.json").exists() is (fault == "readback")
 
 
 def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:

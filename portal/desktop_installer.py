@@ -508,13 +508,9 @@ def install(
             if task_name not in query.stdout:
                 raise RuntimeError("registered logon task could not be read back")
 
-        _record_activation_state(
-            runtime_root,
-            requested=activate,
-            qualified=True,
-            active=bool(activate),
-        )
-
+        # Persist the exact registration result before promoting the separate
+        # runtime-spec activation claim. A failed result write must never leave
+        # RUNTIME_INSTALL_SPEC.json claiming ACTIVE_AT_LOGON.
         result = {
             "schema": (
                 "PORTAL_DESKTOP_INSTALLATION_RESULT_V2"
@@ -542,9 +538,22 @@ def install(
             "native_openai_router_replaced": False,
             "installed_at": time.time(),
         }
-        (runtime_root / "INSTALLATION_RESULT.json").write_text(
-            json.dumps(result, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
+        result_path = runtime_root / "INSTALLATION_RESULT.json"
+        result_text = json.dumps(result, sort_keys=True, indent=2) + "\n"
+        staged_result_path = result_path.with_suffix(".json.tmp")
+        staged_result_path.write_text(result_text, encoding="utf-8")
+        staged_result_path.replace(result_path)
+        if result_path.read_text(encoding="utf-8") != result_text:
+            raise RuntimeError("installation result readback mismatch")
+
+        # The runtime-spec active flag is the final activation claim. The
+        # installation result above is necessary but not sufficient evidence:
+        # it records verified task registration even if this final step fails.
+        _record_activation_state(
+            runtime_root,
+            requested=activate,
+            qualified=True,
+            active=bool(activate),
         )
         return result
     except BaseException:
