@@ -31,20 +31,36 @@ python scripts/test_installed_worker_restart_qualification.py
 ```
 
 This starts three independent Python processes per positive scenario using
-one disposable SQLite file beneath the OS temporary directory:
+one disposable SQLite file beneath the OS temporary directory, plus three
+restricted local witness files (`qualification.key`, `qualification.prepare.json`,
+and `qualification.consume.json`):
 
 1. `prepare` admits exactly one public, read-only `RUNNER_ACTION_PULL` route.
 2. `consume` runs the installed-wheel reference worker and records a fenced
    `SUCCEEDED` receipt. The offline test explicitly supplies a synthetic
    transport and labels it `SYNTHETIC_OFFLINE`.
-3. `verify` reopens the durable database in a fresh process, checks the
-   unchanged receipt SHA-256 and fencing token, then checks that the terminal
-   route cannot be claimed again.
+3. `verify` reopens the durable database in a fresh process. It requires a
+   signed preparation witness (exact route and public head) **and** a separate
+   signed consume witness recording the worker's observed public ref reads and
+   canonical receipt content. It independently hashes that content and
+   compares the result with SQLite's exact route, receipt SHA-256 and delivery
+   fencing token before checking that the terminal route cannot be claimed
+   again. Absent or changed witnesses fail closed.
 
 Negative cases reject superseded public heads, repeated state initialization,
-and an arbitrary/non-temp database destination. The standalone CLI requires
+an arbitrary/non-temp database destination, an invented terminal SQLite receipt
+without a consume witness, a forged receipt digest/fencing token after a real
+consume, and tampering of the consume witness. The standalone CLI requires
 `qualification.sqlite3` under the OS temporary directory and refuses to reset
 an existing database.
+
+This witness is an **isolated local qualification integrity check**, not an
+external signature or an adversarial custody system. The HMAC key is stored
+beside the disposable database with restrictive file mode; an actor with full
+same-user filesystem access could replace the key and both signed witnesses.
+That actor is outside the proof's threat model. A DB-only forged row cannot
+reach `REOPENED_AND_VERIFIED`. No claims of private Bus or installed host
+receipt authenticity should be inferred.
 
 For a **separate live public-read-only** probe, first refresh the target branch
 SHA independently. Within the temporary environment, call the same script's
@@ -66,7 +82,15 @@ In a disposable Linux/Python 3.12 environment with the above exact wheels:
   `8fe5a52866d9c9ac2f426f6cf50310889ff553eed478de115f9ece6f271c987e`
 - After a separate-process reopen, same receipt SHA-256 and fencing token `1`;
   `replay_claimed=false`.
-- Offline standard-library regression: **4/4 tests passed**.
+- Offline standard-library regression after hostile falsification:
+  **7/7 tests passed**.
+
+Hostile review falsifier (2026-11-06) previously created a fabricated terminal
+SQLite row and received a false `REOPENED_AND_VERIFIED` result. The corrected
+implementation requires both authenticated witness files, cryptographically
+binds the prepared route and independently recomputes the worker's canonical
+receipt from captured public read observations. The demonstrated forged-row
+case now raises `RuntimeError: trusted durable witness missing`.
 
 `evidence_class=ISOLATED_INSTALLED_WHEELS_PUBLIC_READ_ONLY` is deliberately
 limited. The proof does not establish a deployed Portal service, private Bus
