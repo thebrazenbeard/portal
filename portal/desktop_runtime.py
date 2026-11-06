@@ -54,13 +54,13 @@ class CognitionResult:
 class PreRouteDecision:
     """Host-owned admission for one exact cognition request, never model text.
 
-    The host obtains the evidence ID from the engine's claimed request and
-    supplies a decision through an in-process callback. This is a routing
+    The host obtains an attempt-bound ID from the engine after the SQLite
+    claim and supplies a decision through an in-process callback. This is a routing
     enforcement seam, not a proof that any upstream cognitive donor was run,
     authenticated, or qualified.
     """
 
-    request_evidence_id: str
+    attempt_binding_id: str
     action: str  # exact ALLOW or STOP_PLAY; no truthy/falsy coercion
     schema: str = "PORTAL_PRE_ROUTE_ADMISSION_V1"
 
@@ -669,6 +669,18 @@ class ResidentCognitionEngine:
         now: float | None = None,
         conversation_session_id: str | None = None,
     ) -> CognitionResult:
+        # Pin the host input to private scalar/tuple fields before ledger
+        # claim. The caller may keep its original dataclass reference and
+        # bypass frozen=True with object.__setattr__; neither that object nor
+        # the callback's copy may retarget the task after ledger admission.
+        request = CognitionRequestEnvelope(
+            request_id=request.request_id,
+            source=request.source,
+            reason=request.reason,
+            task=request.task,
+            created_at=request.created_at,
+            required_capabilities=request.required_capabilities,
+        )
         if conversation_session_id is not None:
             if request.source != "HUMAN":
                 raise ValueError("conversation context is HUMAN-only")
@@ -701,20 +713,36 @@ class ResidentCognitionEngine:
         assert attempt_token is not None
 
         if self.pre_route_gate is not None:
-            # This value binds source, reason, task, creation time, capability
-            # requirements and opaque conversation session to the decision.
-            # An old STOP_PLAY (or ALLOW) cannot be replayed for another turn.
+            # Bind the full request/session and the *fresh claim attempt*.
+            # Request evidence is stable across retryable failures, but an old
+            # ALLOW must not authorize a later retry after policy has changed.
             request_evidence_id = CognitionLedger._evidence(
                 request, state="RUNNING", route=None, response_text=None,
                 error=None, conversation_binding_digest=session_binding,
             )
+            attempt_binding_id = "cognition-attempt:" + hashlib.sha256(
+                ("PORTAL_PRE_ROUTE_ATTEMPT_V1:" + request_evidence_id
+                 + ":" + attempt_token).encode("ascii")
+            ).hexdigest()
             try:
-                decision = self.pre_route_gate(request, request_evidence_id)
+                # Never hand the claimed/executed request instance to an
+                # arbitrary host callback. The explicit clone also allows a
+                # post-call integrity check for callback-side mutation.
+                gate_request = CognitionRequestEnvelope(
+                    request_id=request.request_id,
+                    source=request.source,
+                    reason=request.reason,
+                    task=request.task,
+                    created_at=request.created_at,
+                    required_capabilities=request.required_capabilities,
+                )
+                decision = self.pre_route_gate(gate_request, attempt_binding_id)
                 if (
-                    type(decision) is not PreRouteDecision
+                    gate_request != request
+                    or type(decision) is not PreRouteDecision
                     or decision.schema != "PORTAL_PRE_ROUTE_ADMISSION_V1"
-                    or type(decision.request_evidence_id) is not str
-                    or decision.request_evidence_id != request_evidence_id
+                    or type(decision.attempt_binding_id) is not str
+                    or decision.attempt_binding_id != attempt_binding_id
                     or type(decision.action) is not str
                     or decision.action not in ("ALLOW", "STOP_PLAY")
                 ):
