@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -56,7 +57,46 @@ class InstalledReferenceWorkerTests(unittest.TestCase):
             self.assertIn("SUPERSEDED", mismatch.stderr)
             verify = phase("verify", db)
             self.assertNotEqual(verify.returncode, 0)
-            self.assertIn("not terminal success", verify.stderr)
+            self.assertIn("trusted durable witness missing", verify.stderr)
+
+    def test_manufactured_terminal_row_without_consume_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="portal-wheel-forged-terminal-") as folder:
+            db = Path(folder) / "qualification.sqlite3"
+            self.assertEqual(phase("prepare", db, "--target-head", HEAD_A).returncode, 0)
+            with sqlite3.connect(db) as connection:
+                connection.execute(
+                    "UPDATE worker_route_outbox SET state = 'RECEIPT_RECORDED', "
+                    "receipt_class = 'SUCCEEDED', receipt_sha256 = ?, "
+                    "delivery_fencing_token = 99", ("z" * 64,)
+                )
+            verification = phase("verify", db)
+            self.assertNotEqual(verification.returncode, 0)
+            self.assertIn("trusted durable witness missing", verification.stderr)
+
+    def test_forged_receipt_after_genuine_consume_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="portal-wheel-mutated-receipt-") as folder:
+            db = Path(folder) / "qualification.sqlite3"
+            self.assertEqual(phase("prepare", db, "--target-head", HEAD_A).returncode, 0)
+            self.assertEqual(phase("consume", db, "--fixture-observed-head", HEAD_A).returncode, 0)
+            with sqlite3.connect(db) as connection:
+                connection.execute("UPDATE worker_route_outbox SET receipt_sha256 = ?, "
+                                   "delivery_fencing_token = 99", ("z" * 64,))
+            verification = phase("verify", db)
+            self.assertNotEqual(verification.returncode, 0)
+            self.assertIn("authenticated consume witness", verification.stderr)
+
+    def test_altered_consume_witness_fails_integrity(self):
+        with tempfile.TemporaryDirectory(prefix="portal-wheel-mutated-witness-") as folder:
+            db = Path(folder) / "qualification.sqlite3"
+            self.assertEqual(phase("prepare", db, "--target-head", HEAD_A).returncode, 0)
+            self.assertEqual(phase("consume", db, "--fixture-observed-head", HEAD_A).returncode, 0)
+            witness = db.with_name("qualification.consume.json")
+            data = json.loads(witness.read_text())
+            data["payload"]["receipt_sha256"] = "z" * 64
+            witness.write_text(json.dumps(data))
+            verification = phase("verify", db)
+            self.assertNotEqual(verification.returncode, 0)
+            self.assertIn("witness integrity failed", verification.stderr)
 
     def test_existing_state_refuses_implicit_reset(self):
         with tempfile.TemporaryDirectory(prefix="portal-wheel-no-reset-") as folder:
