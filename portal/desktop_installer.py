@@ -95,18 +95,23 @@ def build_logon_task_command(
     ]
 
 
-def build_task_recovery_settings_command(*, task_name: str) -> list[str]:
-    """Set bounded restart recovery without starting or stopping the host.
+def build_task_recovery_settings_command(
+    *, task_name: str, launcher: Path,
+) -> list[str]:
+    """Set bounded restart recovery; attest task action, trigger, and principal.
 
-    Schtasks /Create /SC ONLOGON alone leaves RestartCount=0, so an exit
-    strands the resident host until another logon. Keep one-at-a-time
-    execution and leave host-level duplicate protection intact.
+    A settings-only readback can pass after the action or task owner has been
+    replaced. The exact launcher and caller's SID must still be bound to the
+    scheduled task before an activation receipt can be published.
     """
     if not _TASK_NAME_RE.fullmatch(task_name):
         raise ValueError("task_name contains unsupported characters")
+    # Single-quoted PowerShell strings escape apostrophes by doubling them.
+    launcher_value = _validated_cmd_path(Path(launcher).resolve()).replace("'", "''")
     script = (
         "$ErrorActionPreference='Stop'; "
         f"$name='{task_name}'; "
+        f"$expectedLauncher='{launcher_value}'; "
         "$settings=New-ScheduledTaskSettingsSet "
         "-RestartCount 3 "
         "-RestartInterval (New-TimeSpan -Minutes 5) "
@@ -114,14 +119,40 @@ def build_task_recovery_settings_command(*, task_name: str) -> list[str]:
         "-MultipleInstances IgnoreNew -StartWhenAvailable; "
         "Set-ScheduledTask -TaskPath '\\' -TaskName $name "
         "-Settings $settings -ErrorAction Stop | Out-Null; "
-        "$actual=(Get-ScheduledTask -TaskPath '\\' -TaskName $name "
-        "-ErrorAction Stop).Settings; "
+        "$task=Get-ScheduledTask -TaskPath '\\' -TaskName $name "
+        "-ErrorAction Stop; "
+        "$actual=$task.Settings; "
         "if ($actual.RestartCount -ne 3 -or "
         "[string]$actual.RestartInterval -ne 'PT5M' -or "
         "[string]$actual.ExecutionTimeLimit -ne 'PT0S' -or "
         "[string]$actual.MultipleInstances -ne 'IgnoreNew' -or "
         "$actual.StartWhenAvailable -ne $true) "
-        "{ throw 'Task recovery settings readback mismatch' }"
+        "{ throw 'Task recovery settings readback mismatch' }; "
+        "$actions=@($task.Actions); "
+        "$triggers=@($task.Triggers); "
+        "$principal=[string]$task.Principal.UserId; "
+        r"if ($principal -match '^S-\d+(-\d+)+$') "
+        "{ $principalSid=$principal } else "
+        "{ $principalSid=(New-Object System.Security.Principal.NTAccount("
+        "$principal)).Translate("
+        "[System.Security.Principal.SecurityIdentifier]).Value }; "
+        "$expectedSid=[System.Security.Principal.WindowsIdentity]::GetCurrent()"
+        ".User.Value; "
+        "$actionPath=''; $actionArgs=''; "
+        "if ($actions.Count -eq 1) "
+        "{ $actionPath=[System.IO.Path]::GetFullPath("
+        "[string]$actions[0].Execute); "
+        "$actionArgs=[string]$actions[0].Arguments }; "
+        "if ($task.TaskName -cne $name -or $task.TaskPath -cne '\\' -or "
+        "$actions.Count -ne 1 -or $actionPath -ine $expectedLauncher -or "
+        "-not [string]::IsNullOrWhiteSpace($actionArgs) -or "
+        "$principalSid -ne $expectedSid -or "
+        "[string]$task.Principal.LogonType -ne 'Interactive' -or "
+        "[string]$task.Principal.RunLevel -ne 'Limited' -or "
+        "$triggers.Count -ne 1 -or "
+        "$triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger' -or "
+        "$triggers[0].Enabled -ne $true) "
+        "{ throw 'Task binding readback mismatch' }"
     )
     return [
         "powershell.exe",
@@ -485,28 +516,18 @@ def install(
                 )
             )
             try:
-                _run(build_task_recovery_settings_command(task_name=task_name))
+                _run(build_task_recovery_settings_command(
+                    task_name=task_name, launcher=host_launcher,
+                ))
             except Exception as exc:
                 # A task may now exist, but no activation claim may be recorded.
-                # Do not blindly replay an install or delete the ambiguous task.
+                # Exact action, principal, trigger, and settings readback must
+                # all pass. Never replay/delete an ambiguously registered task.
                 raise RuntimeError(
-                    "desktop host task registered, but restart settings were not "
-                    "verified; inspect the exact task before any retry"
+                    "desktop host task registered, but exact task binding and "
+                    "restart settings were not verified; inspect the exact task "
+                    "before any retry"
                 ) from exc
-            query = _run(
-                [
-                    "schtasks.exe",
-                    "/Query",
-                    "/TN",
-                    task_name,
-                    "/FO",
-                    "LIST",
-                    "/V",
-                ],
-                capture=True,
-            )
-            if task_name not in query.stdout:
-                raise RuntimeError("registered logon task could not be read back")
 
         # Persist the exact registration result before promoting the separate
         # runtime-spec activation claim. A failed result write must never leave
