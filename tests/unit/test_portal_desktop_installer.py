@@ -680,6 +680,49 @@ def test_final_install_result_failure_does_not_claim_active(
     assert (root / "INSTALLATION_RESULT.json").exists() is (fault == "readback")
 
 
+
+@pytest.mark.parametrize("phase", ("before_replace", "after_replace"))
+def test_activation_spec_publish_failure_preserves_ambiguous_registration(
+    phase: str, monkeypatch, tmp_path: Path,
+) -> None:
+    """A task/result can exist when final activation publication fails."""
+    root = tmp_path / "runtime"
+    owned_host = _FakeOwnedHost()
+    monkeypatch.setattr(desktop_installer, "_install_sources",
+                        lambda *_args: tmp_path / "python.exe")
+    monkeypatch.setattr(desktop_installer, "_verify_imports", lambda *_args: {})
+    monkeypatch.setattr(desktop_installer, "_start_host",
+                        lambda *_args: owned_host)
+    monkeypatch.setattr(desktop_installer, "_qualify",
+                        lambda *_args: {"qualified": True})
+    monkeypatch.setattr(desktop_installer, "_run",
+                        lambda *_args, **_kwargs: SimpleNamespace(
+                            stdout="VeraDesktopRuntime-desktop-v1"))
+    original_replace = Path.replace
+
+    def fault_spec_replace(self: Path, target: Path):
+        if self.name == "RUNTIME_INSTALL_SPEC.json.tmp":
+            if phase == "before_replace":
+                raise OSError("simulated before spec publication")
+            original_replace(self, target)
+            raise OSError("simulated after spec publication")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fault_spec_replace)
+    with pytest.raises(OSError, match="spec publication"):
+        desktop_installer.install(runtime_root=root, spec=_spec(), activate=True)
+
+    assert owned_host.terminated and owned_host.waited
+    assert (root / "INSTALLATION_RESULT.json").exists()
+    spec = json.loads((root / "RUNTIME_INSTALL_SPEC.json").read_text(
+        encoding="utf-8"))
+    # A confirmed pre-rename failure is non-active. Once rename happened,
+    # the effect is ambiguous to the caller; it must not blindly delete/retry.
+    assert (spec.get("activation", {}).get("active") is True) is (
+        phase == "after_replace"
+    )
+
+
 def test_activation_state_updates_runtime_spec_without_touching_sources(tmp_path: Path) -> None:
     path = tmp_path / "RUNTIME_INSTALL_SPEC.json"
     original = {
