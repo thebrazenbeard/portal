@@ -123,6 +123,15 @@ def test_inventory_digests_have_distinct_types_and_reject_duplicate_or_invalid_e
         evaluate_preflight(report, now=NOW)
 
 
+def test_inventory_rejects_same_host_tag_kind_with_conflicting_digests():
+    report = evidence()
+    conflicting = deepcopy(report["model_inventory"][0])
+    conflicting["digest_sha256"] = "b" * 64
+    report["model_inventory"].append(conflicting)
+    with pytest.raises(ValueError, match="ambiguous duplicate model_inventory tag"):
+        evaluate_preflight(report, now=NOW)
+
+
 def test_paid_route_or_unknown_cost_is_not_admissible():
     for value in (None, True, "false", 0):
         report = evidence()
@@ -208,6 +217,29 @@ def test_cli_bad_evidence_rejected_without_traceback(tmp_path, capsys):
     receipt.write_text("[", encoding="utf-8")
     assert main(["--evidence", str(receipt)]) == 3
     assert json.loads(capsys.readouterr().out)["status"] == "INVALID_EVIDENCE"
+
+
+@pytest.mark.parametrize("original,replacement", [
+    ('"status":"RUNNING"', '"status":"STOPPED","status":"RUNNING"'),
+    ('"incremental_paid_compute":false',
+     '"incremental_paid_compute":true,"incremental_paid_compute":false'),
+])
+def test_cli_rejects_ambiguous_duplicate_json_keys(
+    original, replacement, tmp_path, capsys, monkeypatch,
+):
+    raw = json.dumps(evidence(), separators=(",", ":"))
+    assert original in raw
+    receipt = tmp_path / "duplicate.json"
+    receipt.write_text(raw.replace(original, replacement, 1), encoding="utf-8")
+    monkeypatch.setattr(
+        "portal.unified_host_preflight.datetime",
+        type("FixedDateTime", (datetime,), {
+            "now": classmethod(lambda cls, tz=None: NOW),
+        }),
+    )
+    assert main(["--evidence", str(receipt)]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "INVALID_EVIDENCE"
 
 
 @pytest.mark.parametrize("bad_payload", [
