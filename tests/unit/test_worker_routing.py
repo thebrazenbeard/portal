@@ -3,14 +3,14 @@ import json
 
 import pytest
 
-from runner.models import (
+from portal._runner.models import (
     Frontier,
     Observation,
     ProjectDefinition,
     WorkerDefinition,
 )
-from runner.portfolio import SqlitePortfolioStore
-from runner.worker_routing import (
+from portal._runner.portfolio import SqlitePortfolioStore
+from portal._runner.worker_routing import (
     SqliteWorkerRouteStore,
     resolve_read_only_worker_route,
 )

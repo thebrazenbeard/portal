@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from runner.portfolio_advancement import (
+from portal._runner.portfolio_advancement import (
     AdvancementItem,
     AdvancementWave,
     load_advancement_wave,
 )
-from runner.portfolio_wave_scheduler import (
+from portal._runner.portfolio_wave_scheduler import (
     WaveExecutionBudget,
     collision_keys,
     plan_wave_admission,

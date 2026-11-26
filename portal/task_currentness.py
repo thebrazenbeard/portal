@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from runner.task_monitor import (
+from portal._runner.task_monitor import (
     reconcile_orphaned_tasks,
     summarize_tasks,
 )

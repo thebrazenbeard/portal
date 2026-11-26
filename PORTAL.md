@@ -4,7 +4,7 @@
 
 PORTAL is Vera's **whole-portfolio orchestration and host interface layer**. A chat can be **one interaction surface**, but it is not the runtime, not canonical persistence, and not the architectural center. PORTAL coordinates the **whole portfolio** through independent **parallel** execution lanes while durable state, execution, verification, and recovery remain outside any one interface.
 
-Project Runner remains the governed execution substrate. PORTAL composes its currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics rather than replacing them.
+PORTAL retains a privately namespaced, historically Project Runner-derived execution kernel in `portal._runner`; standalone Project Runner has its own `runner` distribution and command. Their API drift is explicit, and neither package grants host execution authority. PORTAL composes currentness, collision, budget, authority, queue, worker-routing, fencing, task-supervision, receipt, and verification semantics.
 
 ## Mission and implemented coordinator core
 
@@ -45,7 +45,7 @@ This is no longer a planning-only implementation. The command-session path can d
 
 ## Existing execution-loop substrate
 
-The inherited `runner/` already exposes the critical loop primitives:
+The privately namespaced `portal/_runner/` exposes the critical loop primitives:
 - `portfolio-cycle`;
 - `portfolio-wave-plan`;
 - `portfolio-wave-claim`;

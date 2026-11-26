@@ -1,5 +1,5 @@
-from runner.dedup import deduplicate_frontiers, frontier_fingerprint
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.dedup import deduplicate_frontiers, frontier_fingerprint
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
 
 
 def _frontier(

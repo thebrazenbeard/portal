@@ -1,20 +1,23 @@
 from pathlib import Path
 import json
+import subprocess
+import sys
 
-from runner.dedup import frontier_fingerprint
-from runner.models import (
+from portal._runner.dedup import frontier_fingerprint
+from portal._runner.models import (
     Frontier,
     Observation,
     ProjectDefinition,
     WorkerDefinition,
 )
-from runner.portfolio import SqlitePortfolioStore
-from runner.reference_worker import (
+from portal._runner.portfolio import SqlitePortfolioStore
+from portal._runner.reference_worker import (
     REFERENCE_WORKER_ID,
     REFERENCE_WORKER_ROUTE,
     run_reference_read_worker_once,
 )
-from runner.worker_routing import (
+from portal._runner.registry import load_worker_snapshot
+from portal._runner.worker_routing import (
     SqliteWorkerRouteStore,
     resolve_read_only_worker_route,
 )
@@ -48,6 +51,22 @@ class FakeTransport:
         raise AssertionError("reference worker is read-only")
 
 
+def test_registered_reference_worker_launcher_is_installed_and_invocable():
+    root = Path(__file__).resolve().parents[2]
+    workers = load_worker_snapshot(root / "registry" / "workers.yaml")
+    worker = next(item for item in workers.workers if item.id == REFERENCE_WORKER_ID)
+    assert worker.locators["command"] == (
+        "python -m portal._runner.cli run-reference-worker"
+    )
+    subprocess.run(
+        [sys.executable, "-m", "portal._runner.cli", "run-reference-worker", "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
 def _worker() -> WorkerDefinition:
     return WorkerDefinition.from_mapping(
         {
@@ -57,7 +76,7 @@ def _worker() -> WorkerDefinition:
             "lifecycle": "EXECUTABLE",
             "locators": {
                 "workflow": ".github/workflows/test.yml",
-                "command": "project-runner run-reference-worker",
+                "command": "python -m portal._runner.cli run-reference-worker",
             },
             "roles": ["reference-read-worker"],
             "routes": {"RUNNER_ACTION_PULL": "VERIFIED"},

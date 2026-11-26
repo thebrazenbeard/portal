@@ -5,7 +5,7 @@ from pathlib import Path
 import portal.session as portal_session
 from portal.models import ExecutionNode
 from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 def _packet(run_id: str) -> PortalWavePacket:

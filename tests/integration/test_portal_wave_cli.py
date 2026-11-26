@@ -331,7 +331,7 @@ def test_portal_wave_promote_resolves_durable_packet_without_manual_lineage(
     monkeypatch,
     capsys,
 ) -> None:
-    from runner.execution_promotion import ExecutionPromotionReceipt
+    from portal._runner.execution_promotion import ExecutionPromotionReceipt
 
     review = tmp_path / "review.json"
     execution = tmp_path / "execution.json"

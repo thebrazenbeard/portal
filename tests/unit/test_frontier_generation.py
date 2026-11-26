@@ -1,6 +1,6 @@
-from runner.frontier import derive_frontiers
-from runner.models import DependencyReaction, ExactSubject, FrontierStatus
-from runner.propagate import Invalidation
+from portal._runner.frontier import derive_frontiers
+from portal._runner.models import DependencyReaction, ExactSubject, FrontierStatus
+from portal._runner.propagate import Invalidation
 
 
 def _invalidation(reaction=DependencyReaction.REREVIEW, *, consumer="vera", dependency_id="dep-1"):

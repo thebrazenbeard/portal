@@ -1,0 +1,10 @@
+capabilities:
+  read: Observe exact target state without mutation.
+  analyze: Derive conclusions or frontiers from observed evidence.
+  propose: Produce a suggested change without applying it.
+  create_branch: Create an isolated branch on the target repository.
+  write_branch: Write commits to an authorized non-protected branch.
+  open_pr: Open a pull request without merging it.
+  comment: Add a non-PR-review coordination comment where authorized.
+  request_review: Request review without asserting that review passed.
+  merge: Merge only when target-specific authority explicitly permits it.

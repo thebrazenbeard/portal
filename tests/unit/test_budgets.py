@@ -1,6 +1,6 @@
 import pytest
 
-from runner.budgets import BudgetEnvelope, allocate_child_budget
+from portal._runner.budgets import BudgetEnvelope, allocate_child_budget
 
 
 def _budget(**overrides):

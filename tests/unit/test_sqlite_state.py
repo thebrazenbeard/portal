@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.leases import Lease
-from runner.sqlite_state import SQLiteLeaseStore, SQLiteLineageBudgetStore
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.leases import Lease
+from portal._runner.sqlite_state import SQLiteLeaseStore, SQLiteLineageBudgetStore
 
 
 def _budget():

@@ -38,7 +38,7 @@ def verify_observed_result(
     completion evidence without mutating lease state or re-executing a backend.
     """
     if result.work_fingerprint != __import__(
-        "runner.work_units", fromlist=["work_unit_fingerprint"]
+        "portal._runner.work_units", fromlist=["work_unit_fingerprint"]
     ).work_unit_fingerprint(work):
         raise ValueError("backend result fingerprint does not match work")
 

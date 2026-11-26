@@ -158,5 +158,5 @@ def test_static_projects_explicitly_disables_safe_host_auto_discovery(
     assert code == 0
     capsys.readouterr()
     _name, kwargs = FakeSession.calls[0]
-    assert kwargs["projects_path"] == ROOT / "registry" / "projects.yaml"
+    assert kwargs["projects_path"] == portal_cli.ROOT / "registry" / "projects.yaml"
     assert kwargs["public_safe"] is True

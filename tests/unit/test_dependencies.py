@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from runner.models import DependencyReaction
-from runner.registry import load_dependencies
+from portal._runner.models import DependencyReaction
+from portal._runner.registry import load_dependencies
 
 
 def test_load_dependencies_returns_typed_edge(tmp_path: Path):

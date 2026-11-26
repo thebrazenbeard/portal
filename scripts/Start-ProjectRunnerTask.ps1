@@ -89,7 +89,7 @@ $request | ConvertTo-Json -Depth 4 | Set-Content -Path $requestPath -Encoding UT
 $pythonExe = Resolve-ProjectRunnerPython
 $supervisor = Start-Process -FilePath $pythonExe `
     -ArgumentList @(
-        "-m", "runner.task_supervisor",
+        "-m", "portal._runner.task_supervisor",
         "--request-path", $requestPath
     ) `
     -WorkingDirectory $WorkingDirectory `

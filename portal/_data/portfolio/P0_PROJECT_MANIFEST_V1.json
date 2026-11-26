@@ -1,0 +1,42 @@
+{
+  "schema": "PROJECT_RUNNER_P0_PROJECT_MANIFEST_V1",
+  "corpus_id": "PROJECT_RUNNER_PORTFOLIO_CORPUS_V1",
+  "classification": {
+    "project_id": "project-runner",
+    "repository": "thebrazenbeard/project-runner",
+    "priority": "P0",
+    "family_id": "portfolio-spine",
+    "activity_state": "ACTIVE_HEAVY",
+    "observed_at": "2026-09-24T13:08:00-04:00",
+    "source_kind": "PUBLIC_CORPUS_SNAPSHOT",
+    "source_subject": "thebrazenbeard/project-runner@4bc9dfee1204c774d077419ee9c3fdf91ebc141f:portfolio/corpus.public.json"
+  },
+  "role": {
+    "purpose": "Portfolio inventory, dependencies, bounded scheduling/execution and completion evidence.",
+    "status": "M6 is on main; durable scheduler/operator work remains open. Owns this corpus identity.",
+    "current_frontier": "Make the corpus a validated descriptive input without turning priority into authority."
+  },
+  "governance": {
+    "priority_is_authority": false,
+    "scheduling_requires_currentness": true,
+    "effect_requires_explicit_authority": true,
+    "merge_deploy_not_granted": true
+  },
+  "build_tracks": [
+    {
+      "id": "deterministic-corpus-diff",
+      "goal": "Refresh and diff the portfolio corpus deterministically against live evidence.",
+      "acceptance": ["Membership changes are explicit.", "Private identifiers remain outside public output.", "Exact source evidence is bound."]
+    },
+    {
+      "id": "scheduler-context",
+      "goal": "Feed priority, family and activity into scheduling as non-authoritative context.",
+      "acceptance": ["Currentness is rechecked before dispatch.", "Existing target authority gates remain mandatory.", "P0 never implies mutation permission."]
+    },
+    {
+      "id": "completion-evidence",
+      "goal": "Keep post-work exact-subject verification independent from backend success.",
+      "acceptance": ["Completion requires exact currentness.", "Ambiguous effects remain OUTCOME_UNKNOWN.", "Durable receipts preserve evidence lineage."]
+    }
+  ]
+}

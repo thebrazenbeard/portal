@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thebrazenbeard/project-runner/schemas/project.schema.json",
+  "type": "object",
+  "required": [
+    "projects"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "visibility",
+          "repositories",
+          "capabilities"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "visibility": {
+            "enum": [
+              "public",
+              "private"
+            ]
+          },
+          "repositories": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[^/]+/[^/]+$"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "assignment_scope": {
+            "enum": [
+              "NONE",
+              "BT2_ASSIGNMENT",
+              "EXTERNAL_BOUNDED"
+            ]
+          },
+          "review_scope": {
+            "enum": [
+              "NONE",
+              "STANDING"
+            ]
+          },
+          "family_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "scope_note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "scheduling_state": {
+            "enum": [
+              "SCHEDULABLE",
+              "HELD",
+              "ARCHIVED",
+              "DORMANT",
+              "SENSITIVE_HELD",
+              "DECISION_HELD"
+            ]
+          },
+          "execution_targets": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "required": [
+                "work_type",
+                "repository",
+                "ref"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "work_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "repository": {
+                  "type": "string",
+                  "pattern": "^[^/]+/[^/]+$"
+                },
+                "ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "worker_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "worker_route": {
+                  "enum": [
+                    "CHATGPT_INVOCATION",
+                    "RUNNER_ACTION_PULL",
+                    "DIRECT_EXTERNAL_DISPATCH",
+                    "PLUGIN_TOOL_CALL",
+                    "OPENAI_AGENT_API",
+                    "GITHUB_ACTION",
+                    "HUMAN_MANUAL"
+                  ]
+                }
+              },
+              "dependentRequired": {
+                "worker_id": [
+                  "worker_route"
+                ],
+                "worker_route": [
+                  "worker_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

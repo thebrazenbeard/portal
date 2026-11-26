@@ -1,0 +1,107 @@
+{
+  "schema": "PROJECT_RUNNER_P0_BUILD_MATRIX_V1",
+  "observed_date": "2026-09-28",
+  "corpus_id": "PROJECT_RUNNER_PORTFOLIO_CORPUS_V1",
+  "corpus_source": "thebrazenbeard/project-runner@36ab54c912f94c8ce6c07aa5117b937ac3f43d67:portfolio/corpus.public.json",
+  "authority_rule": "This matrix records source work only. It grants no merge, deployment, installation, runtime, scheduling, or mutation authority.",
+  "lantern_currentness": "UNKNOWN_WOWSQL_CONNECTOR_INTERNAL_FAILURE_2026_09_28",
+  "records": [
+    {
+      "project_id": "bt2",
+      "repository": "thebrazenbeard/bt2",
+      "pr": 46,
+      "manifest_subject": "6a471ef8ec670b6d3257567ae674f14df31652ed",
+      "readback": "PASS"
+    },
+    {
+      "project_id": "discovery",
+      "repository": "thebrazenbeard/discovery",
+      "pr": 43,
+      "manifest_subject": "dea7cd5bf54988e0e3ff0e187bfca5604dae3988",
+      "readback": "PASS",
+      "validation": "MAIN_SOURCE_HAS_71_REPOSITORY_CENSUS; EXACT_HEAD_ACTION_RUN_NOT_OBSERVED",
+      "current_main": "62b679a4809c7496f87d1075b25b3f7a50abf2ab",
+      "current_main_census": "71 total / 53 public / 18 private",
+      "current_main_action_run": "NOT_OBSERVED_ON_EXACT_HEAD"
+    },
+    {
+      "project_id": "project-lantern",
+      "repository": "thebrazenbeard/project-lantern",
+      "pr": 8,
+      "manifest_subject": "3cc11da0abf0d665d9ef74077156f96b3f6970f2",
+      "readback": "PASS"
+    },
+    {
+      "project_id": "project-runner",
+      "repository": "thebrazenbeard/project-runner",
+      "pr": 33,
+      "manifest_subject": "88d6a8bbe47b4287884550d419a80f6c6fdf176b",
+      "readback": "PASS",
+      "validation": "TEST_SUCCESS"
+    },
+    {
+      "project_id": "vera",
+      "repository": "thebrazenbeard/vera",
+      "pr": 201,
+      "manifest_subject": "b9bc73e02db7fdf4c1ae0f1cbf7133b124ff17db",
+      "readback": "PASS",
+      "validation": "RELEASE_AND_ENFORCEMENT_PASS; TEMPORAL_PILOT_PREEXISTING_FAIL"
+    },
+    {
+      "project_id": "vera-model-training",
+      "repository": "thebrazenbeard/vera_model_training",
+      "pr": 47,
+      "manifest_subject": "c9ecb708067cf34304f169e2ef49df6263adb2fc",
+      "readback": "PASS",
+      "validation": "TESTS_SUCCESS"
+    },
+    {
+      "project_id": "vera-control-plane",
+      "repository": "thebrazenbeard/vera-control-plane",
+      "pr": 132,
+      "manifest_subject": "3e96f1d596f638c505ccc8e1a0e986dfb9687ef4",
+      "readback": "PASS"
+    },
+    {
+      "project_id": "vera-mesh",
+      "repository": "thebrazenbeard/vera-mesh",
+      "pr": 39,
+      "manifest_subject": "12b4dc3ffad12cca7ba84dbc715512929352ab6a",
+      "readback": "PASS",
+      "validation": "MAIN_BASE_GENERIC_STARTER_WORKFLOWS_FAIL; ACTIVE_PR38_DOMAIN_WORKFLOWS_PASS"
+    },
+    {
+      "project_id": "vera-mono",
+      "repository": "thebrazenbeard/vera-mono",
+      "pr": 2,
+      "manifest_subject": "b42604f83fa868b88a590872c11f4e344cccc981",
+      "readback": "PASS",
+      "validation": "MONOREPO_TESTS_SUCCESS"
+    },
+    {
+      "project_id": "workbridgemcp",
+      "repository": "thebrazenbeard/WorkBridgeMCP",
+      "pr": 9,
+      "manifest_subject": "d1a22c90e5c34d8ac1481ea41436d534a6a1d603",
+      "readback": "PASS",
+      "validation": "MAIN_BASE_GENERIC_STARTER_WORKFLOWS_FAIL; ACTIVE_PR8_CI_PASS"
+    }
+  ],
+  "private_p0": {
+    "count": 1,
+    "identity_disclosure": "OMITTED_FROM_PUBLIC_MATRIX",
+    "complete_matrix_location": "private coordination surface"
+  },
+  "corpus_membership": {
+    "total": 71,
+    "public": 53,
+    "private": 18,
+    "public_delta": [
+      "thebrazenbeard/axle",
+      "thebrazenbeard/ingest",
+      "thebrazenbeard/lgcm",
+      "thebrazenbeard/pro-run"
+    ],
+    "note": "The public P0 matrix remains unchanged; the four new public repositories are descriptive P1 subjects at this cut."
+  }
+}

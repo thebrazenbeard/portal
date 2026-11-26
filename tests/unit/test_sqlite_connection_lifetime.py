@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner import sqlite_state
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner import sqlite_state
 
 
 def _budget():

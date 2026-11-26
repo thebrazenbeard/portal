@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from runner.cli import main
+from portal._runner.cli import main
 
 
 ROOT = Path(__file__).resolve().parents[2]

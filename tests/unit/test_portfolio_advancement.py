@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from runner.portfolio_advancement import (
+from portal._runner.portfolio_advancement import (
     load_advancement_wave,
     validate_wave_against_corpus,
 )
-from runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_corpus import load_portfolio_corpus
 
 
 ROOT = Path(__file__).resolve().parents[2]
