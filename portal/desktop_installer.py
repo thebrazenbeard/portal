@@ -718,7 +718,14 @@ def _initialize_fresh_mono(
     for directory in (runtime_root, state.parent):
         ensure_private_directory(directory)
         _verify_private_state_acl(directory)
-    state.mkdir(mode=0o700, exist_ok=False)
+    # Windows Python 3.13+ gives mkdir(0700) a special protected DACL.
+    # Inherit the already verified private parent instead of replacing that
+    # policy with OWNER RIGHTS. POSIX retains owner-only creation.
+    if os.name == "nt":
+        state.mkdir(exist_ok=False)
+    else:
+        state.mkdir(mode=0o700, exist_ok=False)
+    _reject_reparse_ancestors(state)
     _verify_private_state_acl(state)
     # Fixed program, no caller-supplied code. Synchronous exit precedes host launch.
     code = r"""
@@ -757,6 +764,28 @@ vera_core.VeraStateDirectory(
     _reject_reparse_ancestors(memory)
     if not memory.is_file() or memory.stat().st_size == 0:
         raise RuntimeError("Mono initialization exited without a memory ledger")
+    if os.name == "nt":
+        # The initializer may create additional state directories and SQLite
+        # files. Do not begin host qualification if any new descendant has
+        # lost the private inherited custody boundary.
+        pending = [state]
+        while pending:
+            path = pending.pop()
+            # Explicit lstat and enumeration propagate filesystem errors.
+            # pathlib glob may suppress OSError, including denied subtrees.
+            _reject_reparse_ancestors(path)
+            info = path.lstat()
+            if (stat.S_ISLNK(info.st_mode)
+                    or info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                raise RuntimeError("fresh state contains a reparse point")
+            _verify_private_state_acl(path)
+            if stat.S_ISDIR(info.st_mode):
+                # Fully enumerate before accepting this directory's children.
+                # A mid-iteration failure must not silently truncate the walk.
+                with os.scandir(path) as entries:
+                    pending.extend(Path(entry.path) for entry in entries)
+            elif not stat.S_ISREG(info.st_mode):
+                raise RuntimeError("fresh state contains an unsupported file type")
 
 
 
