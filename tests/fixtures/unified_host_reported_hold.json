@@ -1,0 +1,21 @@
+{
+  "schema": "VERA_ECOSYSTEM_HOST_PREFLIGHT_V1",
+  "observed_at_utc": "2026-11-05T23:23:29Z",
+  "observations": [
+    {"id": "control.vera_mono_pilot", "kind": "WINDOWS_SERVICE", "status": "STOPPED", "credential_applied": false},
+    {"id": "control.veramesh_tunnel", "kind": "WINDOWS_SERVICE", "status": "STOPPED", "credential_applied": false},
+    {"id": "control.ollama_tags", "kind": "HTTP", "status": 200, "credential_applied": false},
+    {"id": "worker_a.ollama_tags", "kind": "HTTP", "status": 200, "credential_applied": false},
+    {"id": "worker_b.rezon_healthz", "kind": "HTTP", "status": 200, "credential_applied": false},
+    {"id": "worker_b.rezon_readyz", "kind": "AUTHENTICATED_HTTP", "status": 401, "credential_applied": false},
+    {"id": "worker_b.llama_models", "kind": "HTTP", "status": 200, "credential_applied": false}
+  ],
+  "model_inventory": [],
+  "model_selection": {
+    "host": "control",
+    "model_tag": "",
+    "digest_kind": "",
+    "digest_sha256": "",
+    "incremental_paid_compute": null
+  }
+}
