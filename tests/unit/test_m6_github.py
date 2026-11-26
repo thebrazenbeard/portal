@@ -1,20 +1,20 @@
 import pytest
-from runner.budgets import BudgetEnvelope
-from runner.dispatch import dispatch_ready
-from runner.github_backend import (
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.dispatch import dispatch_ready
+from portal._runner.github_backend import (
     GitHubBackend,
     GitHubOperation,
     TargetAuthorityGrant,
 )
-from runner.leases import InMemoryLeaseStore
-from runner.m6_github import (
+from portal._runner.leases import InMemoryLeaseStore
+from portal._runner.m6_github import (
     GitHubCurrentSubjectReader,
     GitHubReadInspectionBackend,
     frontier_to_github_inspection_work,
 )
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
-from runner.verify import verify_attempt
-from runner.work_units import WorkUnitStatus, work_unit_fingerprint
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.verify import verify_attempt
+from portal._runner.work_units import WorkUnitStatus, work_unit_fingerprint
 
 
 HC_HEAD = "618245b54fb923c7a204892c6953ab6d1c5dac57"

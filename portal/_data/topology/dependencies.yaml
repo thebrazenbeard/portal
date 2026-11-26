@@ -1,0 +1,20 @@
+dependencies:
+- id: bus-routing-to-project-runner
+  provider: chat-communication-bus
+  consumer: project-runner
+  kind: routing-contract
+  selector:
+    repository: thebrazenbeard/chat-communication-bus
+    ref: main
+    path_prefix: architecture/contracts/
+  reaction: INSPECT
+  evidence: exact-subject
+- id: control-plane-to-vera
+  provider: vera-control-plane
+  consumer: vera
+  kind: control-plane
+  selector:
+    repository: thebrazenbeard/vera-control-plane
+    ref: main
+  reaction: REQUALIFY
+  evidence: exact-subject

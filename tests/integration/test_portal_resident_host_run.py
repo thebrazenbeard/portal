@@ -8,7 +8,7 @@ from portal.host_pump import PortalHostDriverResult, PortalHostPump
 from portal.models import ExecutionNode
 from portal.route_resolver import PortalRouteAdvertisement
 from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 def _packet(run_id: str, subject_id: str) -> PortalWavePacket:

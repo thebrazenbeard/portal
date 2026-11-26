@@ -4,8 +4,8 @@ from pathlib import Path
 import time
 from typing import Callable, Mapping, TYPE_CHECKING
 
-from runner.execution_promotion import NO_PROTECTED_EFFECT
-from runner.github_backend import GitHubTransport
+from portal._runner.execution_promotion import NO_PROTECTED_EFFECT
+from portal._runner.github_backend import GitHubTransport
 
 from .adapters import (
     PortalDispatchRecord,

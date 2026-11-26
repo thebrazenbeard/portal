@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.durable_dispatch import SqliteDispatchAdmissionStore
-from runner.m6_github import frontier_to_github_inspection_work
-from runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
-from runner.operator import (
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.durable_dispatch import SqliteDispatchAdmissionStore
+from portal._runner.m6_github import frontier_to_github_inspection_work
+from portal._runner.models import CostClass, ExactSubject, Frontier, FrontierStatus
+from portal._runner.operator import (
     build_github_read_backend,
     run_durable_github_read_inspection,
     summarize_recovery_state,
 )
-from runner.persistent_state import SqliteBudgetStore
-from runner.recursive_state import SqliteRecursiveWorkStore
-from runner.work_units import WorkUnitStatus
+from portal._runner.persistent_state import SqliteBudgetStore
+from portal._runner.recursive_state import SqliteRecursiveWorkStore
+from portal._runner.work_units import WorkUnitStatus
 
 
 PROVIDER = ExactSubject(
@@ -220,7 +220,7 @@ def test_atomic_root_initialization_rolls_back_budget_when_work_insert_collides(
         budget_scope_id="root",
         parent_fingerprint=None,
         ancestry_fingerprints={result_fingerprint := __import__(
-            "runner.work_units",
+            "portal._runner.work_units",
             fromlist=["work_unit_fingerprint"],
         ).work_unit_fingerprint(work)},
         effective_capabilities={"read", "analyze"},

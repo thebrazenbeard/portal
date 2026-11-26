@@ -1,5 +1,5 @@
-from runner.models import ExactSubject
-from runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from portal._runner.models import ExactSubject
+from portal._runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 def _work(payload):

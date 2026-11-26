@@ -12,9 +12,9 @@ from portal.discovery import (
 from portal.live_portfolio import refresh_live_local_portfolio
 from portal.models import ExecutionNode
 from portal.wave_runtime import PortalWaveStore, prepare_portal_wave
-from runner.models import ProjectDefinition
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_wave_scheduler import WaveExecutionBudget
+from portal._runner.models import ProjectDefinition
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_wave_scheduler import WaveExecutionBudget
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -242,7 +242,7 @@ def test_unsupported_queued_workstream_does_not_consume_packet_capacity(
     state_db = tmp_path / "portal-unsupported-workstream.sqlite3"
     transport = FakeReadOnlyTransport(heads)
     wave = __import__(
-        "runner.portfolio_advancement",
+        "portal._runner.portfolio_advancement",
         fromlist=["load_advancement_wave"],
     ).load_advancement_wave(WAVE)
     excluded = tuple(
@@ -285,7 +285,7 @@ def test_active_workstream_still_consumes_budget_while_queued_workstreams_are_sk
     state_db = tmp_path / "portal-active-workstream.sqlite3"
     transport = FakeReadOnlyTransport(heads)
     wave = __import__(
-        "runner.portfolio_advancement",
+        "portal._runner.portfolio_advancement",
         fromlist=["load_advancement_wave"],
     ).load_advancement_wave(WAVE)
     excluded = tuple(

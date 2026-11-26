@@ -1,6 +1,6 @@
 import pytest
 from jsonschema import ValidationError
-from runner.schema import validate_document
+from portal._runner.schema import validate_document
 
 
 def test_worker_schema_rejects_missing_id():

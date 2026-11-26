@@ -3,7 +3,7 @@ import copy
 import pytest
 from jsonschema.exceptions import ValidationError
 
-from runner.schema import validate_document
+from portal._runner.schema import validate_document
 
 
 def _manifest() -> dict:

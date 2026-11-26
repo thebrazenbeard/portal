@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from runner.execution_promotion import (
+from portal._runner.execution_promotion import (
     ExecutionPromotionReceipt,
     PromotedExecution,
     SOURCE_WRITE,
 )
-from runner.github_backend import GitHubOutcomeUnknown, GitHubPreconditionFailed
-from runner.promoted_github_tree import (
+from portal._runner.github_backend import GitHubOutcomeUnknown, GitHubPreconditionFailed
+from portal._runner.promoted_github_tree import (
     PromotedGitHubSourceTreeWriteBackend,
     source_tree_write_request_sha256,
 )

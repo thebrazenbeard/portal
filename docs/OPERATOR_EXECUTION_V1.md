@@ -1,5 +1,13 @@
 # Project Runner Operator Execution V1
 
+This is a historical/standalone **Project Runner** operator contract.
+The `portal-coordinator` distribution does not install the `project-runner`
+command or its `runner` Python package. Use a separately installed
+[`project-runner`](https://github.com/thebrazenbeard/project-runner) for the
+commands described here; Portal's supported entry point is `portal`.
+The documentation below is not a claim that the two packages share an
+installed runtime, host lease, or effect authorization.
+
 Status: source candidate stacked on the independently reviewed M6 canonical-baseline candidate. This document does not grant merge, deployment, or downstream mutation authority.
 
 ## Why this slice exists

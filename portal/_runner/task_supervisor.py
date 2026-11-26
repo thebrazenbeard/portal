@@ -157,7 +157,7 @@ def launch_background_task(
                 [
                     sys.executable,
                     "-m",
-                    "runner.task_supervisor",
+                    "portal._runner.task_supervisor",
                     "--request-path",
                     str(request_path),
                 ],

@@ -7,20 +7,20 @@ import sqlite3
 
 import pytest
 
-from runner.cli import main
-from runner.execution_promotion import (
+from portal._runner.cli import main
+from portal._runner.execution_promotion import (
     execute_promoted,
     promote_claimed_to_running,
     sign_evidence,
 )
-from runner.github_backend import (
+from portal._runner.github_backend import (
     GitHubFileState,
     GitHubOutcomeUnknown,
     GitHubPreconditionFailed,
 )
-from runner.portfolio_corpus import load_portfolio_corpus
-from runner.portfolio_operator_bridge import claim_bound_plan_subject
-from runner.promoted_github import (
+from portal._runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_operator_bridge import claim_bound_plan_subject
+from portal._runner.promoted_github import (
     PromotedGitHubSourceWriteBackend,
     source_write_request_sha256,
 )
@@ -634,7 +634,7 @@ def test_adapter_rejects_request_target_divergence_without_mutation(tmp_path):
 
 
 def test_cli_executes_only_previously_promoted_write(tmp_path, monkeypatch, capsys):
-    from runner import cli as cli_module
+    from portal._runner import cli as cli_module
 
     claim, transport = _claim(tmp_path)
     request = _request(claim)

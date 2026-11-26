@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thebrazenbeard.github.io/project-runner/schemas/work-unit.schema.json",
+  "title": "Project Runner Work Unit",
+  "type": "object",
+  "required": [
+    "id",
+    "root_frontier_id",
+    "parent_work_id",
+    "inputs",
+    "operation",
+    "required_capabilities",
+    "collision_keys",
+    "recursion_depth",
+    "budget_allocation",
+    "expected_outputs",
+    "completion_criteria",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "root_frontier_id": {"type": "string", "minLength": 1},
+    "parent_work_id": {"type": ["string", "null"]},
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["repository", "ref"],
+        "additionalProperties": false,
+        "properties": {
+          "repository": {"type": "string", "minLength": 1},
+          "ref": {"type": "string", "minLength": 1},
+          "commit": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "digest": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "operation": {"type": "string", "minLength": 1},
+    "required_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "collision_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "recursion_depth": {"type": "integer", "minimum": 0},
+    "budget_allocation": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "expected_outputs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "completion_criteria": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "payload": {"type": "object"},
+    "status": {
+      "enum": [
+        "PENDING","CLAIMED","RUNNING","VERIFYING","COMPLETE",
+        "FAILED_RETRYABLE","FAILED_DETERMINISTIC","OUTCOME_UNKNOWN","SUPERSEDED"
+      ]
+    }
+  }
+}

@@ -6,11 +6,11 @@ from pathlib import Path
 import portal.live_portfolio as live_portfolio
 from portal.discovery import RepositoryInventoryItem
 from portal.live_portfolio import refresh_live_public_portfolio
-from runner.portfolio_advancement import (
+from portal._runner.portfolio_advancement import (
     load_advancement_wave,
     validate_wave_against_corpus,
 )
-from runner.portfolio_corpus import load_portfolio_corpus
+from portal._runner.portfolio_corpus import load_portfolio_corpus
 
 
 def _repo(

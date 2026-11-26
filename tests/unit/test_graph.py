@@ -1,5 +1,5 @@
-from runner.graph import affected_edges, selector_matches
-from runner.models import (
+from portal._runner.graph import affected_edges, selector_matches
+from portal._runner.models import (
     DependencyEdge,
     DependencyReaction,
     DependencySelector,

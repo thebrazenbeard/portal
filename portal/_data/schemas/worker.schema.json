@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thebrazenbeard/project-runner/schemas/worker.schema.json",
+  "type": "object",
+  "required": [
+    "workers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "worker_type",
+          "lifecycle",
+          "locators",
+          "roles",
+          "routes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "worker_type": {
+            "enum": [
+              "CHATGPT_CUSTOM_GPT",
+              "CHATGPT_PLUGIN",
+              "OPENAI_AGENT",
+              "GITHUB_ACTION",
+              "EXTERNAL_API",
+              "HUMAN"
+            ]
+          },
+          "lifecycle": {
+            "enum": [
+              "REGISTERED",
+              "DISCOVERED",
+              "PROFILED",
+              "CONNECTED",
+              "EXECUTABLE",
+              "UNAVAILABLE"
+            ]
+          },
+          "locators": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "roles": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "routes": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "CHATGPT_INVOCATION",
+                "RUNNER_ACTION_PULL",
+                "DIRECT_EXTERNAL_DISPATCH",
+                "PLUGIN_TOOL_CALL",
+                "OPENAI_AGENT_API",
+                "GITHUB_ACTION",
+                "HUMAN_MANUAL"
+              ]
+            },
+            "additionalProperties": {
+              "enum": [
+                "UNVERIFIED",
+                "CONNECTED",
+                "VERIFIED",
+                "UNAVAILABLE"
+              ]
+            }
+          },
+          "reconstruction": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "repository",
+              "path",
+              "commit"
+            ],
+            "properties": {
+              "repository": {
+                "type": "string",
+                "minLength": 3,
+                "pattern": "^[^/\\s]+/[^/\\s]+$"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              }
+            }
+          },
+          "route_contracts": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "CHATGPT_INVOCATION",
+                "RUNNER_ACTION_PULL",
+                "DIRECT_EXTERNAL_DISPATCH",
+                "PLUGIN_TOOL_CALL",
+                "OPENAI_AGENT_API",
+                "GITHUB_ACTION",
+                "HUMAN_MANUAL"
+              ]
+            },
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "effect_class",
+                "replay_policy"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "effect_class": {
+                  "enum": [
+                    "READ_ONLY",
+                    "MUTATING"
+                  ]
+                },
+                "replay_policy": {
+                  "enum": [
+                    "SAFE",
+                    "RECONCILE_REQUIRED",
+                    "NEVER"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

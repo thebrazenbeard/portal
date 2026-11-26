@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["dependencies"],
+  "additionalProperties": false,
+  "properties": {
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "provider", "consumer", "kind", "selector", "reaction", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "provider": {"type": "string", "minLength": 1},
+          "consumer": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "selector": {
+            "type": "object",
+            "required": ["repository"],
+            "additionalProperties": false,
+            "properties": {
+              "repository": {"type": "string", "minLength": 1},
+              "ref": {"type": "string", "minLength": 1},
+              "path_prefix": {"type": "string", "minLength": 1}
+            }
+          },
+          "reaction": {"enum": ["NO_ACTION", "INSPECT", "RETEST", "REREVIEW", "REQUALIFY", "BLOCK"]},
+          "evidence": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

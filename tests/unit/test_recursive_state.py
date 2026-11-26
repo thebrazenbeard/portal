@@ -3,18 +3,18 @@ from pathlib import Path
 
 import pytest
 
-from runner.budgets import BudgetEnvelope
-from runner.decompose import admit_child_work
-from runner.models import ExactSubject
-from runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
-from runner.recursive_admission import SqliteRecursiveAdmissionStore
-from runner.recursive_state import (
+from portal._runner.budgets import BudgetEnvelope
+from portal._runner.decompose import admit_child_work
+from portal._runner.models import ExactSubject
+from portal._runner.persistent_state import SqliteBudgetStore, SqliteLeaseStore
+from portal._runner.recursive_admission import SqliteRecursiveAdmissionStore
+from portal._runner.recursive_state import (
     SqliteRecursiveWorkStore,
     _canonical_json,
     _legacy_immutable_digest,
     _work_payload,
 )
-from runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
+from portal._runner.work_units import WorkUnit, WorkUnitStatus, work_unit_fingerprint
 
 
 def _subject(commit: str) -> ExactSubject:
