@@ -16,6 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 
 from .desktop_install import InstallSpec, RuntimeSource, prepare_stage_root
+from .desktop_cognition import RestrictedOllamaAdmission
 from .runtime_source_attestation import write_attestation, verify_attestation
 
 
@@ -951,6 +952,12 @@ def install(
 
 def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
     meso_sha = getattr(args, "meso_sha", None)
+    model = getattr(args, "ollama_model", None)
+    digest = getattr(args, "ollama_registry_digest", None)
+    if (model is None) != (digest is None) or (model is not None and meso_sha is not None):
+        raise ValueError("restricted model requires model and digest and excludes optional MESO")
+    admission = (RestrictedOllamaAdmission("ollama", model, digest, "http://127.0.0.1:11434")
+                 if model is not None else None)
     sources = (
         RuntimeSource(
             "vera-mono", "thebrazenbeard/vera-mono", "main", args.vera_mono_sha,
@@ -972,10 +979,12 @@ def _spec_from_args(args: argparse.Namespace) -> InstallSpec:
     spec = InstallSpec(
         schema=(
             "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2"
-            if meso_sha is not None else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1"
+            if meso_sha is not None else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3"
+            if admission is not None else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1"
         ),
         install_id=args.install_id,
         sources=sources,
+        model_admission=admission,
     )
     spec.validate()
     return spec
@@ -997,6 +1006,8 @@ def main() -> None:
         "--meso-sha",
         help="Opt into V2 staged install with a fifth exact MESO-CRCT source SHA",
     )
+    parser.add_argument("--ollama-model")
+    parser.add_argument("--ollama-registry-digest")
     parser.add_argument("--activate", action="store_true")
     args = parser.parse_args()
     result = install(

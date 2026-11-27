@@ -53,6 +53,63 @@ def ollama_registry_digest(tags: Mapping[str, object] | None, model: str) -> str
     return digest if type(digest) is str and _OLLAMA_DIGEST_RE.fullmatch(digest) else None
 
 
+@dataclass(frozen=True)
+class RestrictedOllamaAdmission:
+    provider: str
+    model: str
+    registry_digest: str
+    endpoint: str
+
+    def validate(self) -> None:
+        if (self.provider != "ollama" or self.endpoint != "http://127.0.0.1:11434"
+                or type(self.model) is not str or not self.model
+                or self.model != self.model.strip() or len(self.model.encode("utf-8")) > 128
+                or any(ord(ch) < 32 for ch in self.model)
+                or type(self.registry_digest) is not str
+                or not _OLLAMA_DIGEST_RE.fullmatch(self.registry_digest)):
+            raise ValueError("invalid restricted Ollama admission")
+
+    def to_mapping(self) -> dict[str, str]:
+        self.validate()
+        return {"provider": self.provider, "model": self.model,
+                "registry_digest": self.registry_digest, "endpoint": self.endpoint}
+
+    @classmethod
+    def from_mapping(cls, value: object) -> "RestrictedOllamaAdmission":
+        if not isinstance(value, dict) or set(value) != {"provider", "model", "registry_digest", "endpoint"}:
+            raise ValueError("exact restricted model admission fields required")
+        if any(type(v) is not str for v in value.values()):
+            raise ValueError("restricted model admission fields must be strings")
+        admission = cls(**value)
+        admission.validate()
+        return admission
+
+    def binding_digest(self) -> str:
+        import hashlib
+        return hashlib.sha256(json.dumps(self.to_mapping(), sort_keys=True,
+                                        separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def restrict_cognition_routes(
+    routes: tuple[CognitionRoute, ...], admission: RestrictedOllamaAdmission,
+) -> tuple[CognitionRoute, ...]:
+    admission.validate()
+    matches = tuple(route for route in routes
+                    if route.route_id == f"ollama:{admission.model}")
+    if len(matches) != 1:
+        return ()
+    route = matches[0]
+    if (route.provider != admission.provider or route.model_or_agent != admission.model
+            or route.observed_registry_digest != admission.registry_digest
+            or route.local is not True or route.available is not True
+            or route.current is not True or route.auto_admissible is not True
+            or route.incremental_paid_compute is not False
+            or route.capabilities != ("text",)
+            or route.effect_authority_ceiling != "COGNITION_ONLY_NO_PROTECTED_EFFECT"):
+        return ()
+    return matches
+
+
 CommandProbe = Callable[[str, tuple[str, ...]], str | None]
 OllamaTagsProbe = Callable[[], Mapping[str, object] | None]
 PreActiveModelsProbe = Callable[[], Mapping[str, object] | None]
@@ -289,6 +346,19 @@ def discover_cognition_routes(
         )
 
     return tuple(sorted(routes, key=lambda route: route.route_id))
+
+
+def discover_restricted_ollama_routes(
+    admission: RestrictedOllamaAdmission, *,
+    ollama_tags: OllamaTagsProbe = _default_ollama_tags,
+) -> tuple[CognitionRoute, ...]:
+    """Use only the existing fixed loopback Ollama discovery path."""
+    return restrict_cognition_routes(
+        discover_cognition_routes(command_probe=lambda *_: None,
+                                  ollama_tags=ollama_tags,
+                                  pre_active_models=lambda: None),
+        admission,
+    )
 
 
 def select_cognition_route(

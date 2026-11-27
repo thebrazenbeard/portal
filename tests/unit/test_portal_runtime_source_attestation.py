@@ -109,3 +109,15 @@ def test_attestation_rejects_modified_receipt(tmp_path: Path) -> None:
     receipt["sha256"] = "0" * 64
     path.write_text(json.dumps(receipt), encoding="utf-8")
     _must_fail(lambda: verify_attestation(tmp_path, spec))
+
+def test_restricted_attestation_binds_model_identity(tmp_path):
+    from dataclasses import replace
+    from portal.desktop_cognition import RestrictedOllamaAdmission
+    legacy = _stage(tmp_path)
+    admission = RestrictedOllamaAdmission("ollama","gemma3:1b","a"*64,"http://127.0.0.1:11434")
+    spec = replace(legacy,schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3",model_admission=admission)
+    attested=write_attestation(tmp_path,spec)
+    assert attested["model_admission"]==admission.to_mapping()
+    assert verify_attestation(tmp_path,spec)==attested
+    _must_fail(lambda:verify_attestation(tmp_path,replace(spec,model_admission=replace(admission,registry_digest="b"*64))))
+    _must_fail(lambda:verify_attestation(tmp_path,legacy))

@@ -12,6 +12,7 @@ import pytest
 
 from portal import desktop_qualify
 from portal.desktop_install import InstallSpec, RuntimeSource
+from portal.desktop_cognition import RestrictedOllamaAdmission
 
 
 @pytest.mark.parametrize(
@@ -27,16 +28,26 @@ from portal.desktop_install import InstallSpec, RuntimeSource
         ("audio_only", "local text"),
         ("remote_optin", None),
         ("valid", None),
+        ("restricted_valid", None),
+        ("restricted_human", "human cognition restricted admission receipt"),
+        ("restricted_autonomous", "autonomous cognition restricted admission receipt"),
+        ("restricted_volition", "volition cognition restricted admission receipt"),
+        ("restricted_discovery", "restricted model discovery mismatch"),
+        ("restricted_manifest", "host source identity differs"),
     ],
 )
 def test_staged_qualification_rejects_echo_stale_or_nonlocal_cognition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, reason: str | None,
 ) -> None:
+    restricted = mode.startswith("restricted_")
+    admission = RestrictedOllamaAdmission("ollama", "gemma3:1b", "a"*64, "http://127.0.0.1:11434") if restricted else None
+    route_id = "ollama:gemma3:1b" if restricted else "local-text"
     spec = InstallSpec(
-        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
+        schema="VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3" if restricted else "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1",
         install_id="qualified-gate",
         sources=tuple(RuntimeSource(c, f"thebrazenbeard/{c}", "main", char * 40)
                       for c, char in zip(("vera-mono", "portal", "pre-active", "volition"), "abcd")),
+        model_admission=admission,
     )
     spec.write(tmp_path / "RUNTIME_INSTALL_SPEC.json")
     state: dict[str, object] = {"human_id": "human", "keys": []}
@@ -54,14 +65,17 @@ def test_staged_qualification_rejects_echo_stale_or_nonlocal_cognition(
             if command == "desktop_status":
                 return {
                     "state": "ACTIVE", "runtime_id": "expected-runtime", "pid": 100,
-                    "started_at": 1000.0, "source_manifest": spec.to_mapping(),
+                    "started_at": 1000.0, "source_manifest": ({**spec.to_mapping(), "model_admission": {**admission.to_mapping(), "registry_digest": "b"*64}} if mode == "restricted_manifest" else spec.to_mapping()),
                     "components": {n: {"loaded": True}
                                    for n in ("vera_mono", "portal", "pre_active", "volition")},
                     "protected_effect_authority": False,
                 }
             if command == "desktop_discover_routes":
                 return {"routes": [{
-                    "route_id": "local-text", "local": True, "available": True,
+                    "route_id": route_id, "local": True, "available": True,
+                    **({"provider":"ollama", "model_or_agent":"gemma3:1b",
+                        "observed_registry_digest": "b"*64 if mode=="restricted_discovery" else "a"*64,
+                        "effect_authority_ceiling":"COGNITION_ONLY_NO_PROTECTED_EFFECT"} if restricted else {}),
                     "current": True, "auto_admissible": True,
                     "incremental_paid_compute": False,
                     "capabilities": ["audio"] if mode == "audio_only" else ["text"],
@@ -75,7 +89,7 @@ def test_staged_qualification_rejects_echo_stale_or_nonlocal_cognition(
                         if mode == "human_echo" else "PORTAL_DESKTOP_HUMAN_OK"
                     ),
                     "route_id": ("paid-remote" if mode in ("human_remote", "remote_optin")
-                                 else "local-text"),
+                                 else route_id),
                     "evidence_id": "human-evidence",
                     "protected_effect_authority": False,
                 }
@@ -93,7 +107,7 @@ def test_staged_qualification_rejects_echo_stale_or_nonlocal_cognition(
                                      or (mode in ("autonomous_remote", "remote_optin")
                                          and request_id == "old-auto")
                                      or (mode == "volition_remote" and request_id == "volition-auto")
-                                     else "local-text"),
+                                     else route_id),
                         "evidence_id": (
                             "different-human-evidence" if mode == "human_mismatched_receipt"
                             and request_id == state["human_id"] else "human-evidence"
@@ -101,6 +115,11 @@ def test_staged_qualification_rejects_echo_stale_or_nonlocal_cognition(
                         "protected_effect_authority": False,
                         "acceptance": {
                             **accepted,
+                            **({"model_admission_digest": ("b"*64 if
+                                (mode == "restricted_human" and request_id == state["human_id"])
+                                or (mode == "restricted_autonomous" and request_id == "old-auto")
+                                or (mode == "restricted_volition" and request_id == "volition-auto")
+                                else admission.binding_digest())} if restricted else {}),
                             "response_sha256": hashlib.sha256((
                                 "PORTAL_DESKTOP_HUMAN_OK" if request_id == state["human_id"]
                                 else auto_answer
