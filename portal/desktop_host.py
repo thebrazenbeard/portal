@@ -10,7 +10,8 @@ import time
 import traceback
 from typing import Any
 
-from .desktop_cognition import discover_cognition_routes
+from .desktop_cognition import discover_cognition_routes, discover_restricted_ollama_routes
+from .desktop_install import InstallSpec
 from .desktop_ipc import DesktopRuntimeCommandHandler
 from .desktop_pre_active import (
     process_one_autonomous_turn,
@@ -61,8 +62,11 @@ def _atomic_json(path: Path, payload: object) -> None:
 
 
 def _runtime_id(source_manifest: dict[str, object]) -> str:
+    identity = source_manifest.get("sources", [])
+    if source_manifest.get("schema") == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3":
+        identity = {"sources": identity, "model_admission": source_manifest["model_admission"]}
     raw = json.dumps(
-        source_manifest.get("sources", []),
+        identity,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -188,6 +192,30 @@ def claim_bridge_request(
     return claimed_path
 
 
+def _verify_host_model_admission(runtime_root: Path, spec: InstallSpec) -> None:
+    from .runtime_source_attestation import FILENAME, verify_attestation
+
+    if spec.model_admission is not None:
+        verify_attestation(runtime_root, spec)
+        return
+    # Legacy callers without an attestation remain supported. A staged
+    # restricted receipt, however, must never be ignored on legacy reopen.
+    path = runtime_root / FILENAME
+    import stat
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if (not stat.S_ISREG(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & (0x400 | 0x1000 | 0x40000 | 0x400000)):
+        raise RuntimeError("runtime source attestation is redirected or nonregular")
+    attestation = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(attestation, dict):
+        raise RuntimeError("runtime source attestation must be an object")
+    if "model_admission" in attestation:
+        raise RuntimeError("restricted stage cannot reopen with legacy model admission")
+
+
 def run_host(runtime_root: Path) -> int:
     layout = prepare_runtime_layout(runtime_root)
     runtime_root = layout["runtime_root"]
@@ -214,12 +242,21 @@ def run_host(runtime_root: Path) -> int:
     source_manifest = json.loads(install_spec.read_text(encoding="utf-8-sig"))
     if not isinstance(source_manifest, dict):
         raise RuntimeError("runtime install spec must be an object")
+    spec = InstallSpec.from_mapping(source_manifest)
+    model_admission = spec.model_admission
+    _verify_host_model_admission(runtime_root, spec)
     runtime_id = _runtime_id(source_manifest)
+
+    def resident_routes():
+        if model_admission is None:
+            return discover_cognition_routes()
+        # No other provider discovery or external command probe in this mode.
+        return discover_restricted_ollama_routes(model_admission)
 
     if os.name == "nt":
         import ctypes
 
-        mutex_name = "Local\\VeraDesktopRuntime_" + runtime_id[:24]
+        mutex_name = "Local\\VeraDesktopRuntime_" + _runtime_id({"sources": source_manifest["sources"]})[:24]
         mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not mutex_handle:
             raise OSError("failed to create Vera desktop runtime mutex")
@@ -243,10 +280,13 @@ def run_host(runtime_root: Path) -> int:
     )
     cognition_engine = ResidentCognitionEngine(
         ledger=cognition_ledger,
-        authorized_route_ids=authorized_rezon_route_ids(),
+        discover_routes=resident_routes,
+        authorized_route_ids=(authorized_rezon_route_ids()
+                              if model_admission is None else frozenset()),
         accept_result=VeraRuntimeAcceptance(
             vera,
             runtime_id=runtime_id,
+            model_admission=model_admission,
         ),
     )
 
@@ -286,7 +326,7 @@ def run_host(runtime_root: Path) -> int:
 
     handler = DesktopRuntimeCommandHandler(
         engine=cognition_engine,
-        discover_routes=discover_cognition_routes,
+        discover_routes=resident_routes,
         runtime_status=status,
     )
 

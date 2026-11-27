@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-from .desktop_cognition import CognitionRoute
+from .desktop_cognition import CognitionRoute, RestrictedOllamaAdmission, restrict_cognition_routes
 from .desktop_runtime import CognitionRequestEnvelope
 
 
@@ -16,7 +16,8 @@ class VeraRuntimeAcceptance:
     that the model route itself is Vera.
     """
 
-    def __init__(self, vera_runtime: Any, *, runtime_id: str) -> None:
+    def __init__(self, vera_runtime: Any, *, runtime_id: str,
+                 model_admission: RestrictedOllamaAdmission | None = None) -> None:
         if not runtime_id.strip():
             raise ValueError("runtime_id is required")
         if type(vera_runtime).__name__ != "QualifiedVeraRuntime" and not hasattr(
@@ -25,6 +26,7 @@ class VeraRuntimeAcceptance:
             raise TypeError("vera_runtime must expose QualifiedVeraRuntime context")
         self.vera_runtime = vera_runtime
         self.runtime_id = runtime_id
+        self.model_admission = model_admission
 
     def __call__(
         self,
@@ -32,6 +34,8 @@ class VeraRuntimeAcceptance:
         route: CognitionRoute,
         response_text: str,
     ) -> dict[str, object]:
+        if self.model_admission is not None and not restrict_cognition_routes((route,), self.model_admission):
+            raise RuntimeError("cognition result does not match restricted admission")
         context = self.vera_runtime.resume_context()
         if not isinstance(context, dict):
             raise RuntimeError("QualifiedVeraRuntime resume context must be an object")
@@ -61,6 +65,8 @@ class VeraRuntimeAcceptance:
             "canonical_memory_write": False,
             "protected_effect_authority": False,
         }
+        if self.model_admission is not None:
+            payload["model_admission_digest"] = self.model_admission.binding_digest()
         digest = hashlib.sha256(
             json.dumps(
                 payload,

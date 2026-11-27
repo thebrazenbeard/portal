@@ -7,6 +7,8 @@ import re
 import subprocess
 from typing import Callable
 
+from .desktop_cognition import RestrictedOllamaAdmission
+
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _COMPONENTS_V1 = ("vera-mono", "portal", "pre-active", "volition")
@@ -14,6 +16,7 @@ _COMPONENTS_V2 = (*_COMPONENTS_V1, "meso-crct")
 _COMPONENTS_BY_SCHEMA = {
     "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V1": _COMPONENTS_V1,
     "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V2": _COMPONENTS_V2,
+    "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3": _COMPONENTS_V1,
 }
 
 
@@ -55,11 +58,18 @@ class InstallSpec:
     schema: str
     install_id: str
     sources: tuple[RuntimeSource, ...]
+    model_admission: RestrictedOllamaAdmission | None = None
 
     def validate(self) -> None:
         required = _COMPONENTS_BY_SCHEMA.get(self.schema)
         if required is None:
             raise ValueError("unsupported install spec schema")
+        if self.schema == "VERA_DESKTOP_RUNTIME_INSTALL_SPEC_V3":
+            if type(self.model_admission) is not RestrictedOllamaAdmission:
+                raise ValueError("V3 requires exact restricted model admission")
+            self.model_admission.validate()
+        elif self.model_admission is not None:
+            raise ValueError("legacy install schema cannot carry restricted model admission")
         if not self.install_id.strip():
             raise ValueError("install_id is required")
         if len(self.sources) != len(required):
@@ -81,7 +91,7 @@ class InstallSpec:
 
     def to_mapping(self) -> dict[str, object]:
         self.validate()
-        return {
+        payload = {
             "schema": self.schema,
             "install_id": self.install_id,
             "sources": [source.to_mapping() for source in self.sources],
@@ -94,6 +104,10 @@ class InstallSpec:
                 "FROZEN_SOURCE_INSTALL_SPEC_ONLY_NOT_INSTALLED_NOT_QUALIFIED_NOT_ACTIVE"
             ),
         }
+
+        if self.model_admission is not None:
+            payload["model_admission"] = self.model_admission.to_mapping()
+        return payload
 
     def write(self, path: Path) -> None:
         path = Path(path)
@@ -111,6 +125,10 @@ class InstallSpec:
     @classmethod
     def read(cls, path: Path) -> "InstallSpec":
         payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        return cls.from_mapping(payload)
+
+    @classmethod
+    def from_mapping(cls, payload: object) -> "InstallSpec":
         if not isinstance(payload, dict):
             raise ValueError("install spec must be an object")
         raw_sources = payload.get("sources")
@@ -130,6 +148,8 @@ class InstallSpec:
             schema=str(payload.get("schema", "")),
             install_id=str(payload.get("install_id", "")),
             sources=sources,
+            model_admission=(RestrictedOllamaAdmission.from_mapping(payload["model_admission"])
+                             if "model_admission" in payload else None),
         )
         spec.validate()
         return spec

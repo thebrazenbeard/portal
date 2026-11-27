@@ -9,6 +9,7 @@ import uuid
 
 from .desktop_ipc import FileBridgeClient
 from .desktop_install import InstallSpec
+from .desktop_cognition import RestrictedOllamaAdmission
 
 
 _HUMAN_SENTINEL = "PORTAL_DESKTOP_HUMAN_OK"
@@ -39,7 +40,7 @@ def _validated_staged_source_identity(
     if not isinstance(host_source_manifest, dict):
         raise RuntimeError("runtime source manifest is missing")
     expected = installed.to_mapping()
-    keys = ("schema", "install_id", "sources")
+    keys = ("schema", "install_id", "sources", "model_admission") if installed.model_admission is not None else ("schema", "install_id", "sources")
     expected_identity = {key: expected[key] for key in keys}
     actual_identity = {key: host_source_manifest.get(key) for key in keys}
     if expected_identity != actual_identity:
@@ -147,6 +148,10 @@ def qualify_runtime(
     staged_identity = _validated_staged_source_identity(
         runtime_root, status.get("source_manifest"),
     )
+    admission = (RestrictedOllamaAdmission.from_mapping(staged_identity["model_admission"])
+                 if "model_admission" in staged_identity else None)
+    if admission is not None and not require_local_route:
+        raise RuntimeError("restricted model qualification cannot disable local route requirement")
     components = status.get("components")
     if not isinstance(components, dict):
         raise RuntimeError("desktop status missing components")
@@ -177,7 +182,22 @@ def qualify_runtime(
     ]
     if require_local_route and not local_routes:
         raise RuntimeError("no admissible local text no-incremental-paid-compute route")
+    if admission is not None:
+        if (len(routes) != 1 or len(local_routes) != 1
+                or local_routes[0].get("route_id") != f"ollama:{admission.model}"
+                or local_routes[0].get("provider") != admission.provider
+                or local_routes[0].get("model_or_agent") != admission.model
+                or local_routes[0].get("observed_registry_digest") != admission.registry_digest
+                or local_routes[0].get("effect_authority_ceiling") != "COGNITION_ONLY_NO_PROTECTED_EFFECT"):
+            raise RuntimeError("restricted model discovery mismatch")
     local_route_ids = {route["route_id"] for route in local_routes}
+
+    def require_admission_receipt(receipt, *, phase: str) -> None:
+        if admission is not None and (
+            not isinstance(receipt, dict)
+            or receipt.get("model_admission_digest") != admission.binding_digest()
+        ):
+            raise RuntimeError(f"{phase} cognition restricted admission receipt mismatch")
 
     def require_selected_local_route(route_id: object, *, phase: str) -> None:
         if require_local_route and route_id not in local_route_ids:
@@ -218,6 +238,7 @@ def qualify_runtime(
     if human_record is None:
         raise RuntimeError("human cognition evidence is missing")
     human_acceptance = human_record.get("acceptance")
+    require_admission_receipt(human_acceptance, phase="human")
     require_selected_local_route(human_record.get("route_id"), phase="human")
     if (
         human_record.get("route_id") != human.get("route_id")
@@ -300,6 +321,7 @@ def qualify_runtime(
     if autonomous_record.get("protected_effect_authority") is not False:
         raise RuntimeError("autonomous cognition claimed protected effect authority")
     autonomous_acceptance = autonomous_record.get("acceptance")
+    require_admission_receipt(autonomous_acceptance, phase="autonomous")
     require_selected_local_route(autonomous_record.get("route_id"), phase="autonomous")
     if isinstance(autonomous_acceptance, dict) and (
         autonomous_acceptance.get("response_sha256") != _response_digest(_AUTONOMOUS_SENTINEL)
@@ -395,6 +417,7 @@ def qualify_runtime(
     if volition_record is None:
         raise RuntimeError("Volition cognition activity is missing")
     volition_acceptance = volition_record.get("acceptance")
+    require_admission_receipt(volition_acceptance, phase="volition")
     require_selected_local_route(volition_record.get("route_id"), phase="volition")
     if (
         volition_record.get("state") != "COMPLETED"

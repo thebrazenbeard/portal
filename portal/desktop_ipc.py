@@ -34,7 +34,7 @@ def _public_acceptance(raw: object) -> dict[str, object] | None:
     if not isinstance(acceptance, dict):
         return None
     output: dict[str, object] = {}
-    for field in ("schema", "status", "acceptance_digest", "context_digest", "response_sha256"):
+    for field in ("schema", "status", "acceptance_digest", "context_digest", "response_sha256", "model_admission_digest"):
         value = acceptance.get(field)
         if not isinstance(value, str):
             continue

@@ -151,6 +151,8 @@ def build_attestation(runtime_root: Path, spec: InstallSpec) -> dict[str, object
     body: dict[str, object] = {
         "schema": SCHEMA, "install_id": spec.install_id, "sources": sources,
     }
+    if spec.model_admission is not None:
+        body["model_admission"] = spec.model_admission.to_mapping()
     raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return {**body, "sha256": hashlib.sha256(raw).hexdigest()}
 
