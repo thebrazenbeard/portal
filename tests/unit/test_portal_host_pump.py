@@ -104,7 +104,7 @@ def _queue(
 def test_pump_marks_attempt_before_driver_effect_and_records_completion(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",
@@ -142,7 +142,7 @@ def test_pump_marks_attempt_before_driver_effect_and_records_completion(
 def test_driver_exception_leaves_attempted_dispatch_unresolved_and_not_replayed(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",
@@ -178,7 +178,7 @@ def test_driver_exception_leaves_attempted_dispatch_unresolved_and_not_replayed(
 def test_missing_driver_leaves_dispatch_queued_without_crossing_effect_boundary(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",
@@ -198,7 +198,7 @@ def test_missing_driver_leaves_dispatch_queued_without_crossing_effect_boundary(
 def test_unresolved_subject_does_not_block_unrelated_pending_dispatch(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     stuck = _queue(
         store,
         run_id="portfolio::g1",
@@ -241,7 +241,7 @@ def test_competing_host_attempt_is_skipped_without_driver_execution(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",
@@ -291,7 +291,7 @@ def test_competing_host_attempt_is_skipped_without_driver_execution(
 def test_pump_does_not_swallow_process_control_exceptions(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     dispatch_id = _queue(
         store,
         run_id="portfolio::g1",
@@ -323,7 +323,7 @@ def test_pump_does_not_swallow_process_control_exceptions(
 def test_stale_queued_route_does_not_block_unrelated_safe_dispatch(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     alpha = _queue(
         store,
         run_id="portfolio::g1",

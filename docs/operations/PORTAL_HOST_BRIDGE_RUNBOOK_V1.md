@@ -212,13 +212,13 @@ For an interactive ChatGPT/plugin host, prefer the atomic take operation. Supply
 
     portal host take       --state-db .portal/portal.sqlite3       --session-id portfolio       --adapter-id github       --adapter-id workbridge       --attempt-id HOST_UNIQUE_ATTEMPT_ID       --evidence-id HOST_REQUEST_EVIDENCE_ID
 
-`host take` selects the oldest queued dispatch among those adapter IDs whose exact bound route is still qualified and marks it `ATTEMPTED` in the same transaction before returning the work-bearing envelope. Route qualification is revalidated at this effect boundary: exact target/node, availability, attachment, currentness window, required capability, technical effect capability, and effect authority must still hold. A stale or no-longer-authorized queued dispatch is not attempted merely because it was valid when queued.
+`host take` first checks the bound repository/ref/exact Git head using the currently configured GitHub credentials, **outside** the SQLite write transaction. Missing credentials for a private repository, read failures, malformed heads, and moved refs are `SOURCE_HEAD_HELD`; no ATTEMPTED marker is written. It selects a source-current queued dispatch among the given adapter IDs, then revalidates the immutable queued binding and exact route inside the write transaction before marking it `ATTEMPTED` and returning the work-bearing envelope. Route qualification includes exact target/node, availability, attachment, currentness window, required capability, technical effect capability, and effect authority. A stale or no-longer-authorized queued dispatch is not attempted merely because it was valid when queued.
 
 If the host already selected one exact dispatch through another race-safe mechanism, the lower-level equivalent remains:
 
     portal host attempt       --state-db .portal/portal.sqlite3       --dispatch-id DISPATCH_ID       --attempt-id HOST_UNIQUE_ATTEMPT_ID       --evidence-id HOST_REQUEST_EVIDENCE_ID
 
-Only after the durable attempt marker succeeds should the host invoke the external effect. Exact replay of the same already-recorded attempt is idempotent; a different second attempt is refused after the boundary.
+Only after the durable attempt marker succeeds should the host invoke the external effect. The supplied command driver checks the Git head **again** immediately before launching a subprocess. These are point-in-time checks, not an atomic condition on a subsequent source write: a source-changing adapter must itself pin immutable source or enforce the expected Git head as a compare-and-swap at mutation time. Generic drivers without that guarantee are **not qualified for source-changing effects**. Exact replay of the same already-recorded attempt is idempotent; a different second attempt is refused after the boundary.
 
 If the host disconnects, times out, crashes, loses the response, or receives an ambiguous result after the attempt marker, the effect is unresolved. Do not retry it through GitHub, WorkBridge, Executor, Lappy V2, or another route until the original effect is reconciled.
 

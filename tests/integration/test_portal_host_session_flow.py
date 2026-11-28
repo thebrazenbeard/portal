@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 import portal.cli as portal_cli
 import portal.session as portal_session
 from portal.wave_runtime import PortalWavePacket, PortalWavePreparationResult
+
+
+@pytest.fixture(autouse=True)
+def _local_head_reader(monkeypatch):
+    monkeypatch.setattr(
+        portal_cli, "GitHubRestTransport",
+        lambda **_kwargs: SimpleNamespace(read_ref=lambda _r, _f: "a" * 40),
+    )
 
 
 def _packet(

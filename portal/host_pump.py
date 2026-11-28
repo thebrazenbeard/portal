@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Mapping
 import uuid
 
-from .host_bridge import PortalHostBridgeStore
+from .host_bridge import PortalHostBridgeStore, PortalHostSourceHeadHeld
 
 
 _ALLOWED_RESULT_STATES = frozenset(
@@ -61,6 +61,7 @@ class PortalHostPumpResult:
     no_driver: int
     race_lost: int
     route_unqualified: int
+    source_head_held: int = 0
 
 
 class PortalHostPump:
@@ -118,6 +119,7 @@ class PortalHostPump:
         no_driver = 0
         race_lost = 0
         route_unqualified = 0
+        source_head_held = 0
 
         for dispatch in pending:
             dispatch_id = _required(
@@ -147,6 +149,20 @@ class PortalHostPump:
                 )
                 continue
 
+            execute = getattr(driver, "execute", None)
+            if execute is None or not callable(execute):
+                no_driver += 1
+                items.append(
+                    PortalHostPumpItemResult(
+                        dispatch_id=dispatch_id,
+                        adapter_id=adapter_id,
+                        route_id=route_id,
+                        state="NO_DRIVER",
+                        reason="bound driver has no callable execute method",
+                    )
+                )
+                continue
+
             attempt_id = _required(
                 self.attempt_id_factory(dispatch),
                 "attempt_id",
@@ -159,6 +175,18 @@ class PortalHostPump:
                     attempt_id=attempt_id,
                     evidence_id=attempt_evidence,
                 )
+            except PortalHostSourceHeadHeld:
+                source_head_held += 1
+                items.append(
+                    PortalHostPumpItemResult(
+                        dispatch_id=dispatch_id,
+                        adapter_id=adapter_id,
+                        route_id=route_id,
+                        state="SOURCE_HEAD_HELD",
+                        reason="bound source head is not current or unavailable",
+                    )
+                )
+                continue
             except ValueError:
                 current = self.store.load_dispatch(dispatch_id)
                 current_state = str(current.get("state") or "")
@@ -197,8 +225,34 @@ class PortalHostPump:
                 raise
             attempted += 1
 
-            execute = getattr(driver, "execute", None)
-            if execute is None or not callable(execute):
+            try:
+                result = execute(dispatch, attempt_id=attempt_id)
+            except PortalHostSourceHeadHeld as exc:
+                # The built-in argv driver raises this only *before* it starts
+                # a subprocess. Its exact type lets us prove no driver effect
+                # began, so a durable verified hold is preferable to a false
+                # ambiguous outcome. Unknown/custom drivers get no exemption.
+                from .host_command_driver import PortalCommandHostDriver
+
+                if type(driver) is PortalCommandHostDriver:
+                    held_evidence = "portal:pre-effect-source-head-held:" + attempt_id
+                    self.store.record_reconciliation(
+                        dispatch_id=dispatch_id,
+                        state="VERIFIED_HELD",
+                        evidence_id=held_evidence,
+                    )
+                    verified_held += 1
+                    items.append(
+                        PortalHostPumpItemResult(
+                            dispatch_id=dispatch_id,
+                            adapter_id=adapter_id,
+                            route_id=route_id,
+                            state="VERIFIED_HELD",
+                            evidence_id=held_evidence,
+                            reason=str(exc),
+                        )
+                    )
+                    continue
                 outcome_unknown += 1
                 items.append(
                     PortalHostPumpItemResult(
@@ -207,13 +261,10 @@ class PortalHostPump:
                         route_id=route_id,
                         state="OUTCOME_UNKNOWN",
                         evidence_id=attempt_evidence,
-                        reason="bound driver has no callable execute method",
+                        reason="untrusted driver raised source-head exception",
                     )
                 )
                 continue
-
-            try:
-                result = execute(dispatch, attempt_id=attempt_id)
             except Exception as exc:
                 outcome_unknown += 1
                 items.append(
@@ -277,4 +328,5 @@ class PortalHostPump:
             no_driver=no_driver,
             race_lost=race_lost,
             route_unqualified=route_unqualified,
+            source_head_held=source_head_held,
         )

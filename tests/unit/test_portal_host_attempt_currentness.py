@@ -93,7 +93,7 @@ def _advertise(
 def test_attempt_refuses_bound_route_that_expired_after_queue(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     _advertise(
         store,
         subject_id="portal",
@@ -124,7 +124,7 @@ def test_attempt_refuses_bound_route_that_expired_after_queue(
 def test_exact_attempt_replay_remains_idempotent_after_route_expires(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     _advertise(
         store,
         subject_id="portal",
@@ -160,7 +160,7 @@ def test_exact_attempt_replay_remains_idempotent_after_route_expires(
 def test_atomic_take_skips_expired_route_and_takes_next_current_dispatch(
     tmp_path: Path,
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     _advertise(
         store,
         subject_id="alpha",
@@ -220,7 +220,7 @@ def test_attempt_revalidates_all_route_qualification_dimensions(
     tmp_path: Path,
     route_override: dict[str, object],
 ) -> None:
-    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3")
+    store = PortalHostBridgeStore(tmp_path / "portal.sqlite3", head_reader=lambda _r, _f: "a" * 40)
     values = dict(
         adapter_id="github",
         route_id="github:portal",

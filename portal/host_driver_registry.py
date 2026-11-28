@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 import yaml
 
@@ -20,6 +20,8 @@ _ALLOWED_DRIVER_KEYS = {
 
 def load_host_command_drivers(
     path: Path,
+    *,
+    head_reader: Callable[[str, str], str] | None = None,
 ) -> dict[str, PortalCommandHostDriver]:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
@@ -74,6 +76,7 @@ def load_host_command_drivers(
             command=tuple(command),
             timeout_seconds=raw.get("timeout_seconds", 300.0),
             cwd=Path(cwd) if cwd is not None else None,
+            head_reader=head_reader,
         )
 
     return dict(sorted(result.items()))

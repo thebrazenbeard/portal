@@ -6,6 +6,8 @@ import time
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 import portal.cli as portal_cli
 from portal.host_bridge import PortalHostBridgeStore, PortalHostExecutionAdapter
 from portal.route_resolver import PortalRouteAdvertisement
@@ -14,6 +16,14 @@ from portal.wave_runtime import PortalWavePacket
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _local_head_reader(monkeypatch):
+    monkeypatch.setattr(
+        portal_cli, "GitHubRestTransport",
+        lambda **_kwargs: SimpleNamespace(read_ref=lambda _r, _f: "a" * 40),
+    )
 
 
 def _packet() -> PortalWavePacket:
@@ -375,7 +385,7 @@ def test_host_pump_cli_loads_manifest_and_runs_existing_pump(
     monkeypatch.setattr(
         portal_cli,
         "load_host_command_drivers",
-        lambda path: (
+        lambda path, **_kwargs: (
             calls.append({"drivers_path": path}) or fake_drivers
         ),
         raising=False,
@@ -411,6 +421,7 @@ def test_host_pump_cli_loads_manifest_and_runs_existing_pump(
                 no_driver=0,
                 race_lost=0,
                 route_unqualified=0,
+                source_head_held=0,
             )
 
     monkeypatch.setattr(

@@ -1412,7 +1412,10 @@ def _session_execution_adapter(
         raise ValueError("choose host bridge or worker backends, not both")
     if args.host_bridge:
         return PortalHostExecutionAdapter(
-            store=PortalHostBridgeStore(Path(args.state_db)),
+            store=PortalHostBridgeStore(
+                Path(args.state_db),
+                head_reader=GitHubRestTransport(token=_github_token()).read_ref,
+            ),
         )
     if args.worker_backends is None:
         return None
@@ -1445,7 +1448,10 @@ def _session_host_pump(
         raise ValueError("--host-max-dispatches must be a positive integer")
     return PortalHostPump(
         store=execution_adapter.store,
-        drivers=load_host_command_drivers(Path(host_drivers)),
+        drivers=load_host_command_drivers(
+            Path(host_drivers),
+            head_reader=GitHubRestTransport(token=_github_token()).read_ref,
+        ),
     )
 
 
@@ -2738,7 +2744,10 @@ def _host_pending_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _host_take_payload(args: argparse.Namespace) -> dict[str, object]:
-    store = PortalHostBridgeStore(Path(args.state_db))
+    store = PortalHostBridgeStore(
+        Path(args.state_db),
+        head_reader=GitHubRestTransport(token=_github_token()).read_ref,
+    )
     try:
         dispatch = store.take_pending_dispatch(
             session_id=args.session_id,
@@ -2767,7 +2776,10 @@ def _host_unresolved_payload(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _host_attempt_payload(args: argparse.Namespace) -> dict[str, object]:
-    store = PortalHostBridgeStore(Path(args.state_db))
+    store = PortalHostBridgeStore(
+        Path(args.state_db),
+        head_reader=GitHubRestTransport(token=_github_token()).read_ref,
+    )
     try:
         dispatch = store.mark_attempted(
             dispatch_id=args.dispatch_id,
@@ -2872,8 +2884,9 @@ def _plain_result_item(item: object) -> dict[str, object]:
 
 
 def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
-    drivers = load_host_command_drivers(Path(args.drivers))
-    store = PortalHostBridgeStore(Path(args.state_db))
+    head_reader = GitHubRestTransport(token=_github_token()).read_ref
+    drivers = load_host_command_drivers(Path(args.drivers), head_reader=head_reader)
+    store = PortalHostBridgeStore(Path(args.state_db), head_reader=head_reader)
     try:
         result = PortalHostPump(
             store=store,
@@ -2895,6 +2908,7 @@ def _host_pump_payload(args: argparse.Namespace) -> dict[str, object]:
         "no_driver": result.no_driver,
         "race_lost": result.race_lost,
         "route_unqualified": result.route_unqualified,
+        "source_head_held": result.source_head_held,
     }
 
 
