@@ -175,7 +175,15 @@ class RuntimeSupervisor:
             return RuntimeStatus(RuntimeState.OFFLINE, "heartbeat_missing")
 
         try:
-            payload = json.loads(heartbeat.read_text(encoding="utf-8-sig"))
+            for attempt in range(3):
+                try:
+                    raw_heartbeat = heartbeat.read_text(encoding="utf-8-sig")
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.02)
+            payload = json.loads(raw_heartbeat)
             if not isinstance(payload, dict):
                 raise ValueError("heartbeat root must be an object")
             pid = int(payload["pid"])
@@ -237,3 +245,4 @@ class RuntimeSupervisor:
             "runtime_launch_requested",
             pid=pid,
         )
+

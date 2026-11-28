@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from portal.desktop_supervisor import (
     RuntimeState,
@@ -122,3 +123,50 @@ def test_missing_component_marks_live_runtime_degraded(tmp_path: Path) -> None:
     assert status.state is RuntimeState.DEGRADED
     assert status.reason == "component_not_loaded"
     assert status.components_loaded is False
+
+
+def test_transient_windows_sharing_denial_is_retried(tmp_path: Path) -> None:
+    _write_heartbeat(tmp_path, observed_at=99.0)
+    target = tmp_path / "bridge" / "heartbeat.json"
+    original = Path.read_text
+    attempts = 0
+
+    def flaky_read(path: Path, *args: object, **kwargs: object) -> str:
+        nonlocal attempts
+        if path == target:
+            attempts += 1
+            if attempts < 3:
+                raise PermissionError("simulated sharing denial")
+        return original(path, *args, **kwargs)
+
+    with patch.object(Path, "read_text", flaky_read), patch(
+        "portal.desktop_supervisor.time.sleep"
+    ) as sleep:
+        status = _supervisor(tmp_path, alive=True).status(now=100.0)
+    assert status.state is RuntimeState.ACTIVE
+    assert attempts == 3
+    assert sleep.call_count == 2
+
+
+def test_permanent_heartbeat_permission_error_stays_blocked(tmp_path: Path) -> None:
+    _write_heartbeat(tmp_path, observed_at=99.0)
+    target = tmp_path / "bridge" / "heartbeat.json"
+    original = Path.read_text
+    attempts = 0
+
+    def denied_read(path: Path, *args: object, **kwargs: object) -> str:
+        nonlocal attempts
+        if path == target:
+            attempts += 1
+            raise PermissionError("persistent access denial")
+        return original(path, *args, **kwargs)
+
+    with patch.object(Path, "read_text", denied_read), patch(
+        "portal.desktop_supervisor.time.sleep"
+    ) as sleep:
+        status = _supervisor(tmp_path, alive=True).status(now=100.0)
+    assert status.state is RuntimeState.BLOCKED
+    assert status.reason == "heartbeat_invalid"
+    assert attempts == 3
+    assert sleep.call_count == 2
+
